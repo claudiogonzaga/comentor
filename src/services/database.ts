@@ -11,6 +11,7 @@ import type {
   GeminiModel,
   ChatRole,
 } from '../types';
+import { DEFAULT_SYSTEM_PROMPT } from '../constants/promptTemplate';
 
 const DB_NAME = 'comentor.db';
 let db: SQLite.SQLiteDatabase | null = null;
@@ -36,6 +37,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       gemini_model TEXT NOT NULL DEFAULT 'gemini-2.0-flash-lite',
       has_api_key INTEGER NOT NULL DEFAULT 0,
       onboarding_done INTEGER NOT NULL DEFAULT 0,
+      system_prompt TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -87,14 +89,27 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_chat_habit ON chat_messages(habit_id, created_at);
   `);
 
-  const existing = await database.getFirstAsync<{ id: number }>(
-    'SELECT id FROM user_config WHERE id = 1',
+  // Defensive migration: add system_prompt column if missing (older installs).
+  const cols = await database.getAllAsync<{ name: string }>(
+    "PRAGMA table_info('user_config')",
+  );
+  if (!cols.some((c) => c.name === 'system_prompt')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN system_prompt TEXT`);
+  }
+
+  const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
+    'SELECT id, system_prompt FROM user_config WHERE id = 1',
   );
   if (!existing) {
     await database.runAsync(
-      `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done)
-       VALUES (1, '23:00', 10, 12, 'firm', 'gemini-2.0-flash-lite', 0, 0)`,
+      `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt)
+       VALUES (1, '23:00', 10, 12, 'firm', 'gemini-2.0-flash-lite', 0, 0, ?)`,
+      [DEFAULT_SYSTEM_PROMPT],
     );
+  } else if (!existing.system_prompt) {
+    await database.runAsync(`UPDATE user_config SET system_prompt = ? WHERE id = 1`, [
+      DEFAULT_SYSTEM_PROMPT,
+    ]);
   }
 }
 
@@ -108,6 +123,7 @@ interface UserConfigRow {
   gemini_model: string;
   has_api_key: number;
   onboarding_done: number;
+  system_prompt: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -120,6 +136,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   geminiModel: r.gemini_model as GeminiModel,
   hasApiKey: r.has_api_key === 1,
   onboardingDone: r.onboarding_done === 1,
+  systemPrompt: r.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -144,6 +161,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     geminiModel: 'gemini_model',
     hasApiKey: 'has_api_key',
     onboardingDone: 'onboarding_done',
+    systemPrompt: 'system_prompt',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

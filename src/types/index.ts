@@ -20,6 +20,7 @@ export interface UserConfig {
   geminiModel: GeminiModel;
   hasApiKey: boolean;
   onboardingDone: boolean;
+  systemPrompt: string;
 }
 
 export interface Habit {

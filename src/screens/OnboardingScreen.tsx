@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -19,6 +21,7 @@ import type { Tone } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { ensureSleepHabit } from '../services/coach';
 import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
+import { testApiKey } from '../services/gemini';
 
 const STEPS = [
   {
@@ -60,12 +63,53 @@ export function OnboardingScreen() {
   const [name, setName] = useState('');
   const [apiKey, setApiKeyLocal] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
+  const [keyError, setKeyError] = useState<string | null>(null);
 
   const isIntro = step < STEPS.length;
+  const trimmedKey = apiKey.trim();
+  const canActivate = trimmedKey.length >= 20 && !submitting;
+
+  const handleTestKey = async () => {
+    if (!trimmedKey) return;
+    setTesting(true);
+    setKeyError(null);
+    const result = await testApiKey(trimmedKey);
+    setTesting(false);
+    if (result.ok) {
+      setKeyStatus('ok');
+    } else {
+      setKeyStatus('error');
+      setKeyError(result.error ?? 'erro desconhecido');
+    }
+  };
 
   const finalize = async () => {
+    if (!trimmedKey) {
+      Alert.alert(
+        'Chave de API obrigatória',
+        'A Corujinha precisa de uma chave do Google AI Studio para conversar contigo. É grátis — clique no link abaixo do campo.',
+      );
+      return;
+    }
     setSubmitting(true);
     try {
+      if (keyStatus !== 'ok') {
+        const result = await testApiKey(trimmedKey);
+        if (!result.ok) {
+          setKeyStatus('error');
+          setKeyError(result.error ?? 'chave inválida');
+          Alert.alert(
+            'Chave inválida',
+            `O Gemini não aceitou essa chave: ${result.error ?? 'erro desconhecido'}.\n\nGere uma nova em aistudio.google.com/apikey.`,
+          );
+          setSubmitting(false);
+          return;
+        }
+        setKeyStatus('ok');
+      }
+
       const intervalNum = Math.max(5, Math.min(60, parseInt(interval, 10) || 10));
       await setConfig({
         name: name.trim() || null,
@@ -74,9 +118,7 @@ export function OnboardingScreen() {
         tone,
         onboardingDone: true,
       });
-      if (apiKey.trim()) {
-        await setApiKey(apiKey.trim());
-      }
+      await setApiKey(trimmedKey);
       const habit = await ensureSleepHabit(bedtime);
       const granted = await ensurePermissions();
       if (granted) {
@@ -195,16 +237,45 @@ export function OnboardingScreen() {
           </View>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Chave de API do Google AI Studio</Text>
+            <Text style={styles.label}>
+              Chave de API do Google AI Studio <Text style={styles.required}>*obrigatória</Text>
+            </Text>
             <TextInput
               value={apiKey}
-              onChangeText={setApiKeyLocal}
-              placeholder="cole aqui (opcional, mas recomendado)"
+              onChangeText={(v) => {
+                setApiKeyLocal(v);
+                setKeyStatus('idle');
+                setKeyError(null);
+              }}
+              placeholder="cole aqui sua chave"
               placeholderTextColor={colors.text.tertiary}
               style={styles.input}
               autoCapitalize="none"
               secureTextEntry
             />
+
+            <View style={styles.keyHelpRow}>
+              <Pressable
+                onPress={handleTestKey}
+                disabled={!trimmedKey || testing}
+                style={[styles.testBtn, (!trimmedKey || testing) && { opacity: 0.5 }]}
+              >
+                {testing ? (
+                  <ActivityIndicator color={colors.accent.gold} size="small" />
+                ) : (
+                  <Text style={styles.testBtnText}>Testar chave</Text>
+                )}
+              </Pressable>
+              {keyStatus === 'ok' && (
+                <Text style={styles.keyOk}>✓ Chave válida</Text>
+              )}
+              {keyStatus === 'error' && (
+                <Text style={styles.keyErr} numberOfLines={2}>
+                  ✗ {keyError}
+                </Text>
+              )}
+            </View>
+
             <Pressable onPress={() => Linking.openURL('https://aistudio.google.com/apikey')}>
               <Text style={styles.linkHint}>
                 Obtenha uma gratuita em aistudio.google.com →
@@ -217,7 +288,13 @@ export function OnboardingScreen() {
             label="Ativar CoMentor 🦉"
             onPress={finalize}
             loading={submitting}
+            disabled={!canActivate}
           />
+          {!trimmedKey && (
+            <Text style={styles.requiredNote}>
+              Cole sua chave de API para ativar.
+            </Text>
+          )}
           <View style={{ height: spacing.xl }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -313,6 +390,49 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.accent.gold,
     marginTop: spacing.xs,
+  },
+  required: {
+    color: colors.accent.warning,
+    fontFamily: typography.small.fontFamily,
+  },
+  requiredNote: {
+    ...typography.small,
+    color: colors.accent.warning,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  keyHelpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+  },
+  testBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+    minHeight: 36,
+    minWidth: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  testBtnText: {
+    ...typography.small,
+    color: colors.accent.gold,
+  },
+  keyOk: {
+    ...typography.small,
+    color: colors.accent.success,
+    flexShrink: 1,
+  },
+  keyErr: {
+    ...typography.small,
+    color: colors.accent.danger,
+    flexShrink: 1,
+    flex: 1,
   },
   toneRow: {
     flexDirection: 'row',
