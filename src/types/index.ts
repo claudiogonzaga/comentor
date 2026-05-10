@@ -8,6 +8,28 @@ export type GeminiModel =
   | 'gemini-2.0-flash-lite'
   | 'gemini-2.0-flash';
 
+export type AIBackend = 'remote' | 'local';
+
+export type LocalModelId =
+  | 'gemma-4-e4b'
+  | 'qwen3-4b-thinking-2507'
+  | 'qwen3.5-4b';
+
+export type LocalChatTemplate = 'gemma' | 'chatml';
+
+export interface LocalModelInfo {
+  id: LocalModelId;
+  label: string;
+  vendor: string;
+  description: string;
+  downloadUrl: string;
+  fileName: string;
+  sizeBytes: number;
+  contextWindow: number;
+  hasThinking: boolean;
+  chatTemplate: LocalChatTemplate;
+}
+
 export type OwlMood = 'calm' | 'worried' | 'serious' | 'sleeping' | 'celebrating';
 
 export type IntensityLevel = 1 | 2 | 3 | 4 | 5;
@@ -29,6 +51,10 @@ export interface UserConfig {
   systemPrompt: string;
   prepRemindersEnabled: boolean;
   voiceModeEnabled: boolean;
+  aiBackend: AIBackend;
+  localModelId: LocalModelId | null;
+  localModelDownloaded: boolean;
+  allowMobileDataDownload: boolean;
 }
 
 export interface Habit {

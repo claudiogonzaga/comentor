@@ -1,10 +1,12 @@
 import * as SQLite from 'expo-sqlite';
 import type {
+  AIBackend,
   ChatMessage,
   DailyLog,
   Habit,
   HabitType,
   IntensityLevel,
+  LocalModelId,
   Streak,
   Tone,
   UserConfig,
@@ -40,6 +42,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       system_prompt TEXT,
       prep_reminders_enabled INTEGER NOT NULL DEFAULT 1,
       voice_mode_enabled INTEGER NOT NULL DEFAULT 1,
+      ai_backend TEXT NOT NULL DEFAULT 'remote',
+      local_model_id TEXT,
+      local_model_downloaded INTEGER NOT NULL DEFAULT 0,
+      allow_mobile_data_download INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -109,6 +115,26 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN voice_mode_enabled INTEGER NOT NULL DEFAULT 1`,
     );
   }
+  if (!colNames.includes('ai_backend')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN ai_backend TEXT NOT NULL DEFAULT 'remote'`,
+    );
+  }
+  if (!colNames.includes('local_model_id')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN local_model_id TEXT`,
+    );
+  }
+  if (!colNames.includes('local_model_downloaded')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN local_model_downloaded INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  if (!colNames.includes('allow_mobile_data_download')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN allow_mobile_data_download INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
 
   const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
     'SELECT id, system_prompt FROM user_config WHERE id = 1',
@@ -146,6 +172,10 @@ interface UserConfigRow {
   system_prompt: string | null;
   prep_reminders_enabled: number;
   voice_mode_enabled: number;
+  ai_backend: string | null;
+  local_model_id: string | null;
+  local_model_downloaded: number;
+  allow_mobile_data_download: number;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -161,6 +191,10 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   systemPrompt: r.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
   prepRemindersEnabled: r.prep_reminders_enabled === 1,
   voiceModeEnabled: r.voice_mode_enabled === 1,
+  aiBackend: (r.ai_backend ?? 'remote') as AIBackend,
+  localModelId: (r.local_model_id ?? null) as LocalModelId | null,
+  localModelDownloaded: r.local_model_downloaded === 1,
+  allowMobileDataDownload: r.allow_mobile_data_download === 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -188,6 +222,10 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     systemPrompt: 'system_prompt',
     prepRemindersEnabled: 'prep_reminders_enabled',
     voiceModeEnabled: 'voice_mode_enabled',
+    aiBackend: 'ai_backend',
+    localModelId: 'local_model_id',
+    localModelDownloaded: 'local_model_downloaded',
+    allowMobileDataDownload: 'allow_mobile_data_download',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
