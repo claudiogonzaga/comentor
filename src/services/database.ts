@@ -1,10 +1,16 @@
 import * as SQLite from 'expo-sqlite';
 import type {
+  AIBackend,
   ChatMessage,
   DailyLog,
   Habit,
   HabitType,
   IntensityLevel,
+  Interview,
+  InterviewMessage,
+  InterviewSummary,
+  LocalModelId,
+  SnoozeFeedback,
   Streak,
   Tone,
   UserConfig,
@@ -40,9 +46,44 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       system_prompt TEXT,
       prep_reminders_enabled INTEGER NOT NULL DEFAULT 1,
       voice_mode_enabled INTEGER NOT NULL DEFAULT 1,
+      ai_backend TEXT NOT NULL DEFAULT 'remote',
+      local_model_id TEXT,
+      local_model_downloaded INTEGER NOT NULL DEFAULT 0,
+      allow_mobile_data_download INTEGER NOT NULL DEFAULT 0,
+      interview_completed_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS interviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      habit_id INTEGER REFERENCES habits(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'in_progress',
+      summary TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS interview_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      interview_id INTEGER NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS snooze_feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      habit_id INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+      log_id INTEGER REFERENCES daily_log(id) ON DELETE CASCADE,
+      snooze_minutes INTEGER NOT NULL DEFAULT 15,
+      reason TEXT,
+      custom_text TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_interview_messages ON interview_messages(interview_id, id);
+    CREATE INDEX IF NOT EXISTS idx_snooze_feedback ON snooze_feedback(habit_id, created_at);
 
     CREATE TABLE IF NOT EXISTS habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,6 +150,31 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN voice_mode_enabled INTEGER NOT NULL DEFAULT 1`,
     );
   }
+  if (!colNames.includes('ai_backend')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN ai_backend TEXT NOT NULL DEFAULT 'remote'`,
+    );
+  }
+  if (!colNames.includes('local_model_id')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN local_model_id TEXT`,
+    );
+  }
+  if (!colNames.includes('local_model_downloaded')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN local_model_downloaded INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  if (!colNames.includes('allow_mobile_data_download')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN allow_mobile_data_download INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  if (!colNames.includes('interview_completed_at')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN interview_completed_at TEXT`,
+    );
+  }
 
   const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
     'SELECT id, system_prompt FROM user_config WHERE id = 1',
@@ -146,6 +212,11 @@ interface UserConfigRow {
   system_prompt: string | null;
   prep_reminders_enabled: number;
   voice_mode_enabled: number;
+  ai_backend: string | null;
+  local_model_id: string | null;
+  local_model_downloaded: number;
+  allow_mobile_data_download: number;
+  interview_completed_at: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -161,6 +232,11 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   systemPrompt: r.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
   prepRemindersEnabled: r.prep_reminders_enabled === 1,
   voiceModeEnabled: r.voice_mode_enabled === 1,
+  aiBackend: (r.ai_backend ?? 'remote') as AIBackend,
+  localModelId: (r.local_model_id ?? null) as LocalModelId | null,
+  localModelDownloaded: r.local_model_downloaded === 1,
+  allowMobileDataDownload: r.allow_mobile_data_download === 1,
+  interviewCompletedAt: r.interview_completed_at,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -188,6 +264,11 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     systemPrompt: 'system_prompt',
     prepRemindersEnabled: 'prep_reminders_enabled',
     voiceModeEnabled: 'voice_mode_enabled',
+    aiBackend: 'ai_backend',
+    localModelId: 'local_model_id',
+    localModelDownloaded: 'local_model_downloaded',
+    allowMobileDataDownload: 'allow_mobile_data_download',
+    interviewCompletedAt: 'interview_completed_at',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
@@ -439,4 +520,156 @@ export async function getRecentChat(habitId: number, limit = 20): Promise<ChatMe
 export async function clearChat(habitId: number) {
   const d = await getDb();
   await d.runAsync('DELETE FROM chat_messages WHERE habit_id = ?', [habitId]);
+}
+
+interface InterviewRow {
+  id: number;
+  habit_id: number | null;
+  status: string;
+  summary: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+const rowToInterview = (r: InterviewRow): Interview => ({
+  id: r.id,
+  habitId: r.habit_id,
+  status: r.status as Interview['status'],
+  summary: (() => {
+    if (!r.summary) return null;
+    try {
+      return JSON.parse(r.summary) as InterviewSummary;
+    } catch {
+      return null;
+    }
+  })(),
+  createdAt: r.created_at,
+  completedAt: r.completed_at,
+});
+
+export async function createInterview(habitId: number | null): Promise<number> {
+  const d = await getDb();
+  const result = await d.runAsync(
+    `INSERT INTO interviews (habit_id, status) VALUES (?, 'in_progress')`,
+    [habitId],
+  );
+  return result.lastInsertRowId as number;
+}
+
+export async function addInterviewMessage(
+  interviewId: number,
+  role: ChatRole,
+  content: string,
+): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO interview_messages (interview_id, role, content) VALUES (?, ?, ?)`,
+    [interviewId, role, content],
+  );
+}
+
+interface InterviewMessageRow {
+  id: number;
+  interview_id: number;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export async function getInterviewMessages(interviewId: number): Promise<InterviewMessage[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<InterviewMessageRow>(
+    `SELECT * FROM interview_messages WHERE interview_id = ? ORDER BY id ASC`,
+    [interviewId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    interviewId: r.interview_id,
+    role: r.role as ChatRole,
+    content: r.content,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function completeInterview(
+  interviewId: number,
+  summary: InterviewSummary,
+): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `UPDATE interviews SET status = 'completed', summary = ?, completed_at = datetime('now') WHERE id = ?`,
+    [JSON.stringify(summary), interviewId],
+  );
+}
+
+export async function getLatestCompletedInterview(): Promise<Interview | null> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<InterviewRow>(
+    `SELECT * FROM interviews WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1`,
+  );
+  return row ? rowToInterview(row) : null;
+}
+
+interface SnoozeFeedbackRow {
+  id: number;
+  habit_id: number;
+  log_id: number | null;
+  snooze_minutes: number;
+  reason: string | null;
+  custom_text: string | null;
+  created_at: string;
+}
+
+export async function addSnoozeFeedback(
+  habitId: number,
+  logId: number | null,
+  snoozeMinutes: number,
+  reason: string | null,
+  customText: string | null,
+): Promise<number> {
+  const d = await getDb();
+  const result = await d.runAsync(
+    `INSERT INTO snooze_feedback (habit_id, log_id, snooze_minutes, reason, custom_text) VALUES (?, ?, ?, ?, ?)`,
+    [habitId, logId, snoozeMinutes, reason, customText],
+  );
+  return result.lastInsertRowId as number;
+}
+
+export async function getRecentSnoozeFeedback(
+  habitId: number,
+  limit = 5,
+): Promise<SnoozeFeedback[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<SnoozeFeedbackRow>(
+    `SELECT * FROM snooze_feedback WHERE habit_id = ? ORDER BY id DESC LIMIT ?`,
+    [habitId, limit],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    habitId: r.habit_id,
+    logId: r.log_id,
+    snoozeMinutes: r.snooze_minutes,
+    reason: r.reason,
+    customText: r.custom_text,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function resetAllUserData(): Promise<void> {
+  const d = await getDb();
+  await d.execAsync(`
+    DELETE FROM snooze_feedback;
+    DELETE FROM interview_messages;
+    DELETE FROM interviews;
+    DELETE FROM chat_messages;
+    DELETE FROM streaks;
+    DELETE FROM daily_log;
+    DELETE FROM habits;
+    DELETE FROM user_config WHERE id = 1;
+  `);
+  await d.runAsync(
+    `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt, prep_reminders_enabled, voice_mode_enabled, ai_backend, local_model_downloaded, allow_mobile_data_download)
+     VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 1, 'remote', 0, 0)`,
+    [DEFAULT_SYSTEM_PROMPT],
+  );
 }

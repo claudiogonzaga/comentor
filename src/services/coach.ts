@@ -3,9 +3,11 @@ import {
   addChatMessage,
   getActiveHabits,
   getHabitByType,
+  getLatestCompletedInterview,
   getOrCreateLog,
   getRecentChat,
   getRecentLogs,
+  getRecentSnoozeFeedback,
   getStreak,
   getUserConfig,
   incrementReminders,
@@ -13,13 +15,24 @@ import {
   upsertHabit,
 } from './database';
 import {
-  continueConversation,
-  generateCoachMessage,
-  generateSnoozeArgument,
+  continueConversation as continueConversationRemote,
+  generateCoachMessage as generateCoachMessageRemote,
+  generateSnoozeArgument as generateSnoozeArgumentRemote,
 } from './gemini';
+import { generateLocal, type LocalChatMessage } from './localModel';
+import { summaryToCoachContext } from './interview';
+import { pickFallback } from './fallbackMessages';
 import { recordCompletion } from './streaks';
-import { getIntensityForMinutesLate } from '../constants/intensityLevels';
-import type { IntensityLevel } from '../types';
+import { getIntensityForMinutesLate, INTENSITY_LEVELS } from '../constants/intensityLevels';
+import { DEFAULT_SYSTEM_PROMPT, fillTemplate } from '../constants/promptTemplate';
+import type {
+  ChatMessage,
+  IntensityLevel,
+  LocalModelId,
+  SnoozeFeedback,
+  Tone,
+  UserConfig,
+} from '../types';
 
 const SLEEP_HABIT_DEFAULTS = {
   type: 'sleep' as const,
@@ -64,6 +77,197 @@ function summarizeRecentLogs(logs: { date: string; completed: boolean; actualTim
   return `${completed}/${logs.length} dias completados; últimos 7 dias: ${onTime}/${lastSeven.length}`;
 }
 
+interface CoachingContext {
+  userName: string | null;
+  bedtime: string;
+  currentTime: string;
+  minutesLate: number;
+  level: IntensityLevel;
+  streak: number;
+  tone: Tone;
+  recentLogsSummary: string;
+  systemPrompt?: string;
+  interviewContext?: string;
+  recentSnoozeFeedback?: string;
+}
+
+function formatSnoozeFeedback(feedback: SnoozeFeedback[]): string {
+  if (feedback.length === 0) return '';
+  const lines = feedback.slice(0, 3).map((f, i) => {
+    const reason = f.reason ?? '';
+    const custom = f.customText ?? '';
+    const combined = [reason, custom].filter(Boolean).join(' — ');
+    return `${i === 0 ? 'último adiamento' : `adiamento -${i}`}: ${combined || '(sem motivo)'}`;
+  });
+  return lines.join('; ');
+}
+
+async function buildPersonalizationContext(
+  habitId: number,
+): Promise<{ interviewContext: string; recentSnoozeFeedback: string }> {
+  const interview = await getLatestCompletedInterview();
+  const feedback = await getRecentSnoozeFeedback(habitId, 3);
+  return {
+    interviewContext: summaryToCoachContext(interview?.summary ?? null),
+    recentSnoozeFeedback: formatSnoozeFeedback(feedback),
+  };
+}
+
+function buildSystemPromptText(ctx: CoachingContext): string {
+  const template = ctx.systemPrompt && ctx.systemPrompt.trim().length > 0
+    ? ctx.systemPrompt
+    : DEFAULT_SYSTEM_PROMPT;
+  const base = fillTemplate(template, {
+    userName: ctx.userName ?? 'amigo(a)',
+    bedtime: ctx.bedtime,
+    currentTime: ctx.currentTime,
+    minutesLate: ctx.minutesLate,
+    level: ctx.level,
+    technique: INTENSITY_LEVELS[ctx.level].technique,
+    streak: ctx.streak,
+    tone: ctx.tone,
+    recentLogsSummary: ctx.recentLogsSummary,
+  });
+  const extras: string[] = [];
+  if (ctx.interviewContext && ctx.interviewContext.trim().length > 0) {
+    extras.push(`\nO QUE VOCÊ JÁ SABE SOBRE A PESSOA (da entrevista inicial):\n${ctx.interviewContext}`);
+  }
+  if (ctx.recentSnoozeFeedback && ctx.recentSnoozeFeedback.trim().length > 0) {
+    extras.push(
+      `\nADIAMENTOS RECENTES (motivos que a pessoa deu pra adiar nas últimas vezes):\n${ctx.recentSnoozeFeedback}\n` +
+        `Use essa informação para personalizar a abordagem — não repita argumentos genéricos se já souber o motivo real.`,
+    );
+  }
+  return extras.length ? `${base}\n${extras.join('\n')}` : base;
+}
+
+function historyToLocalMessages(history: ChatMessage[]): LocalChatMessage[] {
+  return history.slice(-10).map((m) => ({
+    role: m.role === 'corujinha' ? 'assistant' : 'user',
+    content: m.content,
+  }));
+}
+
+async function runCoachGeneration(
+  config: UserConfig,
+  context: CoachingContext,
+  history: ChatMessage[],
+): Promise<{ text: string; offline: boolean }> {
+  if (config.aiBackend === 'local') {
+    if (!config.localModelId || !config.localModelDownloaded) {
+      return {
+        text: pickFallback(context.level, context.tone, {
+          bedtime: context.bedtime,
+          minutesLate: context.minutesLate,
+          streak: context.streak,
+        }),
+        offline: true,
+      };
+    }
+    try {
+      const messages: LocalChatMessage[] = [
+        { role: 'system', content: buildSystemPromptText(context) },
+        ...historyToLocalMessages(history),
+      ];
+      if (messages.length === 1 || messages[messages.length - 1].role !== 'user') {
+        messages.push({
+          role: 'user',
+          content: `[Sistema: gere uma mensagem de coach de sono para nível ${context.level}, ${context.minutesLate} minutos atrasado.]`,
+        });
+      }
+      const text = await generateLocal(config.localModelId as LocalModelId, messages, {
+        maxTokens: 400,
+      });
+      if (!text.trim()) throw new Error('empty');
+      return { text: text.trim(), offline: false };
+    } catch (err) {
+      console.warn('Local model failed, fallback:', err);
+      return {
+        text: pickFallback(context.level, context.tone, {
+          bedtime: context.bedtime,
+          minutesLate: context.minutesLate,
+          streak: context.streak,
+        }),
+        offline: true,
+      };
+    }
+  }
+  return generateCoachMessageRemote(context, config.geminiModel, history);
+}
+
+async function runChatGeneration(
+  config: UserConfig,
+  context: CoachingContext,
+  history: ChatMessage[],
+  userMessage: string,
+): Promise<{ text: string; offline: boolean }> {
+  if (config.aiBackend === 'local') {
+    if (!config.localModelId || !config.localModelDownloaded) {
+      return {
+        text: 'O modelo local ainda não foi baixado. Vai em Configurações para baixar e voltamos a conversar. 🦉',
+        offline: true,
+      };
+    }
+    try {
+      const messages: LocalChatMessage[] = [
+        { role: 'system', content: buildSystemPromptText(context) },
+        ...historyToLocalMessages(history),
+        { role: 'user', content: userMessage },
+      ];
+      const text = await generateLocal(config.localModelId as LocalModelId, messages, {
+        maxTokens: 400,
+      });
+      if (!text.trim()) throw new Error('empty');
+      return { text: text.trim(), offline: false };
+    } catch (err) {
+      console.warn('Local chat failed:', err);
+      return {
+        text: 'Tive um problema pra te responder agora. Mas o que importa: você ainda está acordado. O que vamos fazer sobre isso? 🦉',
+        offline: true,
+      };
+    }
+  }
+  return continueConversationRemote(context, config.geminiModel, history, userMessage);
+}
+
+async function runSnoozeGeneration(
+  config: UserConfig,
+  context: CoachingContext,
+  snoozeMinutes: number,
+): Promise<{ text: string; offline: boolean }> {
+  if (config.aiBackend === 'local') {
+    if (!config.localModelId || !config.localModelDownloaded) {
+      return {
+        text: `Mais ${snoozeMinutes}? A gente sabe como isso termina. Repensa.`,
+        offline: true,
+      };
+    }
+    try {
+      const userMsg = `[Sistema interno: o usuário acabou de pedir mais ${snoozeMinutes} minutos antes de dormir. ` +
+        `Está atrasado ${context.minutesLate} minutos. Streak: ${context.streak} dias. Tom: ${context.tone}. ` +
+        `Gere UMA resposta curta (2-3 frases, máx 250 caracteres) tentando convencê-lo a NÃO adiar. ` +
+        `Use uma técnica de persuasão (aversão à perda, identidade, ou efeito dotação da streak). ` +
+        `Não seja moralista. Seja direto e respeitoso.]`;
+      const messages: LocalChatMessage[] = [
+        { role: 'system', content: buildSystemPromptText(context) },
+        { role: 'user', content: userMsg },
+      ];
+      const text = await generateLocal(config.localModelId as LocalModelId, messages, {
+        maxTokens: 300,
+      });
+      if (!text.trim()) throw new Error('empty');
+      return { text: text.trim(), offline: false };
+    } catch (err) {
+      console.warn('Local snooze failed:', err);
+      return {
+        text: `Mais ${snoozeMinutes}? Sua versão de amanhã está te observando. Volta agora.`,
+        offline: true,
+      };
+    }
+  }
+  return generateSnoozeArgumentRemote(context, config.geminiModel, snoozeMinutes);
+}
+
 export interface CoachInvocationResult {
   message: string;
   level: IntensityLevel;
@@ -82,8 +286,10 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   const streak = await getStreak(habit.id);
   const recentLogs = await getRecentLogs(habit.id, 14);
   const history = await getRecentChat(habit.id, 10);
+  const personalization = await buildPersonalizationContext(habit.id);
 
-  const result = await generateCoachMessage(
+  const result = await runCoachGeneration(
+    config,
     {
       userName: config.name,
       bedtime: config.bedtime,
@@ -94,8 +300,8 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
+      ...personalization,
     },
-    config.geminiModel,
     history,
   );
 
@@ -114,7 +320,9 @@ export async function sendUserMessage(
   const streak = await getStreak(habitId);
   const recentLogs = await getRecentLogs(habitId, 14);
 
-  const result = await continueConversation(
+  const personalization = await buildPersonalizationContext(habitId);
+  const result = await runChatGeneration(
+    config,
     {
       userName: config.name,
       bedtime: config.bedtime,
@@ -125,8 +333,8 @@ export async function sendUserMessage(
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
+      ...personalization,
     },
-    config.geminiModel,
     history,
     text,
   );
@@ -144,7 +352,9 @@ export async function getSnoozeArgument(
   const streak = await getStreak(habitId);
   const recentLogs = await getRecentLogs(habitId, 14);
 
-  const result = await generateSnoozeArgument(
+  const personalization = await buildPersonalizationContext(habitId);
+  const result = await runSnoozeGeneration(
+    config,
     {
       userName: config.name,
       bedtime: config.bedtime,
@@ -155,8 +365,8 @@ export async function getSnoozeArgument(
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
+      ...personalization,
     },
-    config.geminiModel,
     snoozeMinutes,
   );
 

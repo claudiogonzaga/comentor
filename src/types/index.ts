@@ -8,6 +8,28 @@ export type GeminiModel =
   | 'gemini-2.0-flash-lite'
   | 'gemini-2.0-flash';
 
+export type AIBackend = 'remote' | 'local';
+
+export type LocalModelId =
+  | 'gemma-4-e4b'
+  | 'qwen3-4b-thinking-2507'
+  | 'qwen3.5-4b';
+
+export type LocalChatTemplate = 'gemma' | 'chatml';
+
+export interface LocalModelInfo {
+  id: LocalModelId;
+  label: string;
+  vendor: string;
+  description: string;
+  downloadUrl: string;
+  fileName: string;
+  sizeBytes: number;
+  contextWindow: number;
+  hasThinking: boolean;
+  chatTemplate: LocalChatTemplate;
+}
+
 export type OwlMood = 'calm' | 'worried' | 'serious' | 'sleeping' | 'celebrating';
 
 export type IntensityLevel = 1 | 2 | 3 | 4 | 5;
@@ -29,6 +51,45 @@ export interface UserConfig {
   systemPrompt: string;
   prepRemindersEnabled: boolean;
   voiceModeEnabled: boolean;
+  aiBackend: AIBackend;
+  localModelId: LocalModelId | null;
+  localModelDownloaded: boolean;
+  allowMobileDataDownload: boolean;
+  interviewCompletedAt: string | null;
+}
+
+export interface InterviewSummary {
+  causes: string[];
+  triggers: string[];
+  notes: string;
+  derivedReasons: string[];
+}
+
+export interface Interview {
+  id: number;
+  habitId: number | null;
+  status: 'in_progress' | 'completed';
+  summary: InterviewSummary | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface InterviewMessage {
+  id: number;
+  interviewId: number;
+  role: ChatRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface SnoozeFeedback {
+  id: number;
+  habitId: number;
+  logId: number | null;
+  snoozeMinutes: number;
+  reason: string | null;
+  customText: string | null;
+  createdAt: string;
 }
 
 export interface Habit {

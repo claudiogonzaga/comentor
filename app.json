@@ -34,13 +34,17 @@
         "USE_EXACT_ALARM",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "ACCESS_NETWORK_STATE",
+        "INTERNET"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "expo-dev-client",
+      "expo-file-system",
       "expo-secure-store",
       "expo-sqlite",
       "expo-font",
