@@ -27,11 +27,13 @@ import {
 } from '../services/notifications';
 import { testApiKey } from '../services/gemini';
 import {
+  deleteAllDownloadedModels,
   deleteDownloadedModel,
   getDownloadedModelSize,
   isModelDownloaded,
 } from '../services/modelDownload';
 import { releaseModel } from '../services/localModel';
+import { resetAllUserData } from '../services/database';
 import {
   LOCAL_MODEL_LIST,
   formatModelSize,
@@ -272,6 +274,46 @@ export function SettingsScreen() {
     Linking.openURL(url);
   };
 
+  const handleRedoInterview = () => {
+    navigation.navigate('Interview', { mode: 'redo' });
+  };
+
+  const handleResetAllData = () => {
+    Alert.alert(
+      'Apagar todos os dados?',
+      'Isso vai remover seu histórico, entrevista, feedback e modelos baixados. O app volta ao estado de instalação. Confirma?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sim, apagar tudo',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await releaseModel();
+              await deleteAllDownloadedModels();
+              await deleteApiKey();
+              await resetAllUserData();
+              await refreshConfig();
+              Alert.alert(
+                'Dados apagados',
+                'Tudo foi limpo. Você vai voltar para o onboarding.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () =>
+                      navigation.reset({ index: 0, routes: [{ name: 'Onboarding' }] }),
+                  },
+                ],
+              );
+            } catch (err) {
+              Alert.alert('Erro', err instanceof Error ? err.message : 'Falha ao resetar.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const removeKey = async () => {
     Alert.alert(
       'Remover chave de API?',
@@ -380,6 +422,20 @@ export function SettingsScreen() {
               </Pressable>
             ))}
           </View>
+        </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Sobre você</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
+            {config?.interviewCompletedAt
+              ? 'Você já fez a entrevista inicial. Pode refazer ou aprofundar a qualquer momento.'
+              : 'Faça uma entrevista guiada para a Corujinha entender melhor suas dificuldades.'}
+          </Text>
+          <Pressable onPress={handleRedoInterview} style={styles.outlineBtn}>
+            <Text style={styles.outlineBtnText}>
+              {config?.interviewCompletedAt ? 'Refazer / aprofundar entrevista' : 'Fazer entrevista'}
+            </Text>
+          </Pressable>
         </Card>
 
         <Card style={styles.card}>
@@ -665,6 +721,17 @@ export function SettingsScreen() {
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             Atualizações vêm do GitHub Releases. O download é um APK que substitui o app atual.
           </Text>
+        </Card>
+
+        <Card style={{ ...styles.card, ...styles.dangerCard }}>
+          <Text style={[styles.section, { color: colors.accent.danger }]}>Zona de perigo</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
+            Apaga todo o seu histórico (chat, entrevista, feedbacks de adiamento, streaks)
+            e modelos baixados. O app volta ao estado original.
+          </Text>
+          <Pressable onPress={handleResetAllData} style={styles.dangerBtn}>
+            <Text style={styles.dangerBtnText}>Apagar todos os meus dados</Text>
+          </Pressable>
         </Card>
 
         <View style={{ height: spacing.md }} />
@@ -1001,5 +1068,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 48,
+  },
+  outlineBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  outlineBtnText: {
+    ...typography.bodyMedium,
+    color: colors.accent.gold,
+  },
+  dangerCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(228,120,120,0.3)',
+  },
+  dangerBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.accent.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  dangerBtnText: {
+    ...typography.bodyMedium,
+    color: colors.accent.danger,
   },
 });

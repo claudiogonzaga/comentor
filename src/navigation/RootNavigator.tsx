@@ -5,6 +5,8 @@ import * as Notifications from 'expo-notifications';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { AIChoiceScreen } from '../screens/AIChoiceScreen';
 import { ModelDownloadScreen } from '../screens/ModelDownloadScreen';
+import { InterviewScreen } from '../screens/InterviewScreen';
+import { SnoozeFeedbackScreen } from '../screens/SnoozeFeedbackScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -18,6 +20,8 @@ export type RootStackParamList = {
   Onboarding: undefined;
   AIChoice: undefined;
   ModelDownload: { modelId: LocalModelId; fromOnboarding?: boolean };
+  Interview: { mode: 'onboarding' | 'redo' };
+  SnoozeFeedback: { habitId: number; level: 1 | 2 | 3 | 4 | 5 };
   Main: undefined;
   Home: undefined;
   Chat: undefined;
@@ -70,6 +74,12 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="AIChoice" component={AIChoiceScreen} />
         <Stack.Screen name="ModelDownload" component={ModelDownloadScreen} />
+        <Stack.Screen name="Interview" component={InterviewScreen} />
+        <Stack.Screen
+          name="SnoozeFeedback"
+          component={SnoozeFeedbackScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
         <Stack.Screen name="Main" component={HomeScreen} />
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ animation: 'slide_from_bottom' }} />

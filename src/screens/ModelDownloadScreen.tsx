@@ -19,7 +19,6 @@ import {
   type DownloadProgress,
 } from '../services/modelDownload';
 import { useAppStore } from '../store/useAppStore';
-import { activateApp } from '../services/onboardingFinalize';
 
 type DownloadParams = {
   ModelDownload: {
@@ -93,8 +92,7 @@ export function ModelDownloadScreen() {
 
   const handleFinish = async () => {
     if (fromOnboarding) {
-      await activateApp();
-      navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+      navigation.navigate('Interview', { mode: 'onboarding' });
     } else {
       navigation.goBack();
     }

@@ -3,9 +3,11 @@ import {
   addChatMessage,
   getActiveHabits,
   getHabitByType,
+  getLatestCompletedInterview,
   getOrCreateLog,
   getRecentChat,
   getRecentLogs,
+  getRecentSnoozeFeedback,
   getStreak,
   getUserConfig,
   incrementReminders,
@@ -18,6 +20,7 @@ import {
   generateSnoozeArgument as generateSnoozeArgumentRemote,
 } from './gemini';
 import { generateLocal, type LocalChatMessage } from './localModel';
+import { summaryToCoachContext } from './interview';
 import { pickFallback } from './fallbackMessages';
 import { recordCompletion } from './streaks';
 import { getIntensityForMinutesLate, INTENSITY_LEVELS } from '../constants/intensityLevels';
@@ -26,6 +29,7 @@ import type {
   ChatMessage,
   IntensityLevel,
   LocalModelId,
+  SnoozeFeedback,
   Tone,
   UserConfig,
 } from '../types';
@@ -83,13 +87,37 @@ interface CoachingContext {
   tone: Tone;
   recentLogsSummary: string;
   systemPrompt?: string;
+  interviewContext?: string;
+  recentSnoozeFeedback?: string;
+}
+
+function formatSnoozeFeedback(feedback: SnoozeFeedback[]): string {
+  if (feedback.length === 0) return '';
+  const lines = feedback.slice(0, 3).map((f, i) => {
+    const reason = f.reason ?? '';
+    const custom = f.customText ?? '';
+    const combined = [reason, custom].filter(Boolean).join(' — ');
+    return `${i === 0 ? 'último adiamento' : `adiamento -${i}`}: ${combined || '(sem motivo)'}`;
+  });
+  return lines.join('; ');
+}
+
+async function buildPersonalizationContext(
+  habitId: number,
+): Promise<{ interviewContext: string; recentSnoozeFeedback: string }> {
+  const interview = await getLatestCompletedInterview();
+  const feedback = await getRecentSnoozeFeedback(habitId, 3);
+  return {
+    interviewContext: summaryToCoachContext(interview?.summary ?? null),
+    recentSnoozeFeedback: formatSnoozeFeedback(feedback),
+  };
 }
 
 function buildSystemPromptText(ctx: CoachingContext): string {
   const template = ctx.systemPrompt && ctx.systemPrompt.trim().length > 0
     ? ctx.systemPrompt
     : DEFAULT_SYSTEM_PROMPT;
-  return fillTemplate(template, {
+  const base = fillTemplate(template, {
     userName: ctx.userName ?? 'amigo(a)',
     bedtime: ctx.bedtime,
     currentTime: ctx.currentTime,
@@ -100,6 +128,17 @@ function buildSystemPromptText(ctx: CoachingContext): string {
     tone: ctx.tone,
     recentLogsSummary: ctx.recentLogsSummary,
   });
+  const extras: string[] = [];
+  if (ctx.interviewContext && ctx.interviewContext.trim().length > 0) {
+    extras.push(`\nO QUE VOCÊ JÁ SABE SOBRE A PESSOA (da entrevista inicial):\n${ctx.interviewContext}`);
+  }
+  if (ctx.recentSnoozeFeedback && ctx.recentSnoozeFeedback.trim().length > 0) {
+    extras.push(
+      `\nADIAMENTOS RECENTES (motivos que a pessoa deu pra adiar nas últimas vezes):\n${ctx.recentSnoozeFeedback}\n` +
+        `Use essa informação para personalizar a abordagem — não repita argumentos genéricos se já souber o motivo real.`,
+    );
+  }
+  return extras.length ? `${base}\n${extras.join('\n')}` : base;
 }
 
 function historyToLocalMessages(history: ChatMessage[]): LocalChatMessage[] {
@@ -247,6 +286,7 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   const streak = await getStreak(habit.id);
   const recentLogs = await getRecentLogs(habit.id, 14);
   const history = await getRecentChat(habit.id, 10);
+  const personalization = await buildPersonalizationContext(habit.id);
 
   const result = await runCoachGeneration(
     config,
@@ -260,6 +300,7 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
+      ...personalization,
     },
     history,
   );
@@ -279,6 +320,7 @@ export async function sendUserMessage(
   const streak = await getStreak(habitId);
   const recentLogs = await getRecentLogs(habitId, 14);
 
+  const personalization = await buildPersonalizationContext(habitId);
   const result = await runChatGeneration(
     config,
     {
@@ -291,6 +333,7 @@ export async function sendUserMessage(
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
+      ...personalization,
     },
     history,
     text,
@@ -309,6 +352,7 @@ export async function getSnoozeArgument(
   const streak = await getStreak(habitId);
   const recentLogs = await getRecentLogs(habitId, 14);
 
+  const personalization = await buildPersonalizationContext(habitId);
   const result = await runSnoozeGeneration(
     config,
     {
@@ -321,6 +365,7 @@ export async function getSnoozeArgument(
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
+      ...personalization,
     },
     snoozeMinutes,
   );

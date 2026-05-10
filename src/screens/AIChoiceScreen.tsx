@@ -21,7 +21,6 @@ import type { AIBackend, LocalModelId } from '../types';
 import { LOCAL_MODEL_LIST, formatModelSize } from '../constants/models';
 import { useAppStore } from '../store/useAppStore';
 import { testApiKey } from '../services/gemini';
-import { activateApp } from '../services/onboardingFinalize';
 
 export function AIChoiceScreen() {
   const navigation = useNavigation<any>();
@@ -76,8 +75,7 @@ export function AIChoiceScreen() {
       }
       await setConfig({ aiBackend: 'remote', localModelId: null, localModelDownloaded: false });
       await setApiKey(trimmedKey);
-      await activateApp();
-      navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+      navigation.navigate('Interview', { mode: 'onboarding' });
     } finally {
       setSubmitting(false);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
 import { ChatBubble } from '../components/ChatBubble';
@@ -19,12 +19,11 @@ import { MicButton } from '../components/MicButton';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   getCoachMessageForNow,
-  getSnoozeArgument,
   markSleepDone,
   sendUserMessage,
 } from '../services/coach';
 import { getRecentChat } from '../services/database';
-import { cancelAllReminders, snoozeFor } from '../services/notifications';
+import { cancelAllReminders } from '../services/notifications';
 import { speak, startListening, stopListening, stopSpeaking } from '../services/voice';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { useAppStore } from '../store/useAppStore';
@@ -197,24 +196,26 @@ export function ChatScreen() {
     navigation.navigate('Home');
   };
 
-  const handleSnooze = async () => {
+  const handleSnooze = () => {
     if (!habitId || sending) return;
-    setSending(true);
-    try {
-      // 1. Generate a counter-argument BEFORE accepting the snooze
-      const arg = await getSnoozeArgument(habitId, level, 15);
-      const recent = await getRecentChat(habitId, 20);
-      setMessages(recent);
-      setOffline(arg.offline);
-      // 2. Schedule the snooze (will fire in 15min with next escalation level)
-      await snoozeFor(15, level, habitId);
-      // 3. Auto-speak the argument; navigation stays so user can read/listen
-      // (auto-TTS effect will pick this up). Do NOT navigate away — let the
-      // user respond if they want.
-    } finally {
-      setSending(false);
-    }
+    navigation.navigate('SnoozeFeedback', { habitId, level });
   };
+
+  // Reload messages when returning from SnoozeFeedback so the new corujinha
+  // counter-argument shows up.
+  useFocusEffect(
+    useCallback(() => {
+      if (!habitId) return;
+      let cancelled = false;
+      (async () => {
+        const recent = await getRecentChat(habitId, 20);
+        if (!cancelled) setMessages(recent);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [habitId]),
+  );
 
   const owlMood: OwlMood =
     micState === 'listening' ? 'celebrating'

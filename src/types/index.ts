@@ -55,6 +55,41 @@ export interface UserConfig {
   localModelId: LocalModelId | null;
   localModelDownloaded: boolean;
   allowMobileDataDownload: boolean;
+  interviewCompletedAt: string | null;
+}
+
+export interface InterviewSummary {
+  causes: string[];
+  triggers: string[];
+  notes: string;
+  derivedReasons: string[];
+}
+
+export interface Interview {
+  id: number;
+  habitId: number | null;
+  status: 'in_progress' | 'completed';
+  summary: InterviewSummary | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface InterviewMessage {
+  id: number;
+  interviewId: number;
+  role: ChatRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface SnoozeFeedback {
+  id: number;
+  habitId: number;
+  logId: number | null;
+  snoozeMinutes: number;
+  reason: string | null;
+  customText: string | null;
+  createdAt: string;
 }
 
 export interface Habit {
