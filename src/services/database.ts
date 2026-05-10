@@ -11,7 +11,7 @@ import type {
   GeminiModel,
   ChatRole,
 } from '../types';
-import { DEFAULT_SYSTEM_PROMPT } from '../constants/promptTemplate';
+import { DEFAULT_SYSTEM_PROMPT, LEGACY_DEFAULT_PROMPT_MARKER } from '../constants/promptTemplate';
 
 const DB_NAME = 'comentor.db';
 let db: SQLite.SQLiteDatabase | null = null;
@@ -120,6 +120,13 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       [DEFAULT_SYSTEM_PROMPT],
     );
   } else if (!existing.system_prompt) {
+    await database.runAsync(`UPDATE user_config SET system_prompt = ? WHERE id = 1`, [
+      DEFAULT_SYSTEM_PROMPT,
+    ]);
+  } else if (existing.system_prompt.startsWith(LEGACY_DEFAULT_PROMPT_MARKER)) {
+    // v1.2 migration: user is still on the legacy v1.0/v1.1 default prompt
+    // (didn't customize it). Replace with the new "coach noturna" default.
+    // Customized prompts are left untouched.
     await database.runAsync(`UPDATE user_config SET system_prompt = ? WHERE id = 1`, [
       DEFAULT_SYSTEM_PROMPT,
     ]);

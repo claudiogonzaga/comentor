@@ -38,6 +38,18 @@ interface GeminiContent {
   parts: { text: string }[];
 }
 
+// Maximum thinking budget (tokens) allowed by current Gemini flash/flash-lite
+// generations. This is the upper bound documented for 2.5 flash family; if a
+// future generation accepts a higher value we'll bump this. Setting it
+// guarantees the model thinks at MAX (never the default of 0 = no thinking
+// for flash-lite) on every coaching call.
+const MAX_THINKING_BUDGET = 24576;
+
+const MAX_THINKING_CONFIG = {
+  thinkingBudget: MAX_THINKING_BUDGET,
+  includeThoughts: false,
+};
+
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[];
   error?: { message?: string };
@@ -85,9 +97,10 @@ export async function generateCoachMessage(
         system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
         contents,
         generationConfig: {
-          maxOutputTokens: 300,
+          maxOutputTokens: 400,
           temperature: 0.85,
           topP: 0.95,
+          thinkingConfig: MAX_THINKING_CONFIG,
         },
       }),
     });
@@ -140,7 +153,11 @@ export async function continueConversation(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: buildSystemPrompt(systemContext) }] },
         contents,
-        generationConfig: { maxOutputTokens: 300, temperature: 0.85 },
+        generationConfig: {
+          maxOutputTokens: 400,
+          temperature: 0.85,
+          thinkingConfig: MAX_THINKING_CONFIG,
+        },
       }),
     });
 
@@ -192,7 +209,11 @@ export async function generateSnoozeArgument(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
         contents: [{ role: 'user', parts: [{ text: userMsg }] }],
-        generationConfig: { maxOutputTokens: 200, temperature: 0.9 },
+        generationConfig: {
+          maxOutputTokens: 300,
+          temperature: 0.9,
+          thinkingConfig: MAX_THINKING_CONFIG,
+        },
       }),
     });
     if (!res.ok) throw new Error(`Gemini ${res.status}`);

@@ -7,7 +7,7 @@ Coach de vida com IA. Uma corujinha sábia que usa argumentação persuasiva, ci
 ## Stack
 
 - **Expo + React Native + TypeScript** (SDK 54)
-- **Gemini API** (`gemini-3.1-flash-lite` por padrão; troca pra qualquer geração — 3.1, 2.5, 2.0 — nas configurações)
+- **Gemini API** (`gemini-3.1-flash-lite` por padrão, com **thinking budget máximo (24576 tokens)** em toda chamada — qualquer geração 3.1, 2.5 ou 2.0 selecionável em Configurações)
 - **expo-speech** para TTS em pt-BR (auto-fala mensagens da Corujinha)
 - **expo-speech-recognition** para STT em pt-BR (push-to-talk: segura o mic e fala)
 - **SQLite** local para histórico, chat, streaks e prompt do sistema editável
