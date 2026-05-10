@@ -7,6 +7,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
+import { BreathingScreen } from '../screens/BreathingScreen';
 import { useAppStore } from '../store/useAppStore';
 import { colors } from '../theme';
 
@@ -17,6 +18,7 @@ export type RootStackParamList = {
   Chat: undefined;
   Settings: undefined;
   History: undefined;
+  Breathing: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -43,6 +45,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
       const data = response.notification.request.content.data as { type?: string };
       if (data?.type === 'sleep-reminder' && navigationRef.current) {
         navigationRef.current.navigate('Chat');
+      } else if (data?.type === 'prep-reminder' && navigationRef.current) {
+        navigationRef.current.navigate('Breathing');
       }
     });
     return () => sub.remove();
@@ -64,6 +68,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Chat" component={ChatScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
+        <Stack.Screen name="Breathing" component={BreathingScreen} options={{ animation: 'fade' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

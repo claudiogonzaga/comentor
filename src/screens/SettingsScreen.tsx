@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -14,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { TimePickerInput } from '../components/TimePickerInput';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
@@ -28,6 +30,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   PROMPT_PLACEHOLDERS,
 } from '../constants/promptTemplate';
+import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
 import type { GeminiModel, Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
@@ -37,8 +40,12 @@ const TONES: { value: Tone; label: string }[] = [
 ];
 
 const MODELS: { value: GeminiModel; label: string; sub: string }[] = [
-  { value: 'gemini-2.0-flash-lite', label: 'Flash Lite', sub: 'mais barato e rápido' },
-  { value: 'gemini-2.0-flash', label: 'Flash', sub: 'melhor argumentação' },
+  { value: 'gemini-3.1-flash-lite', label: '3.1 Flash Lite', sub: 'novo, mais econômico (default)' },
+  { value: 'gemini-3.1-flash', label: '3.1 Flash', sub: 'novo, melhor argumentação' },
+  { value: 'gemini-2.5-flash-lite', label: '2.5 Flash Lite', sub: 'estável, barato' },
+  { value: 'gemini-2.5-flash', label: '2.5 Flash', sub: 'estável, mais inteligente' },
+  { value: 'gemini-2.0-flash-lite', label: '2.0 Flash Lite', sub: 'fallback antigo' },
+  { value: 'gemini-2.0-flash', label: '2.0 Flash', sub: 'fallback antigo' },
 ];
 
 export function SettingsScreen() {
@@ -49,14 +56,18 @@ export function SettingsScreen() {
   const [interval, setInterval] = useState(String(config?.reminderIntervalMinutes ?? 10));
   const [name, setName] = useState(config?.name ?? '');
   const [tone, setTone] = useState<Tone>(config?.tone ?? 'firm');
-  const [model, setModel] = useState<GeminiModel>(config?.geminiModel ?? 'gemini-2.0-flash-lite');
+  const [model, setModel] = useState<GeminiModel>(config?.geminiModel ?? 'gemini-3.1-flash-lite');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [systemPrompt, setSystemPrompt] = useState(config?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
+  const [prepEnabled, setPrepEnabled] = useState(config?.prepRemindersEnabled ?? true);
+  const [voiceEnabled, setVoiceEnabled] = useState(config?.voiceModeEnabled ?? true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [keyError, setKeyError] = useState<string | null>(null);
   const [showPlaceholders, setShowPlaceholders] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     if (config) {
@@ -66,6 +77,8 @@ export function SettingsScreen() {
       setTone(config.tone);
       setModel(config.geminiModel);
       setSystemPrompt(config.systemPrompt);
+      setPrepEnabled(config.prepRemindersEnabled);
+      setVoiceEnabled(config.voiceModeEnabled);
     }
   }, [config]);
 
@@ -147,6 +160,8 @@ export function SettingsScreen() {
         tone,
         geminiModel: model,
         systemPrompt: finalPrompt,
+        prepRemindersEnabled: prepEnabled,
+        voiceModeEnabled: voiceEnabled,
       });
       const habit = await ensureSleepHabit(bedtime);
       if (await ensurePermissions()) {
@@ -156,12 +171,34 @@ export function SettingsScreen() {
           intervalMinutes: intervalNum,
           maxReminders: 12,
           habitId: habit.id,
+          prepRemindersEnabled: prepEnabled,
         });
       }
       Alert.alert('Salvo', 'Suas preferências foram atualizadas.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const info = await checkForUpdate(true);
+      setUpdateInfo(info);
+      if (!info.latestVersion) {
+        Alert.alert('Sem atualizações', 'Não consegui acessar o GitHub Releases agora. Tente de novo daqui a pouco.');
+      } else if (!info.available) {
+        Alert.alert('Você está na última versão!', `v${info.currentVersion} é a mais recente.`);
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const downloadUpdate = () => {
+    const url = updateInfo?.downloadUrl ?? updateInfo?.releaseUrl;
+    if (!url) return;
+    Linking.openURL(url);
   };
 
   const removeKey = async () => {
@@ -206,13 +243,13 @@ export function SettingsScreen() {
             style={styles.input}
           />
 
-          <Text style={styles.label}>Horário de dormir</Text>
-          <TextInput
-            value={bedtime}
-            onChangeText={(v) => setBedtime(v.replace(/[^0-9:]/g, '').slice(0, 5))}
-            style={[styles.input, styles.inputCenter]}
-            keyboardType="numbers-and-punctuation"
-          />
+          <View style={{ marginTop: spacing.md }}>
+            <TimePickerInput
+              label="Horário de dormir"
+              value={bedtime}
+              onChange={setBedtime}
+            />
+          </View>
 
           <Text style={styles.label}>Intervalo entre lembretes (min)</Text>
           <TextInput
@@ -221,6 +258,40 @@ export function SettingsScreen() {
             style={[styles.input, styles.inputCenter]}
             keyboardType="number-pad"
           />
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Lembrete de preparação
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                {`${interval} min antes da hora, sugiro respiração calmante`}
+              </Text>
+            </View>
+            <Switch
+              value={prepEnabled}
+              onValueChange={setPrepEnabled}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={prepEnabled ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Modo voz 🎤
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                Auto-falar mensagens da Corujinha em pt-BR
+              </Text>
+            </View>
+            <Switch
+              value={voiceEnabled}
+              onValueChange={setVoiceEnabled}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={voiceEnabled ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
         </Card>
 
         <Card style={styles.card}>
@@ -360,6 +431,52 @@ export function SettingsScreen() {
           />
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
             {systemPrompt.length} caracteres
+          </Text>
+        </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Atualizações</Text>
+          <View style={styles.versionRow}>
+            <Text style={[typography.body, { color: colors.text.primary }]}>
+              Versão atual
+            </Text>
+            <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
+              v{getCurrentVersion()}
+            </Text>
+          </View>
+          {updateInfo?.available && updateInfo.latestVersion ? (
+            <View style={styles.updateBox}>
+              <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
+                ✨ Nova versão disponível: v{updateInfo.latestVersion}
+              </Text>
+              {updateInfo.notes ? (
+                <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.xs }]} numberOfLines={4}>
+                  {updateInfo.notes}
+                </Text>
+              ) : null}
+              <View style={{ height: spacing.sm }} />
+              <Button
+                label={updateInfo.downloadUrl ? 'Baixar APK' : 'Abrir release no GitHub'}
+                onPress={downloadUpdate}
+              />
+            </View>
+          ) : (
+            <Pressable
+              onPress={handleCheckUpdate}
+              disabled={checkingUpdate}
+              style={[styles.checkUpdateBtn, checkingUpdate && { opacity: 0.5 }]}
+            >
+              {checkingUpdate ? (
+                <ActivityIndicator color={colors.accent.gold} />
+              ) : (
+                <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
+                  Verificar atualização
+                </Text>
+              )}
+            </Pressable>
+          )}
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
+            Atualizações vêm do GitHub Releases. O download é um APK que substitui o app atual.
           </Text>
         </Card>
 
@@ -564,5 +681,38 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.text.secondary,
     flex: 1,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.md,
+  },
+  versionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  updateBox: {
+    backgroundColor: 'rgba(244,197,83,0.1)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  checkUpdateBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
   },
 });

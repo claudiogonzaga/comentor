@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { TimePickerInput } from '../components/TimePickerInput';
 import { colors, radius, spacing, typography } from '../theme';
 import type { Tone } from '../types';
 import { useAppStore } from '../store/useAppStore';
@@ -66,6 +67,7 @@ export function OnboardingScreen() {
   const [testing, setTesting] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [prepEnabled, setPrepEnabled] = useState(true);
 
   const isIntro = step < STEPS.length;
   const trimmedKey = apiKey.trim();
@@ -117,6 +119,7 @@ export function OnboardingScreen() {
         reminderIntervalMinutes: intervalNum,
         tone,
         onboardingDone: true,
+        prepRemindersEnabled: prepEnabled,
       });
       await setApiKey(trimmedKey);
       const habit = await ensureSleepHabit(bedtime);
@@ -128,6 +131,7 @@ export function OnboardingScreen() {
           intervalMinutes: intervalNum,
           maxReminders: 12,
           habitId: habit.id,
+          prepRemindersEnabled: prepEnabled,
         });
       }
       navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
@@ -191,14 +195,10 @@ export function OnboardingScreen() {
           </View>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Que horas você quer dormir?</Text>
-            <TextInput
+            <TimePickerInput
+              label="Que horas você quer dormir?"
               value={bedtime}
-              onChangeText={(v) => setBedtime(v.replace(/[^0-9:]/g, '').slice(0, 5))}
-              placeholder="23:00"
-              placeholderTextColor={colors.text.tertiary}
-              style={[styles.input, styles.inputTime]}
-              keyboardType="numbers-and-punctuation"
+              onChange={setBedtime}
             />
           </View>
 
@@ -214,6 +214,21 @@ export function OnboardingScreen() {
             />
             <Text style={styles.hint}>Mínimo 5, máximo 60 minutos.</Text>
           </View>
+
+          <Pressable
+            onPress={() => setPrepEnabled((v) => !v)}
+            style={[styles.toggleRow, prepEnabled && styles.toggleRowActive]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleLabel}>Lembrete de preparação 🌙</Text>
+              <Text style={styles.toggleDesc}>
+                {`${interval} min antes da hora, sugiro uma respiração calmante. (recomendado)`}
+              </Text>
+            </View>
+            <View style={[styles.checkbox, prepEnabled && styles.checkboxActive]}>
+              {prepEnabled && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+          </Pressable>
 
           <View style={styles.field}>
             <Text style={styles.label}>Como quer que eu fale?</Text>
@@ -462,5 +477,47 @@ const styles = StyleSheet.create({
   radioActive: {
     borderColor: colors.accent.gold,
     backgroundColor: colors.accent.gold,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bg.surface,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.md,
+  },
+  toggleRowActive: {
+    borderColor: colors.accent.gold,
+    backgroundColor: 'rgba(244,197,83,0.08)',
+  },
+  toggleLabel: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+  },
+  toggleDesc: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  checkbox: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.text.tertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxActive: {
+    borderColor: colors.accent.gold,
+    backgroundColor: colors.accent.gold,
+  },
+  checkmark: {
+    color: colors.text.onGold,
+    fontWeight: '900',
+    fontSize: 16,
   },
 });

@@ -15,19 +15,26 @@ import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
 import { ChatBubble } from '../components/ChatBubble';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { MicButton } from '../components/MicButton';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   getCoachMessageForNow,
+  getSnoozeArgument,
   markSleepDone,
   sendUserMessage,
 } from '../services/coach';
 import { getRecentChat } from '../services/database';
 import { cancelAllReminders, snoozeFor } from '../services/notifications';
+import { speak, startListening, stopListening, stopSpeaking } from '../services/voice';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
+import { useAppStore } from '../store/useAppStore';
 import type { ChatMessage, IntensityLevel, OwlMood } from '../types';
 
 export function ChatScreen() {
   const navigation = useNavigation<any>();
+  const { config } = useAppStore();
+  const voiceMode = config?.voiceModeEnabled ?? true;
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -35,7 +42,29 @@ export function ChatScreen() {
   const [habitId, setHabitId] = useState<number | null>(null);
   const [level, setLevel] = useState<IntensityLevel>(1);
   const [offline, setOffline] = useState(false);
+  const [micState, setMicState] = useState<'idle' | 'listening' | 'processing'>('idle');
+  const [interimText, setInterimText] = useState('');
+  const [speaking, setSpeaking] = useState(false);
+  const [textInputVisible, setTextInputVisible] = useState(!voiceMode);
+
   const scrollRef = useRef<ScrollView>(null);
+  const lastSpokenIdRef = useRef<number | null>(null);
+  const stopListenerRef = useRef<(() => void) | null>(null);
+  const finalTranscriptRef = useRef<string>('');
+
+  const speakMessage = async (text: string) => {
+    if (!voiceMode) return;
+    setSpeaking(true);
+    await speak(text, {
+      onDone: () => setSpeaking(false),
+      onError: () => setSpeaking(false),
+    });
+  };
+
+  const handleStopSpeaking = async () => {
+    await stopSpeaking();
+    setSpeaking(false);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -55,18 +84,29 @@ export function ChatScreen() {
     })();
     return () => {
       mounted = false;
+      stopSpeaking();
+      stopListening();
     };
   }, []);
+
+  // Auto-speak the most recent Corujinha message when voice mode is on.
+  useEffect(() => {
+    if (!voiceMode || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== 'corujinha') return;
+    if (lastSpokenIdRef.current === last.id) return;
+    lastSpokenIdRef.current = last.id;
+    speakMessage(last.content);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, voiceMode]);
 
   useEffect(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   }, [messages]);
 
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || !habitId || sending) return;
+  const sendTranscript = async (text: string) => {
+    if (!text.trim() || !habitId) return;
     setSending(true);
-    setInput('');
     setMessages((m) => [
       ...m,
       {
@@ -88,28 +128,106 @@ export function ChatScreen() {
     }
   };
 
+  const handleSendText = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput('');
+    await sendTranscript(text);
+  };
+
+  const handleMicPressIn = async () => {
+    if (sending || micState !== 'idle') return;
+    await stopSpeaking();
+    setSpeaking(false);
+    setInterimText('');
+    finalTranscriptRef.current = '';
+    setMicState('listening');
+    const stop = await startListening({
+      onResult: (transcript, isFinal) => {
+        setInterimText(transcript);
+        if (isFinal && transcript) finalTranscriptRef.current = transcript;
+      },
+      onError: (code, msg) => {
+        setMicState('idle');
+        setInterimText('');
+        if (code !== 'aborted' && code !== 'no-speech') {
+          // surface to chat as a system note
+          setMessages((m) => [
+            ...m,
+            {
+              id: Date.now(),
+              habitId: habitId ?? 0,
+              role: 'corujinha',
+              content: `(não consegui ouvir: ${msg})`,
+              intensityLevel: null,
+              createdAt: new Date().toISOString(),
+            },
+          ]);
+        }
+      },
+      onEnd: () => {
+        // handled in onPressOut
+      },
+    });
+    stopListenerRef.current = stop;
+  };
+
+  const handleMicPressOut = async () => {
+    if (micState !== 'listening') return;
+    setMicState('processing');
+    await stopListening();
+    // wait briefly for final result event to land
+    setTimeout(async () => {
+      const final = finalTranscriptRef.current.trim() || interimText.trim();
+      stopListenerRef.current?.();
+      stopListenerRef.current = null;
+      setInterimText('');
+      setMicState('idle');
+      if (final) {
+        await sendTranscript(final);
+      }
+    }, 250);
+  };
+
   const handleSleepNow = async () => {
     if (!habitId) return;
+    await stopSpeaking();
     await markSleepDone(habitId);
     await cancelAllReminders();
     navigation.navigate('Home');
   };
 
   const handleSnooze = async () => {
-    if (!habitId) return;
-    await snoozeFor(15, level, habitId);
-    navigation.navigate('Home');
+    if (!habitId || sending) return;
+    setSending(true);
+    try {
+      // 1. Generate a counter-argument BEFORE accepting the snooze
+      const arg = await getSnoozeArgument(habitId, level, 15);
+      const recent = await getRecentChat(habitId, 20);
+      setMessages(recent);
+      setOffline(arg.offline);
+      // 2. Schedule the snooze (will fire in 15min with next escalation level)
+      await snoozeFor(15, level, habitId);
+      // 3. Auto-speak the argument; navigation stays so user can read/listen
+      // (auto-TTS effect will pick this up). Do NOT navigate away — let the
+      // user respond if they want.
+    } finally {
+      setSending(false);
+    }
   };
 
   const owlMood: OwlMood =
-    level >= 4 ? 'serious' : level >= 3 ? 'worried' : 'calm';
+    micState === 'listening' ? 'celebrating'
+      : speaking ? 'celebrating'
+      : level >= 4 ? 'serious'
+      : level >= 3 ? 'worried'
+      : 'calm';
 
   return (
     <ScreenContainer>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()}>
@@ -126,7 +244,13 @@ export function ChatScreen() {
               </Text>
             </View>
           </View>
-          <View style={{ width: 60 }} />
+          {speaking ? (
+            <Pressable onPress={handleStopSpeaking} hitSlop={12}>
+              <Text style={styles.muteIcon}>🔇</Text>
+            </Pressable>
+          ) : (
+            <View style={{ width: 60 }} />
+          )}
         </View>
 
         <ScrollView
@@ -142,15 +266,20 @@ export function ChatScreen() {
               </Text>
             </View>
           ) : (
-            messages.map((m) => (
+            messages.map((m, idx) => (
               <ChatBubble
                 key={m.id}
                 role={m.role}
                 content={m.content}
-                offline={m === messages[messages.length - 1] && offline}
+                offline={idx === messages.length - 1 && offline}
               />
             ))
           )}
+          {micState === 'listening' && interimText ? (
+            <View style={[styles.interimWrap]}>
+              <Text style={styles.interimText}>{interimText}</Text>
+            </View>
+          ) : null}
           {sending && (
             <View style={[styles.row, styles.rowLeft]}>
               <View style={styles.typing}>
@@ -175,30 +304,48 @@ export function ChatScreen() {
             onPress={handleSnooze}
             fullWidth={false}
             style={{ flex: 1 }}
+            loading={sending}
           />
         </View>
 
-        <View style={styles.inputRow}>
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder="Argumente comigo..."
-            placeholderTextColor={colors.text.tertiary}
-            style={styles.input}
-            multiline
-            maxLength={500}
+        {voiceMode && (
+          <MicButton
+            state={micState}
+            onPressIn={handleMicPressIn}
+            onPressOut={handleMicPressOut}
           />
+        )}
+
+        {textInputVisible ? (
+          <View style={styles.inputRow}>
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              placeholder={voiceMode ? 'ou digite...' : 'Argumente comigo...'}
+              placeholderTextColor={colors.text.tertiary}
+              style={styles.input}
+              multiline
+              maxLength={500}
+            />
+            <Pressable
+              onPress={handleSendText}
+              disabled={!input.trim() || sending}
+              style={[
+                styles.sendBtn,
+                (!input.trim() || sending) && { opacity: 0.4 },
+              ]}
+            >
+              <Text style={styles.sendBtnText}>↑</Text>
+            </Pressable>
+          </View>
+        ) : (
           <Pressable
-            onPress={handleSend}
-            disabled={!input.trim() || sending}
-            style={[
-              styles.sendBtn,
-              (!input.trim() || sending) && { opacity: 0.4 },
-            ]}
+            onPress={() => setTextInputVisible(true)}
+            style={styles.toggleTextInput}
           >
-            <Text style={styles.sendBtnText}>↑</Text>
+            <Text style={styles.toggleTextInputLabel}>ou digitar texto →</Text>
           </Pressable>
-        </View>
+        )}
       </KeyboardAvoidingView>
     </ScreenContainer>
   );
@@ -223,6 +370,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  muteIcon: {
+    fontSize: 22,
+    minWidth: 60,
+    textAlign: 'right',
   },
   messages: {
     flex: 1,
@@ -252,6 +404,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderRadius: radius.lg,
+  },
+  interimWrap: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(244,197,83,0.18)',
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  interimText: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontStyle: 'italic',
   },
   actionsRow: {
     flexDirection: 'row',
@@ -290,5 +457,14 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: colors.text.onGold,
     fontWeight: '700',
+  },
+  toggleTextInput: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  toggleTextInputLabel: {
+    ...typography.small,
+    color: colors.text.secondary,
   },
 });

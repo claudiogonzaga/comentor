@@ -43,6 +43,7 @@ interface ScheduleParams {
   maxReminders: number;
   habitId: number;
   logId?: number;
+  prepRemindersEnabled?: boolean;
 }
 
 function buildBedtimeDate(bedtime: string, daysAhead = 0): Date {
@@ -63,12 +64,39 @@ export async function scheduleNightReminders({
   maxReminders,
   habitId,
   logId,
+  prepRemindersEnabled = true,
 }: ScheduleParams): Promise<string[]> {
   await ensureChannel();
   await cancelAllReminders();
 
   const bed = buildBedtimeDate(bedtime);
   const ids: string[] = [];
+
+  // Preparation reminder: fires `intervalMinutes` BEFORE bedtime, suggesting
+  // a wind-down breathing exercise. User can disable.
+  if (prepRemindersEnabled) {
+    const prepAt = new Date(bed.getTime() - intervalMinutes * 60_000);
+    if (prepAt.getTime() > Date.now()) {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🦉 Hora de desacelerar',
+          body: `Em ${intervalMinutes} min é dormir. Que tal 2 respirações curtas + 1 expirada longa? Toca aqui.`,
+          data: {
+            type: 'prep-reminder',
+            habitId,
+            fireAt: prepAt.toISOString(),
+          },
+          sound: 'default',
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: prepAt,
+          channelId: CHANNEL_ID,
+        },
+      });
+      ids.push(id);
+    }
+  }
 
   for (let i = 0; i < maxReminders; i++) {
     const fireAt = new Date(bed.getTime() + i * intervalMinutes * 60_000);

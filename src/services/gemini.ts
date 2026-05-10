@@ -158,34 +158,100 @@ export async function continueConversation(
   }
 }
 
-export async function testApiKey(
-  apiKey: string,
-  model: GeminiModel = 'gemini-2.0-flash-lite',
-): Promise<{ ok: boolean; error?: string }> {
-  const trimmed = apiKey.trim();
-  if (!trimmed) return { ok: false, error: 'chave vazia' };
+export async function generateSnoozeArgument(
+  context: CoachingContext,
+  model: GeminiModel,
+  snoozeMinutes: number,
+): Promise<{ text: string; offline: boolean }> {
+  const apiKey = await getApiKey();
+  const offlineLine = (() => {
+    const opts = [
+      `Mais ${snoozeMinutes}? A gente sabe como isso termina. Toda noite assim, a manhã cobra. Repensa.`,
+      `${snoozeMinutes} minutos é o que sua versão de hoje quer. Mas sua versão de amanhã está te observando.`,
+      `Você não está mais ganhando ${snoozeMinutes} minutos — está pagando por eles. Em foco, em humor, em saúde. Volta agora.`,
+      `Não vou bloquear. Mas vou avisar: cada adiamento ensina seu cérebro que sua palavra vale pouco. Não vai por esse caminho.`,
+    ];
+    return opts[Math.floor(Math.random() * opts.length)];
+  })();
+
+  if (!apiKey) {
+    return { text: offlineLine, offline: true };
+  }
+
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(trimmed)}`;
+    const userMsg = `[Sistema interno: o usuário acabou de pedir mais ${snoozeMinutes} minutos antes de dormir. ` +
+      `Está atrasado ${context.minutesLate} minutos. Streak: ${context.streak} dias. Tom: ${context.tone}. ` +
+      `Gere UMA resposta curta (2-3 frases, máx 250 caracteres) tentando convencê-lo a NÃO adiar. ` +
+      `Use uma técnica de persuasão (aversão à perda, identidade, ou efeito dotação da streak). ` +
+      `Não seja moralista. Seja direto e respeitoso.]`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'oi' }] }],
-        generationConfig: { maxOutputTokens: 5 },
+        system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
+        contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+        generationConfig: { maxOutputTokens: 200, temperature: 0.9 },
       }),
     });
-    if (!res.ok) {
+    if (!res.ok) throw new Error(`Gemini ${res.status}`);
+    const json = (await res.json()) as GeminiResponse;
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) throw new Error('Empty response');
+    return { text, offline: false };
+  } catch (err) {
+    console.warn('Gemini snooze argument failed:', err);
+    return { text: offlineLine, offline: true };
+  }
+}
+
+export async function testApiKey(
+  apiKey: string,
+  model: GeminiModel = 'gemini-3.1-flash-lite',
+): Promise<{ ok: boolean; error?: string; modelTested?: GeminiModel }> {
+  const trimmed = apiKey.trim();
+  if (!trimmed) return { ok: false, error: 'chave vazia' };
+  // If the requested model 404s ("model not found"), fall back through known
+  // generations so we still validate the key. We surface which model worked.
+  const fallbacks: GeminiModel[] = [
+    model,
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite',
+  ];
+  let lastError: string | null = null;
+  for (const m of fallbacks) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${encodeURIComponent(trimmed)}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'oi' }] }],
+          generationConfig: { maxOutputTokens: 5 },
+        }),
+      });
+      if (res.ok) {
+        const j = (await res.json()) as GeminiResponse;
+        if (!j.candidates?.[0]?.content?.parts?.[0]?.text) {
+          lastError = 'resposta vazia do Gemini';
+          continue;
+        }
+        return { ok: true, modelTested: m };
+      }
       const j = (await res.json().catch(() => ({}))) as GeminiResponse;
       const msg = j.error?.message ?? `HTTP ${res.status}`;
-      return { ok: false, error: msg };
+      lastError = msg;
+      // Only fall through on 404 / model-not-found; auth errors should fail fast.
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, error: msg };
+      }
+      if (res.status !== 404 && !msg.toLowerCase().includes('not found')) {
+        return { ok: false, error: msg };
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : 'erro de rede';
     }
-    const j = (await res.json()) as GeminiResponse;
-    if (!j.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return { ok: false, error: 'resposta vazia do Gemini' };
-    }
-    return { ok: true };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'erro de rede';
-    return { ok: false, error: msg };
   }
+  return { ok: false, error: lastError ?? 'erro desconhecido' };
 }

@@ -12,7 +12,11 @@ import {
   markLogCompleted,
   upsertHabit,
 } from './database';
-import { continueConversation, generateCoachMessage } from './gemini';
+import {
+  continueConversation,
+  generateCoachMessage,
+  generateSnoozeArgument,
+} from './gemini';
 import { recordCompletion } from './streaks';
 import { getIntensityForMinutesLate } from '../constants/intensityLevels';
 import type { IntensityLevel } from '../types';
@@ -125,6 +129,35 @@ export async function sendUserMessage(
     config.geminiModel,
     history,
     text,
+  );
+
+  await addChatMessage(habitId, 'corujinha', result.text, level);
+  return { message: result.text, offline: result.offline };
+}
+
+export async function getSnoozeArgument(
+  habitId: number,
+  level: IntensityLevel,
+  snoozeMinutes: number,
+): Promise<{ message: string; offline: boolean }> {
+  const config = await getUserConfig();
+  const streak = await getStreak(habitId);
+  const recentLogs = await getRecentLogs(habitId, 14);
+
+  const result = await generateSnoozeArgument(
+    {
+      userName: config.name,
+      bedtime: config.bedtime,
+      currentTime: nowHHMM(),
+      minutesLate: minutesPast(config.bedtime),
+      level,
+      streak: streak.currentStreak,
+      tone: config.tone,
+      recentLogsSummary: summarizeRecentLogs(recentLogs),
+      systemPrompt: config.systemPrompt,
+    },
+    config.geminiModel,
+    snoozeMinutes,
   );
 
   await addChatMessage(habitId, 'corujinha', result.text, level);

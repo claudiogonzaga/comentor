@@ -34,10 +34,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       reminder_interval_minutes INTEGER NOT NULL DEFAULT 10,
       max_reminders INTEGER NOT NULL DEFAULT 12,
       tone TEXT NOT NULL DEFAULT 'firm',
-      gemini_model TEXT NOT NULL DEFAULT 'gemini-2.0-flash-lite',
+      gemini_model TEXT NOT NULL DEFAULT 'gemini-3.1-flash-lite',
       has_api_key INTEGER NOT NULL DEFAULT 0,
       onboarding_done INTEGER NOT NULL DEFAULT 0,
       system_prompt TEXT,
+      prep_reminders_enabled INTEGER NOT NULL DEFAULT 1,
+      voice_mode_enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -89,12 +91,23 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_chat_habit ON chat_messages(habit_id, created_at);
   `);
 
-  // Defensive migration: add system_prompt column if missing (older installs).
+  // Defensive migrations: add columns if missing (older installs).
   const cols = await database.getAllAsync<{ name: string }>(
     "PRAGMA table_info('user_config')",
   );
-  if (!cols.some((c) => c.name === 'system_prompt')) {
+  const colNames = cols.map((c) => c.name);
+  if (!colNames.includes('system_prompt')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN system_prompt TEXT`);
+  }
+  if (!colNames.includes('prep_reminders_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN prep_reminders_enabled INTEGER NOT NULL DEFAULT 1`,
+    );
+  }
+  if (!colNames.includes('voice_mode_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN voice_mode_enabled INTEGER NOT NULL DEFAULT 1`,
+    );
   }
 
   const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
@@ -102,8 +115,8 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   );
   if (!existing) {
     await database.runAsync(
-      `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt)
-       VALUES (1, '23:00', 10, 12, 'firm', 'gemini-2.0-flash-lite', 0, 0, ?)`,
+      `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt, prep_reminders_enabled, voice_mode_enabled)
+       VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 1)`,
       [DEFAULT_SYSTEM_PROMPT],
     );
   } else if (!existing.system_prompt) {
@@ -124,6 +137,8 @@ interface UserConfigRow {
   has_api_key: number;
   onboarding_done: number;
   system_prompt: string | null;
+  prep_reminders_enabled: number;
+  voice_mode_enabled: number;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -137,6 +152,8 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   hasApiKey: r.has_api_key === 1,
   onboardingDone: r.onboarding_done === 1,
   systemPrompt: r.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
+  prepRemindersEnabled: r.prep_reminders_enabled === 1,
+  voiceModeEnabled: r.voice_mode_enabled === 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -162,6 +179,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     hasApiKey: 'has_api_key',
     onboardingDone: 'onboarding_done',
     systemPrompt: 'system_prompt',
+    prepRemindersEnabled: 'prep_reminders_enabled',
+    voiceModeEnabled: 'voice_mode_enabled',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

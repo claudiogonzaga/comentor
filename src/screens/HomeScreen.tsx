@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
@@ -9,6 +9,7 @@ import { colors, radius, spacing, typography } from '../theme';
 import { getDashboardData, markSleepDone } from '../services/coach';
 import type { OwlMood } from '../types';
 import { cancelAllReminders } from '../services/notifications';
+import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
 
 interface Dashboard {
   config: { bedtime: string; name: string | null };
@@ -41,6 +42,14 @@ export function HomeScreen() {
   const navigation = useNavigation<any>();
   const [data, setData] = useState<Dashboard | null>(null);
   const [marking, setMarking] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  useEffect(() => {
+    // Throttled background check (only fires if 6h+ since last check).
+    checkForUpdate(false).then((info) => {
+      if (info.available) setUpdateInfo(info);
+    });
+  }, []);
 
   const reload = useCallback(async () => {
     const d = await getDashboardData();
@@ -92,6 +101,19 @@ export function HomeScreen() {
   return (
     <ScreenContainer>
       <ScrollView contentContainerStyle={styles.scroll}>
+        {updateInfo?.available && updateInfo.latestVersion && (
+          <Pressable
+            onPress={() => {
+              const url = updateInfo.downloadUrl ?? updateInfo.releaseUrl;
+              if (url) Linking.openURL(url);
+            }}
+            style={styles.updateBanner}
+          >
+            <Text style={styles.updateBannerText}>
+              ✨ Atualização: v{updateInfo.latestVersion} disponível — toque para baixar
+            </Text>
+          </Pressable>
+        )}
         <View style={styles.header}>
           <Text style={[typography.body, { color: colors.text.secondary }]}>
             {greeting}{data?.config.name ? `, ${data.config.name}` : ''}
@@ -251,5 +273,20 @@ const styles = StyleSheet.create({
   historyLink: {
     alignItems: 'center',
     paddingVertical: spacing.md,
+  },
+  updateBanner: {
+    marginTop: spacing.md,
+    backgroundColor: 'rgba(244,197,83,0.18)',
+    borderColor: colors.accent.gold,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.md,
+  },
+  updateBannerText: {
+    ...typography.bodyMedium,
+    color: colors.accent.gold,
+    textAlign: 'center',
   },
 });

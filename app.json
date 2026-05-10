@@ -2,7 +2,7 @@
   "expo": {
     "name": "CoMentor",
     "slug": "comentor",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.claudiogonzaga.comentor"
+      "bundleIdentifier": "com.claudiogonzaga.comentor",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "A Corujinha precisa do microfone para te ouvir quando você fala com ela.",
+        "NSSpeechRecognitionUsageDescription": "Usado para transcrever sua fala em texto e responder na conversa."
+      }
     },
     "android": {
       "package": "com.claudiogonzaga.comentor",
@@ -29,7 +33,8 @@
         "SCHEDULE_EXACT_ALARM",
         "USE_EXACT_ALARM",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "RECORD_AUDIO"
       ]
     },
     "web": {
@@ -53,6 +58,15 @@
           "backgroundColor": "#1B1F3B",
           "image": "./assets/splash-icon.png",
           "imageWidth": 220
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "A Corujinha precisa do microfone para te ouvir.",
+          "speechRecognitionPermission": "Usado para transcrever sua fala em texto.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
         }
       ]
     ],
