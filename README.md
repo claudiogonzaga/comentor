@@ -13,7 +13,7 @@ Coach de vida com IA. Uma corujinha sábia que usa argumentação persuasiva, ci
 - **SQLite** local para histórico, chat, streaks e prompt do sistema editável
 - **expo-secure-store** para a API key (criptografada via Keystore)
 - **expo-notifications** para os lembretes escalonados (5 níveis) + lembrete de preparação
-- **GitHub Releases** como canal de update — app verifica releases e baixa o APK direto
+- **GitHub Releases** como canal de update de APK (mudanças nativas) + **EAS Update / OTA** (mudanças só de JS)
 
 ## Recursos
 
@@ -63,7 +63,8 @@ O perfil `preview` em `eas.json` produz APK direto. O resultado vem como link de
 
 ## Publicar uma release no GitHub
 
-Quando você buildar uma versão nova, bumpa a versão em `app.json` e cria a release:
+Use esse fluxo só quando você **mudou código nativo** (adicionou/removeu lib com binding nativo,
+mexeu em `app.json` `plugins`, mexeu em permissões, etc). Pra mudança só de JS use OTA (abaixo).
 
 ```bash
 # 1. Editar app.json: "version": "1.2.0"
@@ -78,14 +79,56 @@ O script `scripts/release.sh` cria a tag `v1.2.0`, a release no GitHub e anexa o
 A partir daí, qualquer usuário com versão menor verá o banner de atualização no app
 e pode baixar o APK direto.
 
+## OTA (Over-the-Air) — atualização sem rebuild
+
+Pra correção que mexe **só em JS/TypeScript** (componentes, prompts, lógica do coach,
+serviços que não tocam código nativo), use EAS Update — chega no celular do usuário em
+segundos, sem ele precisar reinstalar APK.
+
+### Setup inicial (faz uma vez)
+
+```bash
+npx eas-cli@latest update:configure
+```
+
+Isso preenche `expo.updates.url` no `app.json` com a URL do projeto. Commita esse arquivo.
+
+Depois desse setup, você **precisa rebuildar o APK uma vez** pra que o app passe a saber
+checar OTA. A partir desse build, qualquer mudança JS chega via OTA.
+
+### Publicar um OTA
+
+```bash
+npx eas-cli@latest update --branch preview --message "fix: descrição curta"
+```
+
+`--branch preview` casa com o `channel: "preview"` do build profile em `eas.json`. Trocar
+pra `production` quando estiver mantendo o canal estável.
+
+O app verifica updates ao abrir e baixa em background. Aplica na próxima vez que o usuário
+abrir o app.
+
+### Quando NÃO funciona via OTA (e você é obrigado a rebuildar)
+
+- Mudou versão de qualquer lib com código nativo (ex: `llama.rn`, `expo-secure-store`)
+- Adicionou/removeu plugin em `app.json`
+- Mexeu em permissões Android/iOS
+- Mudou ícones, splash, ou qualquer asset binário do app
+
+A política `runtimeVersion.policy = "fingerprint"` em `app.json` detecta isso automaticamente:
+se o fingerprint nativo mudar, OTAs novos vão pra um runtime version diferente e o build
+antigo simplesmente não recebe o update incompatível.
+
 ## Configuração de IA
 
 Usuário cadastra a chave em **Configurações → Chave de API**. Obtém-se grátis em
 [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-A chave é **obrigatória** desde a v1.0.1 — o app exige antes de finalizar onboarding
-e antes de salvar configurações. Em runtime, se o Gemini falhar (rede/quota), a Corujinha
-usa o banco offline (45 mensagens pré-escritas, 3 tons × 5 níveis × 3 variações).
+A chave era obrigatória até a v1.2; a partir da v1.3 é opcional — alternativa é baixar um
+modelo open-source que roda no celular (Gemma 4 E4B, Qwen3-4B-Thinking-2507, Qwen3.5-4B).
+
+Em runtime, se o Gemini falhar (rede/quota) ou o modelo local não estiver carregado, a
+Corujinha usa o banco offline (45 mensagens pré-escritas, 3 tons × 5 níveis × 3 variações).
 
 ### Modelos suportados
 
