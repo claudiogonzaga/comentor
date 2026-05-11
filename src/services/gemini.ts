@@ -97,7 +97,7 @@ export async function generateCoachMessage(
         system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
         contents,
         generationConfig: {
-          maxOutputTokens: 400,
+          maxOutputTokens: 1200,
           temperature: 0.85,
           topP: 0.95,
           thinkingConfig: MAX_THINKING_CONFIG,
@@ -154,7 +154,7 @@ export async function continueConversation(
         system_instruction: { parts: [{ text: buildSystemPrompt(systemContext) }] },
         contents,
         generationConfig: {
-          maxOutputTokens: 400,
+          maxOutputTokens: 1200,
           temperature: 0.85,
           thinkingConfig: MAX_THINKING_CONFIG,
         },
@@ -210,7 +210,7 @@ export async function generateSnoozeArgument(
         system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
         contents: [{ role: 'user', parts: [{ text: userMsg }] }],
         generationConfig: {
-          maxOutputTokens: 300,
+          maxOutputTokens: 800,
           temperature: 0.9,
           thinkingConfig: MAX_THINKING_CONFIG,
         },

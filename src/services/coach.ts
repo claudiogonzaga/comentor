@@ -176,7 +176,7 @@ async function runCoachGeneration(
         });
       }
       const text = await generateLocal(config.localModelId as LocalModelId, messages, {
-        maxTokens: 400,
+        maxTokens: 1200,
       });
       if (!text.trim()) throw new Error('empty');
       return { text: text.trim(), offline: false };
@@ -215,7 +215,7 @@ async function runChatGeneration(
         { role: 'user', content: userMessage },
       ];
       const text = await generateLocal(config.localModelId as LocalModelId, messages, {
-        maxTokens: 400,
+        maxTokens: 1200,
       });
       if (!text.trim()) throw new Error('empty');
       return { text: text.trim(), offline: false };
@@ -253,7 +253,7 @@ async function runSnoozeGeneration(
         { role: 'user', content: userMsg },
       ];
       const text = await generateLocal(config.localModelId as LocalModelId, messages, {
-        maxTokens: 300,
+        maxTokens: 800,
       });
       if (!text.trim()) throw new Error('empty');
       return { text: text.trim(), offline: false };
