@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import * as Speech from 'expo-speech';
 import { Card } from './Card';
 import { colors, radius, spacing, typography } from '../theme';
 import {
@@ -159,8 +160,8 @@ export function VoicePicker({ value, onChange }: Props) {
                   <Text style={styles.rowTitle}>{v.displayName}</Text>
                   <Text style={styles.rowSub} numberOfLines={1}>
                     {v.language}
-                    {v.quality === 'Enhanced' ? ' · alta qualidade' : ''}
-                    {v.gender !== 'unknown' ? '' : ' · gênero não identificado'}
+                    {v.quality === Speech.VoiceQuality.Enhanced ? ' · alta qualidade' : ''}
+                    {v.gender === 'unknown' ? ' · gênero não identificado' : ''}
                   </Text>
                 </Pressable>
                 <Pressable
