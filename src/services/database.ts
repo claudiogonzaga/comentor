@@ -51,6 +51,8 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
       allow_mobile_data_download INTEGER NOT NULL DEFAULT 0,
       interview_completed_at TEXT,
+      voice_id TEXT,
+      voice_language TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -175,6 +177,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN interview_completed_at TEXT`,
     );
   }
+  if (!colNames.includes('voice_id')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN voice_id TEXT`);
+  }
+  if (!colNames.includes('voice_language')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN voice_language TEXT`);
+  }
 
   const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
     'SELECT id, system_prompt FROM user_config WHERE id = 1',
@@ -217,6 +225,8 @@ interface UserConfigRow {
   local_model_downloaded: number;
   allow_mobile_data_download: number;
   interview_completed_at: string | null;
+  voice_id: string | null;
+  voice_language: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -237,6 +247,8 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   localModelDownloaded: r.local_model_downloaded === 1,
   allowMobileDataDownload: r.allow_mobile_data_download === 1,
   interviewCompletedAt: r.interview_completed_at,
+  voiceId: r.voice_id,
+  voiceLanguage: r.voice_language,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -269,6 +281,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     localModelDownloaded: 'local_model_downloaded',
     allowMobileDataDownload: 'allow_mobile_data_download',
     interviewCompletedAt: 'interview_completed_at',
+    voiceId: 'voice_id',
+    voiceLanguage: 'voice_language',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

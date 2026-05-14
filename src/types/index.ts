@@ -56,6 +56,8 @@ export interface UserConfig {
   localModelDownloaded: boolean;
   allowMobileDataDownload: boolean;
   interviewCompletedAt: string | null;
+  voiceId: string | null;
+  voiceLanguage: string | null;
 }
 
 export interface InterviewSummary {

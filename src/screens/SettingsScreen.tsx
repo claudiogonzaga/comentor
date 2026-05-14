@@ -16,6 +16,8 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
+import { VoicePicker } from '../components/VoicePicker';
+import type { EnrichedVoice } from '../services/voice';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
@@ -406,6 +408,16 @@ export function SettingsScreen() {
             />
           </View>
         </Card>
+
+        <VoicePicker
+          value={config?.voiceId ?? null}
+          onChange={async (v: EnrichedVoice | null) => {
+            await setConfig({
+              voiceId: v?.identifier ?? null,
+              voiceLanguage: v?.language ?? null,
+            });
+          }}
+        />
 
         <Card style={styles.card}>
           <Text style={styles.section}>Tom da Corujinha</Text>
