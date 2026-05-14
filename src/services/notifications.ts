@@ -27,7 +27,7 @@ export async function ensurePermissions(): Promise<boolean> {
 export async function ensureChannel() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-    name: 'Lembretes da Corujinha',
+    name: 'Lembretes do CoMentor',
     description: 'Lembretes de hábitos de sono',
     importance: Notifications.AndroidImportance.HIGH,
     sound: 'default',
@@ -64,39 +64,17 @@ export async function scheduleNightReminders({
   maxReminders,
   habitId,
   logId,
-  prepRemindersEnabled = true,
 }: ScheduleParams): Promise<string[]> {
   await ensureChannel();
-  await cancelAllReminders();
+  await cancelSleepEscalationReminders();
 
   const bed = buildBedtimeDate(bedtime);
   const ids: string[] = [];
 
-  // Preparation reminder: fires `intervalMinutes` BEFORE bedtime, suggesting
-  // a wind-down breathing exercise. User can disable.
-  if (prepRemindersEnabled) {
-    const prepAt = new Date(bed.getTime() - intervalMinutes * 60_000);
-    if (prepAt.getTime() > Date.now()) {
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: '🦉 Hora de desacelerar',
-          body: `Em ${intervalMinutes} min é dormir. Que tal 2 respirações curtas + 1 expirada longa? Toca aqui.`,
-          data: {
-            type: 'prep-reminder',
-            habitId,
-            fireAt: prepAt.toISOString(),
-          },
-          sound: 'default',
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: prepAt,
-          channelId: CHANNEL_ID,
-        },
-      });
-      ids.push(id);
-    }
-  }
+  // Note: the prep / wind-down notification is now handled by the
+  // "breathing" entry in the nudges table (see services/nudges.ts).
+  // scheduleAllNudges() should be called alongside this function so the
+  // breathing nudge fires daily at its configured HH:MM.
 
   for (let i = 0; i < maxReminders; i++) {
     const fireAt = new Date(bed.getTime() + i * intervalMinutes * 60_000);
@@ -122,6 +100,22 @@ export async function scheduleNightReminders({
 
 export async function cancelAllReminders() {
   await Notifications.cancelAllScheduledNotificationsAsync();
+}
+
+/**
+ * Cancels only the night-time sleep escalation notifications (5 levels +
+ * any snooze), leaving daily nudges (bluelight, supplements, breathing)
+ * intact. Used by callers that re-schedule the night chain without
+ * disturbing the unrelated daily nudges.
+ */
+export async function cancelSleepEscalationReminders() {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  for (const s of scheduled) {
+    const data = s.content.data as { type?: string };
+    if (data?.type === 'sleep-reminder' || data?.type === 'prep-reminder') {
+      await Notifications.cancelScheduledNotificationAsync(s.identifier);
+    }
+  }
 }
 
 export async function snoozeFor(minutes: number, level: IntensityLevel, habitId: number) {

@@ -52,10 +52,15 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as { type?: string };
-      if (data?.type === 'sleep-reminder' && navigationRef.current) {
+      const type = data?.type ?? '';
+      if (!navigationRef.current) return;
+      if (type === 'sleep-reminder') {
         navigationRef.current.navigate('Chat');
-      } else if (data?.type === 'prep-reminder' && navigationRef.current) {
+      } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
         navigationRef.current.navigate('Breathing');
+      } else if (type === 'nudge:supplements' || type === 'nudge:bluelight') {
+        // Info nudges — just dismiss to Home for context.
+        navigationRef.current.navigate('Home');
       }
     });
     return () => sub.remove();

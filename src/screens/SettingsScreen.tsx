@@ -17,6 +17,7 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
 import { VoicePicker } from '../components/VoicePicker';
+import { NudgesCard } from '../components/NudgesCard';
 import type { EnrichedVoice } from '../services/voice';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
@@ -86,6 +87,7 @@ export function SettingsScreen() {
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [keyError, setKeyError] = useState<string | null>(null);
   const [showPlaceholders, setShowPlaceholders] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
 
@@ -377,27 +379,10 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Lembrete de preparação
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                {`${interval} min antes da hora, sugiro respiração calmante`}
-              </Text>
-            </View>
-            <Switch
-              value={prepEnabled}
-              onValueChange={setPrepEnabled}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={prepEnabled ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
                 Modo voz 🎤
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Auto-falar mensagens da Corujinha em pt-BR
+                Auto-falar mensagens do CoMentor em pt-BR
               </Text>
             </View>
             <Switch
@@ -407,6 +392,10 @@ export function SettingsScreen() {
               thumbColor={voiceEnabled ? colors.text.onGold : colors.text.tertiary}
             />
           </View>
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
+            O lembrete de respiração antes de dormir agora vive em &quot;Nudges&quot; abaixo
+            (você pode escolher horário, ligar/desligar como qualquer outro).
+          </Text>
         </Card>
 
         <VoicePicker
@@ -419,8 +408,10 @@ export function SettingsScreen() {
           }}
         />
 
+        <NudgesCard />
+
         <Card style={styles.card}>
-          <Text style={styles.section}>Tom da Corujinha</Text>
+          <Text style={styles.section}>Tom do CoMentor</Text>
           <View style={styles.row}>
             {TONES.map((t) => (
               <Pressable
@@ -441,7 +432,7 @@ export function SettingsScreen() {
           <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
             {config?.interviewCompletedAt
               ? 'Você já fez a entrevista inicial. Pode refazer ou aprofundar a qualquer momento.'
-              : 'Faça uma entrevista guiada para a Corujinha entender melhor suas dificuldades.'}
+              : 'Faça uma entrevista guiada para o CoMentor entender melhor suas dificuldades.'}
           </Text>
           <Pressable onPress={handleRedoInterview} style={styles.outlineBtn}>
             <Text style={styles.outlineBtnText}>
@@ -648,45 +639,65 @@ export function SettingsScreen() {
 
         <Card style={styles.card}>
           <View style={styles.promptHeader}>
-            <Text style={styles.section}>Prompt da Corujinha</Text>
-            <Pressable onPress={resetPrompt}>
-              <Text style={[typography.small, styles.linkHint]}>Restaurar padrão</Text>
+            <Text style={styles.section}>Prompt do CoMentor</Text>
+            <Pressable
+              onPress={() => setPromptExpanded((v) => !v)}
+              style={styles.promptToggleBtn}
+            >
+              <Text style={styles.promptToggleText}>
+                {promptExpanded ? 'Recolher ▲' : 'Editar prompt ▼'}
+              </Text>
             </Pressable>
           </View>
-          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
-            Edite a personalidade e regras da IA. Use os placeholders abaixo no formato {'{nome}'} —
-            eles são substituídos a cada chamada com dados reais.
-          </Text>
-          <Pressable
-            onPress={() => setShowPlaceholders((v) => !v)}
-            style={styles.placeholdersToggle}
-          >
-            <Text style={[typography.small, { color: colors.accent.gold }]}>
-              {showPlaceholders ? '▼' : '▶'} Placeholders disponíveis
+          {!promptExpanded ? (
+            <Text style={[typography.small, { color: colors.text.secondary }]}>
+              {systemPrompt.length} caracteres. As regras e a personalidade do
+              CoMentor estão escondidas pra não tomar espaço. Toque em
+              &quot;Editar prompt&quot; pra ler ou alterar.
             </Text>
-          </Pressable>
-          {showPlaceholders && (
-            <View style={styles.placeholdersList}>
-              {PROMPT_PLACEHOLDERS.map((p) => (
-                <View key={p.key} style={styles.placeholderRow}>
-                  <Text style={styles.placeholderKey}>{p.key}</Text>
-                  <Text style={styles.placeholderDesc}>{p.desc}</Text>
+          ) : (
+            <>
+              <View style={styles.promptHeaderActions}>
+                <Pressable onPress={resetPrompt}>
+                  <Text style={[typography.small, styles.linkHint]}>Restaurar padrão</Text>
+                </Pressable>
+              </View>
+              <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
+                Edite a personalidade e regras da IA. Use os placeholders abaixo no formato {'{nome}'} —
+                eles são substituídos a cada chamada com dados reais.
+              </Text>
+              <Pressable
+                onPress={() => setShowPlaceholders((v) => !v)}
+                style={styles.placeholdersToggle}
+              >
+                <Text style={[typography.small, { color: colors.accent.gold }]}>
+                  {showPlaceholders ? '▼' : '▶'} Placeholders disponíveis
+                </Text>
+              </Pressable>
+              {showPlaceholders && (
+                <View style={styles.placeholdersList}>
+                  {PROMPT_PLACEHOLDERS.map((p) => (
+                    <View key={p.key} style={styles.placeholderRow}>
+                      <Text style={styles.placeholderKey}>{p.key}</Text>
+                      <Text style={styles.placeholderDesc}>{p.desc}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
+              )}
+              <TextInput
+                value={systemPrompt}
+                onChangeText={setSystemPrompt}
+                multiline
+                textAlignVertical="top"
+                style={[styles.input, styles.promptInput]}
+                placeholder="Prompt do CoMentor…"
+                placeholderTextColor={colors.text.tertiary}
+              />
+              <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
+                {systemPrompt.length} caracteres
+              </Text>
+            </>
           )}
-          <TextInput
-            value={systemPrompt}
-            onChangeText={setSystemPrompt}
-            multiline
-            textAlignVertical="top"
-            style={[styles.input, styles.promptInput]}
-            placeholder="Prompt da Corujinha…"
-            placeholderTextColor={colors.text.tertiary}
-          />
-          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
-            {systemPrompt.length} caracteres
-          </Text>
         </Card>
 
         <Card style={styles.card}>
@@ -1016,6 +1027,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.sm,
+  },
+  promptHeaderActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: spacing.xs,
+  },
+  promptToggleBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  promptToggleText: {
+    ...typography.small,
+    color: colors.accent.gold,
   },
   promptInput: {
     minHeight: 280,

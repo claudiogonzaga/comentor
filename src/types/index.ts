@@ -132,3 +132,20 @@ export interface Streak {
   bestStreak: number;
   lastCompletedDate: string | null;
 }
+
+export type NudgeType =
+  | 'supplements'
+  | 'bluelight'
+  | 'breathing'
+  | string; // forward-compat for custom user-defined nudges
+
+export interface Nudge {
+  id: number;
+  type: NudgeType;
+  title: string;
+  body: string;
+  emoji: string | null;
+  enabled: boolean;
+  scheduleTime: string; // HH:MM
+  orderIndex: number;
+}

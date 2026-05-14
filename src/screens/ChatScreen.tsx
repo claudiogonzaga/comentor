@@ -238,7 +238,7 @@ export function ChatScreen() {
             <Owl mood={owlMood} size={48} animated={false} />
             <View>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Corujinha
+                CoMentor
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 {INTENSITY_LEVELS[level].title} · nível {level}/5
@@ -263,7 +263,7 @@ export function ChatScreen() {
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                A Corujinha está pensando…
+                O CoMentor está pensando…
               </Text>
             </View>
           ) : (

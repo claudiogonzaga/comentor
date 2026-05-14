@@ -176,7 +176,7 @@ export function HomeScreen() {
         {!data?.todayLog?.completed && (
           <View style={styles.actions}>
             <Button
-              label="Conversar com a Corujinha"
+              label="Conversar com o CoMentor"
               onPress={() => navigation.navigate('Chat')}
             />
             <View style={{ height: spacing.sm }} />

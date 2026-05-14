@@ -3,6 +3,7 @@ import type { UserConfig } from '../types';
 import { getUserConfig, updateUserConfig } from '../services/database';
 import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice } from '../services/voice';
+import { scheduleAllNudges } from '../services/nudges';
 
 interface AppState {
   ready: boolean;
@@ -28,6 +29,12 @@ export const useAppStore = create<AppState>((set) => ({
     const hasApiKey = !!apiKey;
     syncVoiceFromConfig(config);
     set({ config: { ...config, hasApiKey }, hasApiKey, ready: true });
+    // Ensure daily nudges (bluelight, supplements, breathing) are scheduled
+    // — seeded on first run, re-scheduled on every cold start so the
+    // Android alarm queue stays consistent across reboots / OTA upgrades.
+    scheduleAllNudges().catch((err) =>
+      console.warn('scheduleAllNudges on init failed:', err),
+    );
   },
   refreshConfig: async () => {
     const config = await getUserConfig();

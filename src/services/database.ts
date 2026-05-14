@@ -10,6 +10,8 @@ import type {
   InterviewMessage,
   InterviewSummary,
   LocalModelId,
+  Nudge,
+  NudgeType,
   SnoozeFeedback,
   Streak,
   Tone,
@@ -132,6 +134,19 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
 
     CREATE INDEX IF NOT EXISTS idx_daily_log_habit_date ON daily_log(habit_id, date);
     CREATE INDEX IF NOT EXISTS idx_chat_habit ON chat_messages(habit_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS nudges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      emoji TEXT,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      schedule_time TEXT NOT NULL,
+      order_index INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Defensive migrations: add columns if missing (older installs).
@@ -183,6 +198,79 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('voice_language')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN voice_language TEXT`);
   }
+
+  // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
+  // existing per-user customizations from being overwritten on later runs.
+  const existingConfig = await database.getFirstAsync<{
+    bedtime: string;
+    reminder_interval_minutes: number;
+    prep_reminders_enabled: number;
+  }>(
+    'SELECT bedtime, reminder_interval_minutes, prep_reminders_enabled FROM user_config WHERE id = 1',
+  );
+  const bedtimeStr = existingConfig?.bedtime ?? '23:00';
+  const intervalMin = existingConfig?.reminder_interval_minutes ?? 10;
+  const breathingEnabled = (existingConfig?.prep_reminders_enabled ?? 1) === 1 ? 1 : 0;
+
+  const [bh, bm] = bedtimeStr.split(':').map((n) => parseInt(n, 10));
+  const bedtimeMins = (bh || 23) * 60 + (bm || 0);
+  const breathingTime = (() => {
+    let mins = bedtimeMins - intervalMin;
+    if (mins < 0) mins += 24 * 60;
+    const h = Math.floor(mins / 60) % 24;
+    const m = mins % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  })();
+  const suppTime = (() => {
+    let mins = bedtimeMins - 30;
+    if (mins < 0) mins += 24 * 60;
+    const h = Math.floor(mins / 60) % 24;
+    const m = mins % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  })();
+
+  await database.runAsync(
+    `INSERT OR IGNORE INTO nudges
+       (type, title, body, emoji, enabled, schedule_time, order_index)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      'bluelight',
+      'Pôr do sol',
+      'Sol indo embora. Hora dos óculos bloqueadores ou modo escuro nas telas — preserva a melatonina.',
+      '🕶️',
+      1,
+      '18:00',
+      1,
+    ],
+  );
+  await database.runAsync(
+    `INSERT OR IGNORE INTO nudges
+       (type, title, body, emoji, enabled, schedule_time, order_index)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      'supplements',
+      'Suplementos',
+      'Glicina + Magnésio (se você usa). Tomar agora ajuda a entrar em sono profundo.',
+      '💊',
+      0,
+      suppTime,
+      2,
+    ],
+  );
+  await database.runAsync(
+    `INSERT OR IGNORE INTO nudges
+       (type, title, body, emoji, enabled, schedule_time, order_index)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      'breathing',
+      'Respiração 2-2-4',
+      'Bora desacelerar? 2 inspiradas curtas + 1 expirada longa. Toca aqui pra começar.',
+      '🌬️',
+      breathingEnabled,
+      breathingTime,
+      3,
+    ],
+  );
 
   const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
     'SELECT id, system_prompt FROM user_config WHERE id = 1',
@@ -667,6 +755,75 @@ export async function getRecentSnoozeFeedback(
     customText: r.custom_text,
     createdAt: r.created_at,
   }));
+}
+
+// --------- Nudges ---------
+
+interface NudgeRow {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  emoji: string | null;
+  enabled: number;
+  schedule_time: string;
+  order_index: number;
+}
+
+const rowToNudge = (r: NudgeRow): Nudge => ({
+  id: r.id,
+  type: r.type as NudgeType,
+  title: r.title,
+  body: r.body,
+  emoji: r.emoji,
+  enabled: r.enabled === 1,
+  scheduleTime: r.schedule_time,
+  orderIndex: r.order_index,
+});
+
+export async function listNudges(): Promise<Nudge[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<NudgeRow>(
+    'SELECT * FROM nudges ORDER BY order_index ASC, id ASC',
+  );
+  return rows.map(rowToNudge);
+}
+
+export async function updateNudge(
+  id: number,
+  patch: Partial<Pick<Nudge, 'enabled' | 'scheduleTime' | 'title' | 'body'>>,
+): Promise<Nudge | null> {
+  const d = await getDb();
+  const fields: string[] = [];
+  const values: (string | number)[] = [];
+  if (typeof patch.enabled === 'boolean') {
+    fields.push('enabled = ?');
+    values.push(patch.enabled ? 1 : 0);
+  }
+  if (typeof patch.scheduleTime === 'string') {
+    fields.push('schedule_time = ?');
+    values.push(patch.scheduleTime);
+  }
+  if (typeof patch.title === 'string') {
+    fields.push('title = ?');
+    values.push(patch.title);
+  }
+  if (typeof patch.body === 'string') {
+    fields.push('body = ?');
+    values.push(patch.body);
+  }
+  if (fields.length === 0) return null;
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  await d.runAsync(
+    `UPDATE nudges SET ${fields.join(', ')} WHERE id = ?`,
+    values,
+  );
+  const row = await d.getFirstAsync<NudgeRow>(
+    'SELECT * FROM nudges WHERE id = ?',
+    [id],
+  );
+  return row ? rowToNudge(row) : null;
 }
 
 export async function resetAllUserData(): Promise<void> {

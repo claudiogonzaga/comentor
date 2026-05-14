@@ -2,7 +2,7 @@
   "expo": {
     "name": "CoMentor",
     "slug": "comentor",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.claudiogonzaga.comentor",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "A Corujinha precisa do microfone para te ouvir quando você fala com ela.",
+        "NSMicrophoneUsageDescription": "O CoMentor precisa do microfone para te ouvir quando você fala com ele.",
         "NSSpeechRecognitionUsageDescription": "Usado para transcrever sua fala em texto e responder na conversa."
       }
     },
@@ -56,7 +56,7 @@
         {
           "color": "#F4C553",
           "androidMode": "default",
-          "androidCollapsedTitle": "Corujinha"
+          "androidCollapsedTitle": "CoMentor"
         }
       ],
       [
@@ -71,7 +71,7 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "A Corujinha precisa do microfone para te ouvir.",
+          "microphonePermission": "O CoMentor precisa do microfone para te ouvir.",
           "speechRecognitionPermission": "Usado para transcrever sua fala em texto.",
           "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
         }
