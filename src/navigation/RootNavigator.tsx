@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
@@ -12,8 +12,10 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
-import type { LocalModelId } from '../types';
+import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { SLEEP_NOW_ACTION, SNOOZE_ACTION, cancelAllReminders } from '../services/notifications';
+import { markSleepDone } from '../services/coach';
 import { colors } from '../theme';
 
 export type RootStackParamList = {
@@ -49,25 +51,118 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
   const { config } = useAppStore();
   const onboarded = config?.onboardingDone ?? false;
 
+  // A notification tapped while the app was killed fires its response before
+  // the navigator mounts. We stash it here and flush it once navigation is
+  // ready, instead of dropping it (the old bug: the app opened but never
+  // navigated, so taps and the snooze button "did nothing").
+  const navReadyRef = useRef(false);
+  const pendingResponseRef = useRef<Notifications.NotificationResponse | null>(null);
+  const flushRef = useRef<(() => void) | null>(null);
+  // A notification that launches the app is delivered both by
+  // getLastNotificationResponseAsync() and the live listener — dedup so the
+  // action (e.g. marking sleep done) doesn't run twice.
+  const processedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as { type?: string };
-      const type = data?.type ?? '';
-      if (!navigationRef.current) return;
+    const routeResponse = async (response: Notifications.NotificationResponse) => {
+      const data = (response.notification.request.content.data ?? {}) as {
+        type?: string;
+        habitId?: number;
+        level?: number;
+      };
+      const type = data.type ?? '';
+      const action = response.actionIdentifier;
+      const nav = navigationRef.current;
+      if (!nav) return;
+
       if (type === 'sleep-reminder') {
-        navigationRef.current.navigate('Chat');
+        if (action === SLEEP_NOW_ACTION) {
+          // "Vou dormir" button: mark done, stop the escalation chain, go home.
+          if (typeof data.habitId === 'number') {
+            try {
+              await markSleepDone(data.habitId);
+            } catch {
+              /* still navigate even if logging fails */
+            }
+          }
+          await cancelAllReminders();
+          nav.navigate('Home');
+          return;
+        }
+        if (action === SNOOZE_ACTION) {
+          // "Adiar 15 min" button: open the snooze flow (asks the reason,
+          // generates the counter-argument, reschedules).
+          if (typeof data.habitId === 'number') {
+            nav.navigate('SnoozeFeedback', {
+              habitId: data.habitId,
+              level: (data.level ?? 1) as IntensityLevel,
+            });
+          } else {
+            nav.navigate('Chat');
+          }
+          return;
+        }
+        // Tap on the notification body.
+        nav.navigate('Chat');
       } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
-        navigationRef.current.navigate('Breathing');
-      } else if (type === 'nudge:supplements' || type === 'nudge:bluelight') {
-        // Info nudges — just dismiss to Home for context.
-        navigationRef.current.navigate('Home');
+        nav.navigate('Breathing');
+      } else if (type.startsWith('nudge:')) {
+        nav.navigate('Home');
       }
-    });
+    };
+
+    const handle = (response: Notifications.NotificationResponse | null) => {
+      if (!response) return;
+      const key = [
+        response.notification.request.identifier,
+        response.actionIdentifier,
+        response.notification.date,
+      ].join('|');
+      if (processedRef.current.has(key)) return;
+      processedRef.current.add(key);
+      if (navReadyRef.current && navigationRef.current) {
+        void routeResponse(response);
+      } else {
+        pendingResponseRef.current = response;
+      }
+    };
+
+    // Cold start: a notification may have launched the app.
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        handle(response);
+        // Clear it so a later normal cold start doesn't replay it.
+        return Notifications.clearLastNotificationResponseAsync();
+      })
+      .catch(() => {});
+
+    // Warm: app already running when the user taps.
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
+
+    // Runs whatever notification response arrived before navigation was ready.
+    const flush = () => {
+      navReadyRef.current = true;
+      const pending = pendingResponseRef.current;
+      if (pending) {
+        pendingResponseRef.current = null;
+        void routeResponse(pending);
+      }
+    };
+    flushRef.current = flush;
+    // Guard against onReady having already fired before this effect ran.
+    if (navigationRef.current?.isReady?.()) flush();
+
     return () => sub.remove();
   }, [navigationRef]);
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navTheme}
+      onReady={() => {
+        flushRef.current?.();
+      }}
+    >
       <Stack.Navigator
         screenOptions={{
           headerShown: false,

@@ -17,12 +17,13 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
 import { VoicePicker } from '../components/VoicePicker';
+import { OwlSoundPicker } from '../components/OwlSoundPicker';
 import { NudgesCard } from '../components/NudgesCard';
 import type { EnrichedVoice } from '../services/voice';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
-import { ensureSleepHabit } from '../services/coach';
+import { ensureSleepHabit, rescheduleAllNotifications } from '../services/coach';
 import {
   ensureChannel,
   ensurePermissions,
@@ -46,7 +47,7 @@ import {
   PROMPT_PLACEHOLDERS,
 } from '../constants/promptTemplate';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
-import type { AIBackend, GeminiModel, LocalModelId, Tone } from '../types';
+import type { AIBackend, GeminiModel, LocalModelId, OwlSpeciesId, Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
   { value: 'gentle', label: 'Gentil 🤗' },
@@ -81,7 +82,7 @@ export function SettingsScreen() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [systemPrompt, setSystemPrompt] = useState(config?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
   const [prepEnabled, setPrepEnabled] = useState(config?.prepRemindersEnabled ?? true);
-  const [voiceEnabled, setVoiceEnabled] = useState(config?.voiceModeEnabled ?? true);
+  const [voiceEnabled, setVoiceEnabled] = useState(config?.voiceModeEnabled ?? false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
@@ -379,10 +380,12 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Modo voz 🎤
+                Abrir o chat com voz ligada 🔊
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Auto-falar mensagens do CoMentor em pt-BR
+                Por padrão a coruja só escreve. Ligando aqui, as conversas já
+                começam com a leitura em voz alta — e você ainda pode
+                silenciar pelo botão dentro do chat.
               </Text>
             </View>
             <Switch
@@ -397,6 +400,14 @@ export function SettingsScreen() {
             (você pode escolher horário, ligar/desligar como qualquer outro).
           </Text>
         </Card>
+
+        <OwlSoundPicker
+          value={(config?.owlSpecies ?? 'cabure') as OwlSpeciesId}
+          onChange={async (species: OwlSpeciesId) => {
+            await setConfig({ owlSpecies: species });
+            await rescheduleAllNotifications();
+          }}
+        />
 
         <VoicePicker
           value={config?.voiceId ?? null}

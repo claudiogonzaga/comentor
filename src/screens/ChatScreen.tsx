@@ -32,7 +32,6 @@ import type { ChatMessage, IntensityLevel, OwlMood } from '../types';
 export function ChatScreen() {
   const navigation = useNavigation<any>();
   const { config } = useAppStore();
-  const voiceMode = config?.voiceModeEnabled ?? true;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -44,7 +43,9 @@ export function ChatScreen() {
   const [micState, setMicState] = useState<'idle' | 'listening' | 'processing'>('idle');
   const [interimText, setInterimText] = useState('');
   const [speaking, setSpeaking] = useState(false);
-  const [textInputVisible, setTextInputVisible] = useState(!voiceMode);
+  // Voice output is OFF by default: the chat just shows text. The user turns
+  // the speaker on (header button) when they want messages read aloud.
+  const [speechEnabled, setSpeechEnabled] = useState(config?.voiceModeEnabled ?? false);
 
   const scrollRef = useRef<ScrollView>(null);
   const lastSpokenIdRef = useRef<number | null>(null);
@@ -52,7 +53,7 @@ export function ChatScreen() {
   const finalTranscriptRef = useRef<string>('');
 
   const speakMessage = async (text: string) => {
-    if (!voiceMode) return;
+    if (!speechEnabled) return;
     setSpeaking(true);
     await speak(text, {
       onDone: () => setSpeaking(false),
@@ -63,6 +64,16 @@ export function ChatScreen() {
   const handleStopSpeaking = async () => {
     await stopSpeaking();
     setSpeaking(false);
+  };
+
+  const toggleSpeech = async () => {
+    if (speechEnabled) {
+      await stopSpeaking();
+      setSpeaking(false);
+      setSpeechEnabled(false);
+    } else {
+      setSpeechEnabled(true);
+    }
   };
 
   useEffect(() => {
@@ -88,16 +99,17 @@ export function ChatScreen() {
     };
   }, []);
 
-  // Auto-speak the most recent Corujinha message when voice mode is on.
+  // Read the most recent CoMentor message aloud — only when the user has
+  // explicitly turned the speaker on.
   useEffect(() => {
-    if (!voiceMode || messages.length === 0) return;
+    if (!speechEnabled || messages.length === 0) return;
     const last = messages[messages.length - 1];
     if (last.role !== 'corujinha') return;
     if (lastSpokenIdRef.current === last.id) return;
     lastSpokenIdRef.current = last.id;
     speakMessage(last.content);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, voiceMode]);
+  }, [messages, speechEnabled]);
 
   useEffect(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
@@ -245,13 +257,16 @@ export function ChatScreen() {
               </Text>
             </View>
           </View>
-          {speaking ? (
-            <Pressable onPress={handleStopSpeaking} hitSlop={12}>
-              <Text style={styles.muteIcon}>🔇</Text>
-            </Pressable>
-          ) : (
-            <View style={{ width: 60 }} />
-          )}
+          <Pressable
+            onPress={speaking ? handleStopSpeaking : toggleSpeech}
+            hitSlop={12}
+            style={styles.speechToggle}
+          >
+            <Text style={styles.muteIcon}>{speechEnabled ? '🔊' : '🔇'}</Text>
+            <Text style={styles.speechToggleLabel}>
+              {speaking ? 'parar' : speechEnabled ? 'voz on' : 'voz off'}
+            </Text>
+          </Pressable>
         </View>
 
         <ScrollView
@@ -309,44 +324,33 @@ export function ChatScreen() {
           />
         </View>
 
-        {voiceMode && (
-          <MicButton
-            state={micState}
-            onPressIn={handleMicPressIn}
-            onPressOut={handleMicPressOut}
-          />
-        )}
+        <MicButton
+          state={micState}
+          onPressIn={handleMicPressIn}
+          onPressOut={handleMicPressOut}
+        />
 
-        {textInputVisible ? (
-          <View style={styles.inputRow}>
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder={voiceMode ? 'ou digite...' : 'Argumente comigo...'}
-              placeholderTextColor={colors.text.tertiary}
-              style={styles.input}
-              multiline
-              maxLength={500}
-            />
-            <Pressable
-              onPress={handleSendText}
-              disabled={!input.trim() || sending}
-              style={[
-                styles.sendBtn,
-                (!input.trim() || sending) && { opacity: 0.4 },
-              ]}
-            >
-              <Text style={styles.sendBtnText}>↑</Text>
-            </Pressable>
-          </View>
-        ) : (
+        <View style={styles.inputRow}>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder="Argumente comigo..."
+            placeholderTextColor={colors.text.tertiary}
+            style={styles.input}
+            multiline
+            maxLength={500}
+          />
           <Pressable
-            onPress={() => setTextInputVisible(true)}
-            style={styles.toggleTextInput}
+            onPress={handleSendText}
+            disabled={!input.trim() || sending}
+            style={[
+              styles.sendBtn,
+              (!input.trim() || sending) && { opacity: 0.4 },
+            ]}
           >
-            <Text style={styles.toggleTextInputLabel}>ou digitar texto →</Text>
+            <Text style={styles.sendBtnText}>↑</Text>
           </Pressable>
-        )}
+        </View>
       </KeyboardAvoidingView>
     </ScreenContainer>
   );
@@ -372,10 +376,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  muteIcon: {
-    fontSize: 22,
+  speechToggle: {
     minWidth: 60,
-    textAlign: 'right',
+    alignItems: 'center',
+  },
+  muteIcon: {
+    fontSize: 20,
+  },
+  speechToggleLabel: {
+    ...typography.small,
+    color: colors.text.secondary,
+    fontSize: 10,
+    marginTop: 1,
   },
   messages: {
     flex: 1,
@@ -458,14 +470,5 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: colors.text.onGold,
     fontWeight: '700',
-  },
-  toggleTextInput: {
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingBottom: spacing.lg,
-  },
-  toggleTextInputLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
   },
 });

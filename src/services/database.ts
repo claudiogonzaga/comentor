@@ -47,7 +47,8 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       onboarding_done INTEGER NOT NULL DEFAULT 0,
       system_prompt TEXT,
       prep_reminders_enabled INTEGER NOT NULL DEFAULT 1,
-      voice_mode_enabled INTEGER NOT NULL DEFAULT 1,
+      voice_mode_enabled INTEGER NOT NULL DEFAULT 0,
+      owl_species TEXT NOT NULL DEFAULT 'cabure',
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -198,6 +199,16 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('voice_language')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN voice_language TEXT`);
   }
+  // v1.6: owl notification sounds + chat voice off by default.
+  // Adding owl_species is a one-time event for existing installs, so we use it
+  // as the trigger to also force voice mode off (the chat now shows text only
+  // unless the user explicitly turns the sound on).
+  if (!colNames.includes('owl_species')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN owl_species TEXT NOT NULL DEFAULT 'cabure'`,
+    );
+    await database.execAsync(`UPDATE user_config SET voice_mode_enabled = 0`);
+  }
 
   // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
   // existing per-user customizations from being overwritten on later runs.
@@ -278,7 +289,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!existing) {
     await database.runAsync(
       `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt, prep_reminders_enabled, voice_mode_enabled)
-       VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 1)`,
+       VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 0)`,
       [DEFAULT_SYSTEM_PROMPT],
     );
   } else if (!existing.system_prompt) {
@@ -315,6 +326,7 @@ interface UserConfigRow {
   interview_completed_at: string | null;
   voice_id: string | null;
   voice_language: string | null;
+  owl_species: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -337,6 +349,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   interviewCompletedAt: r.interview_completed_at,
   voiceId: r.voice_id,
   voiceLanguage: r.voice_language,
+  owlSpecies: (r.owl_species ?? 'cabure') as UserConfig['owlSpecies'],
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -371,6 +384,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     interviewCompletedAt: 'interview_completed_at',
     voiceId: 'voice_id',
     voiceLanguage: 'voice_language',
+    owlSpecies: 'owl_species',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
@@ -840,7 +854,7 @@ export async function resetAllUserData(): Promise<void> {
   `);
   await d.runAsync(
     `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt, prep_reminders_enabled, voice_mode_enabled, ai_backend, local_model_downloaded, allow_mobile_data_download)
-     VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 1, 'remote', 0, 0)`,
+     VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 0, 'remote', 0, 0)`,
     [DEFAULT_SYSTEM_PROMPT],
   );
 }

@@ -16,7 +16,11 @@ import {
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
 import { useAppStore } from './src/store/useAppStore';
-import { ensureChannel, ensurePermissions } from './src/services/notifications';
+import {
+  ensureChannel,
+  ensureNotificationCategories,
+  ensurePermissions,
+} from './src/services/notifications';
 import { colors } from './src/theme';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
@@ -40,7 +44,10 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const granted = await ensurePermissions();
-      if (granted) await ensureChannel();
+      if (granted) {
+        await ensureChannel();
+        await ensureNotificationCategories();
+      }
     })();
   }, []);
 

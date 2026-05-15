@@ -20,6 +20,13 @@ import {
   generateSnoozeArgument as generateSnoozeArgumentRemote,
 } from './gemini';
 import { generateLocal, type LocalChatMessage } from './localModel';
+import {
+  ensureChannel,
+  ensureNotificationCategories,
+  ensurePermissions,
+  scheduleNightReminders,
+} from './notifications';
+import { scheduleAllNudges } from './nudges';
 import { summaryToCoachContext } from './interview';
 import { pickFallback } from './fallbackMessages';
 import { recordCompletion } from './streaks';
@@ -381,6 +388,27 @@ export async function markSleepDone(habitId: number) {
   await markLogCompleted(log.id, nowHHMM());
   const updated = await recordCompletion(habitId, today);
   return updated;
+}
+
+/**
+ * Re-registers every CoMentor notification (night escalation chain + daily
+ * nudges) onto the channel for the user's currently selected owl sound.
+ * Call after the owl species changes so the new sound takes effect without
+ * waiting for the next Settings save.
+ */
+export async function rescheduleAllNotifications(): Promise<void> {
+  if (!(await ensurePermissions())) return;
+  const config = await getUserConfig();
+  await ensureNotificationCategories();
+  await ensureChannel(config.owlSpecies);
+  const habit = await ensureSleepHabit(config.bedtime);
+  await scheduleNightReminders({
+    bedtime: config.bedtime,
+    intervalMinutes: config.reminderIntervalMinutes,
+    maxReminders: 12,
+    habitId: habit.id,
+  });
+  await scheduleAllNudges();
 }
 
 export async function getDashboardData() {

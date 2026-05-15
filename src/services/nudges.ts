@@ -1,9 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { listNudges, updateNudge } from './database';
 import { ensureChannel } from './notifications';
+import { getOwlSpecies } from '../constants/owlSpecies';
+import { getUserConfig } from './database';
 import type { Nudge } from '../types';
-
-const CHANNEL_ID = 'comentor-sleep';
 
 /**
  * Cancels all currently-scheduled nudge notifications (any whose
@@ -26,8 +26,16 @@ export async function cancelAllNudges(): Promise<void> {
  * to call after any settings save / on app start.
  */
 export async function scheduleAllNudges(): Promise<string[]> {
-  await ensureChannel();
+  const channelId = await ensureChannel();
   await cancelAllNudges();
+
+  let sound: string = 'default';
+  try {
+    const config = await getUserConfig();
+    sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
+  } catch {
+    /* keep default */
+  }
 
   const nudges = await listNudges();
   const ids: string[] = [];
@@ -47,13 +55,13 @@ export async function scheduleAllNudges(): Promise<string[]> {
           title: `${n.emoji ?? '🦉'} ${n.title}`,
           body: n.body,
           data: { type: `nudge:${n.type}`, nudgeId: n.id, nudgeType: n.type },
-          sound: 'default',
+          sound,
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour: safeHour,
           minute: safeMinute,
-          channelId: CHANNEL_ID,
+          channelId,
         },
       });
       ids.push(id);
