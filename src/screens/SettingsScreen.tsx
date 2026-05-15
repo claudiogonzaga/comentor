@@ -29,6 +29,7 @@ import {
   ensurePermissions,
   scheduleNightReminders,
 } from '../services/notifications';
+import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { testApiKey } from '../services/gemini';
 import {
   deleteAllDownloadedModels,
@@ -83,6 +84,9 @@ export function SettingsScreen() {
   const [systemPrompt, setSystemPrompt] = useState(config?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
   const [prepEnabled, setPrepEnabled] = useState(config?.prepRemindersEnabled ?? true);
   const [voiceEnabled, setVoiceEnabled] = useState(config?.voiceModeEnabled ?? false);
+  const [awarenessEnabled, setAwarenessEnabled] = useState(
+    config?.sleepAwarenessEnabled ?? true,
+  );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
@@ -102,6 +106,7 @@ export function SettingsScreen() {
       setSystemPrompt(config.systemPrompt);
       setPrepEnabled(config.prepRemindersEnabled);
       setVoiceEnabled(config.voiceModeEnabled);
+      setAwarenessEnabled(config.sleepAwarenessEnabled);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -237,6 +242,7 @@ export function SettingsScreen() {
         systemPrompt: finalPrompt,
         prepRemindersEnabled: prepEnabled,
         voiceModeEnabled: voiceEnabled,
+        sleepAwarenessEnabled: awarenessEnabled,
         aiBackend,
         localModelId: aiBackend === 'local' ? localModelId : config?.localModelId ?? null,
         allowMobileDataDownload: allowMobileData,
@@ -251,6 +257,7 @@ export function SettingsScreen() {
           habitId: habit.id,
           prepRemindersEnabled: prepEnabled,
         });
+        await scheduleSleepAwarenessNotifications();
       }
       Alert.alert('Salvo', 'Suas preferências foram atualizadas.');
     } finally {
@@ -395,6 +402,26 @@ export function SettingsScreen() {
               thumbColor={voiceEnabled ? colors.text.onGold : colors.text.tertiary}
             />
           </View>
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Lembretes de conscientização 🌙
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                Pequenas notificações ao longo do dia com fatos sobre a
+                importância do sono — 1 de manhã, 1 de tarde e 2 à noite, em
+                horários variados, conforme a hora de dormir se aproxima.
+              </Text>
+            </View>
+            <Switch
+              value={awarenessEnabled}
+              onValueChange={setAwarenessEnabled}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={awarenessEnabled ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             O lembrete de respiração antes de dormir agora vive em &quot;Nudges&quot; abaixo
             (você pode escolher horário, ligar/desligar como qualquer outro).

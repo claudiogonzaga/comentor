@@ -49,6 +49,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       prep_reminders_enabled INTEGER NOT NULL DEFAULT 1,
       voice_mode_enabled INTEGER NOT NULL DEFAULT 0,
       owl_species TEXT NOT NULL DEFAULT 'cabure',
+      sleep_awareness_enabled INTEGER NOT NULL DEFAULT 1,
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -209,6 +210,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     );
     await database.execAsync(`UPDATE user_config SET voice_mode_enabled = 0`);
   }
+  if (!colNames.includes('sleep_awareness_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN sleep_awareness_enabled INTEGER NOT NULL DEFAULT 1`,
+    );
+  }
 
   // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
   // existing per-user customizations from being overwritten on later runs.
@@ -327,6 +333,7 @@ interface UserConfigRow {
   voice_id: string | null;
   voice_language: string | null;
   owl_species: string | null;
+  sleep_awareness_enabled: number;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -350,6 +357,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   voiceId: r.voice_id,
   voiceLanguage: r.voice_language,
   owlSpecies: (r.owl_species ?? 'cabure') as UserConfig['owlSpecies'],
+  sleepAwarenessEnabled: (r.sleep_awareness_enabled ?? 1) === 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -385,6 +393,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     voiceId: 'voice_id',
     voiceLanguage: 'voice_language',
     owlSpecies: 'owl_species',
+    sleepAwarenessEnabled: 'sleep_awareness_enabled',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

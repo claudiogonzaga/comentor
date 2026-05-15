@@ -68,6 +68,7 @@ export interface UserConfig {
   voiceId: string | null;
   voiceLanguage: string | null;
   owlSpecies: OwlSpeciesId;
+  sleepAwarenessEnabled: boolean;
 }
 
 export interface InterviewSummary {

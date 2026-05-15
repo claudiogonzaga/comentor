@@ -25,6 +25,10 @@ Coach de vida com IA. Uma corujinha sábia que usa argumentação persuasiva, ci
   Configurações; vale para os lembretes de sono e os nudges diários
 - **Notificações acionáveis**: os lembretes de sono têm botões "Vou dormir" e
   "Adiar 15 min" direto na notificação — abrem o app e executam a ação
+- **Conscientização sobre o sono**: ao longo do dia o app envia pequenos nudges
+  com citações de especialistas (base de 94 cards em
+  `assets/data/sleep_awareness_cards.xlsx`) — 1 de manhã, 1 de tarde e 2 à
+  noite, em horários aleatórios que se intensificam perto da hora de dormir
 - **Voz opcional no chat**: por padrão a Corujinha só escreve; a leitura em voz
   alta é ligada/desligada pelo botão 🔊 dentro da conversa (ou em Configurações)
 - **Voz nativa**: STT em pt-BR — o usuário responde segurando o microfone

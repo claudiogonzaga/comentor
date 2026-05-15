@@ -106,7 +106,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         nav.navigate('Chat');
       } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
         nav.navigate('Breathing');
-      } else if (type.startsWith('nudge:')) {
+      } else if (type.startsWith('nudge:') || type === 'awareness') {
         nav.navigate('Home');
       }
     };

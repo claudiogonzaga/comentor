@@ -27,6 +27,7 @@ import {
   scheduleNightReminders,
 } from './notifications';
 import { scheduleAllNudges } from './nudges';
+import { scheduleSleepAwarenessNotifications } from './sleepAwareness';
 import { summaryToCoachContext } from './interview';
 import { pickFallback } from './fallbackMessages';
 import { recordCompletion } from './streaks';
@@ -409,6 +410,7 @@ export async function rescheduleAllNotifications(): Promise<void> {
     habitId: habit.id,
   });
   await scheduleAllNudges();
+  await scheduleSleepAwarenessNotifications();
 }
 
 export async function getDashboardData() {

@@ -4,6 +4,7 @@ import { getUserConfig, updateUserConfig } from '../services/database';
 import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice } from '../services/voice';
 import { scheduleAllNudges } from '../services/nudges';
+import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 
 interface AppState {
   ready: boolean;
@@ -34,6 +35,10 @@ export const useAppStore = create<AppState>((set) => ({
     // Android alarm queue stays consistent across reboots / OTA upgrades.
     scheduleAllNudges().catch((err) =>
       console.warn('scheduleAllNudges on init failed:', err),
+    );
+    // Re-arm the daytime sleep-awareness nudges (random times per day).
+    scheduleSleepAwarenessNotifications().catch((err) =>
+      console.warn('scheduleSleepAwarenessNotifications on init failed:', err),
     );
   },
   refreshConfig: async () => {
