@@ -32,6 +32,15 @@ export interface LocalModelInfo {
 
 export type OwlMood = 'calm' | 'worried' | 'serious' | 'sleeping' | 'celebrating';
 
+export type OwlSpeciesId =
+  | 'cabure'
+  | 'suindara'
+  | 'buraqueira'
+  | 'murucututu'
+  | 'mocho'
+  | 'listrada'
+  | 'default';
+
 export type IntensityLevel = 1 | 2 | 3 | 4 | 5;
 
 export type HabitType = 'sleep' | 'reading' | 'exercise' | 'custom';
@@ -58,6 +67,8 @@ export interface UserConfig {
   interviewCompletedAt: string | null;
   voiceId: string | null;
   voiceLanguage: string | null;
+  owlSpecies: OwlSpeciesId;
+  sleepAwarenessEnabled: boolean;
 }
 
 export interface InterviewSummary {

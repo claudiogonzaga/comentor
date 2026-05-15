@@ -1,9 +1,19 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import type { IntensityLevel } from '../types';
+import type { IntensityLevel, OwlSpeciesId } from '../types';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
+import { DEFAULT_OWL_SPECIES, getOwlSpecies } from '../constants/owlSpecies';
+import { getUserConfig } from './database';
 
-const CHANNEL_ID = 'comentor-sleep';
+// Android notification channels are immutable once created — changing a
+// channel's sound has no effect. Bump this when an owl .wav is replaced so a
+// fresh channel is created with the new audio.
+const CHANNEL_VERSION = 1;
+
+/** Category that gives sleep reminders their "Vou dormir" / "Adiar" buttons. */
+export const SLEEP_CATEGORY = 'comentor-sleep-actions';
+export const SLEEP_NOW_ACTION = 'sleep-now';
+export const SNOOZE_ACTION = 'snooze-15';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -24,17 +34,65 @@ export async function ensurePermissions(): Promise<boolean> {
   return req.granted;
 }
 
-export async function ensureChannel() {
-  if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-    name: 'Lembretes do CoMentor',
-    description: 'Lembretes de hábitos de sono',
+/**
+ * Registers the action buttons shown on sleep reminders. Tapping a button
+ * opens the app; RootNavigator routes the action by its identifier.
+ */
+export async function ensureNotificationCategories() {
+  await Notifications.setNotificationCategoryAsync(SLEEP_CATEGORY, [
+    {
+      identifier: SLEEP_NOW_ACTION,
+      buttonTitle: 'Vou dormir 🌙',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: SNOOZE_ACTION,
+      buttonTitle: 'Adiar 15 min',
+      options: { opensAppToForeground: true },
+    },
+  ]);
+}
+
+function channelIdFor(species: OwlSpeciesId): string {
+  return `comentor-owl-${species}-v${CHANNEL_VERSION}`;
+}
+
+async function resolveSpecies(species?: OwlSpeciesId): Promise<OwlSpeciesId> {
+  if (species) return species;
+  try {
+    const config = await getUserConfig();
+    return config.owlSpecies ?? DEFAULT_OWL_SPECIES;
+  } catch {
+    return DEFAULT_OWL_SPECIES;
+  }
+}
+
+/**
+ * Ensures the Android notification channel for the given (or active) owl
+ * species exists and returns its id. On iOS there are no channels, so it just
+ * returns the synthetic id (unused there).
+ */
+export async function ensureChannel(species?: OwlSpeciesId): Promise<string> {
+  const sp = await resolveSpecies(species);
+  const id = channelIdFor(sp);
+  if (Platform.OS !== 'android') return id;
+  const spec = getOwlSpecies(sp);
+  await Notifications.setNotificationChannelAsync(id, {
+    name: `CoMentor — ${spec.name}`,
+    description: 'Lembretes de sono e nudges, com som de coruja',
     importance: Notifications.AndroidImportance.HIGH,
-    sound: 'default',
+    sound: spec.soundFile ?? 'default',
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#F4C553',
     bypassDnd: false,
   });
+  return id;
+}
+
+/** The .wav filename for iOS notification sound, or 'default'. */
+async function soundFor(species?: OwlSpeciesId): Promise<string> {
+  const sp = await resolveSpecies(species);
+  return getOwlSpecies(sp).soundFile ?? 'default';
 }
 
 interface ScheduleParams {
@@ -43,6 +101,11 @@ interface ScheduleParams {
   maxReminders: number;
   habitId: number;
   logId?: number;
+  /**
+   * Accepted for backwards-compatibility with existing callers. The
+   * wind-down / preparation reminder is now a daily nudge (see
+   * services/nudges.ts), so this flag is no longer used here.
+   */
   prepRemindersEnabled?: boolean;
 }
 
@@ -65,16 +128,13 @@ export async function scheduleNightReminders({
   habitId,
   logId,
 }: ScheduleParams): Promise<string[]> {
-  await ensureChannel();
+  const channelId = await ensureChannel();
+  const sound = await soundFor();
+  await ensureNotificationCategories();
   await cancelSleepEscalationReminders();
 
   const bed = buildBedtimeDate(bedtime);
   const ids: string[] = [];
-
-  // Note: the prep / wind-down notification is now handled by the
-  // "breathing" entry in the nudges table (see services/nudges.ts).
-  // scheduleAllNudges() should be called alongside this function so the
-  // breathing nudge fires daily at its configured HH:MM.
 
   for (let i = 0; i < maxReminders; i++) {
     const fireAt = new Date(bed.getTime() + i * intervalMinutes * 60_000);
@@ -85,12 +145,13 @@ export async function scheduleNightReminders({
         title: cfg.notificationTitle,
         body: cfg.notificationBody,
         data: { type: 'sleep-reminder', level, habitId, logId, fireAt: fireAt.toISOString() },
-        sound: 'default',
+        sound,
+        categoryIdentifier: SLEEP_CATEGORY,
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: fireAt,
-        channelId: CHANNEL_ID,
+        channelId,
       },
     });
     ids.push(id);
@@ -119,6 +180,13 @@ export async function cancelSleepEscalationReminders() {
 }
 
 export async function snoozeFor(minutes: number, level: IntensityLevel, habitId: number) {
+  // Stop the current escalation chain so only the snoozed reminder remains —
+  // otherwise the older escalation notifications keep firing on top of it.
+  await cancelSleepEscalationReminders();
+  const channelId = await ensureChannel();
+  const sound = await soundFor();
+  await ensureNotificationCategories();
+
   const fireAt = new Date(Date.now() + minutes * 60_000);
   const cfg = INTENSITY_LEVELS[Math.min(5, level + 1) as IntensityLevel];
   await Notifications.scheduleNotificationAsync({
@@ -126,16 +194,41 @@ export async function snoozeFor(minutes: number, level: IntensityLevel, habitId:
       title: cfg.notificationTitle,
       body: cfg.notificationBody,
       data: { type: 'sleep-reminder', level: cfg.level, habitId, fireAt: fireAt.toISOString() },
-      sound: 'default',
+      sound,
+      categoryIdentifier: SLEEP_CATEGORY,
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
       date: fireAt,
-      channelId: CHANNEL_ID,
+      channelId,
     },
   });
 }
 
 export async function listScheduled() {
   return Notifications.getAllScheduledNotificationsAsync();
+}
+
+/**
+ * Fires an immediate notification so the user can hear what a given owl
+ * species sounds like before choosing it.
+ */
+export async function previewSpeciesSound(species: OwlSpeciesId): Promise<boolean> {
+  if (!(await ensurePermissions())) return false;
+  const channelId = await ensureChannel(species);
+  const spec = getOwlSpecies(species);
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: `${spec.emoji} ${spec.name}`,
+      body: spec.call,
+      sound: spec.soundFile ?? 'default',
+      data: { type: 'sound-preview' },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 1,
+      channelId,
+    },
+  });
+  return true;
 }

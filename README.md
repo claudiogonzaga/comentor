@@ -8,17 +8,30 @@ Coach de vida com IA. Uma corujinha sábia que usa argumentação persuasiva, ci
 
 - **Expo + React Native + TypeScript** (SDK 54)
 - **Gemini API** (`gemini-3.1-flash-lite` por padrão, com **thinking budget máximo (24576 tokens)** em toda chamada — qualquer geração 3.1, 2.5 ou 2.0 selecionável em Configurações)
-- **expo-speech** para TTS em pt-BR (auto-fala mensagens da Corujinha)
+- **expo-speech** para TTS em pt-BR (a leitura em voz alta é opcional — o chat
+  mostra só texto até o usuário ligar o som)
 - **expo-speech-recognition** para STT em pt-BR (push-to-talk: segura o mic e fala)
 - **SQLite** local para histórico, chat, streaks e prompt do sistema editável
 - **expo-secure-store** para a API key (criptografada via Keystore)
-- **expo-notifications** para os lembretes escalonados (5 níveis) + lembrete de preparação
+- **expo-notifications** para os lembretes escalonados (5 níveis) com **som de
+  coruja** (6 espécies escolhíveis) e botões de ação "Vou dormir" / "Adiar"
 - **GitHub Releases** como canal de update de APK (mudanças nativas) + **EAS Update / OTA** (mudanças só de JS)
 
 ## Recursos
 
 - **5 níveis de escalonamento** com técnicas distintas de persuasão (Cialdini, Walker, Huberman)
-- **Voz nativa**: a Corujinha fala em pt-BR automaticamente; usuário responde segurando o microfone
+- **Som de coruja nas notificações**: o usuário escolhe a espécie (Caburé,
+  Suindara, Coruja-buraqueira, Murucututu, Mocho-orelhudo, Coruja-listrada) em
+  Configurações; vale para os lembretes de sono e os nudges diários
+- **Notificações acionáveis**: os lembretes de sono têm botões "Vou dormir" e
+  "Adiar 15 min" direto na notificação — abrem o app e executam a ação
+- **Conscientização sobre o sono**: ao longo do dia o app envia pequenos nudges
+  com citações de especialistas (base de 94 cards em
+  `assets/data/sleep_awareness_cards.xlsx`) — 1 de manhã, 1 de tarde e 2 à
+  noite, em horários aleatórios que se intensificam perto da hora de dormir
+- **Voz opcional no chat**: por padrão a Corujinha só escreve; a leitura em voz
+  alta é ligada/desligada pelo botão 🔊 dentro da conversa (ou em Configurações)
+- **Voz nativa**: STT em pt-BR — o usuário responde segurando o microfone
 - **Argumento contra adiamento**: toda vez que o usuário aperta "+15min", a IA gera um contra-argumento e fala em voz alta antes de aceitar o snooze
 - **Lembrete de preparação** (default ON): X minutos antes da hora marcada, lembra de uma respiração 2-2-4 e abre uma tela com animação guiada
 - **Prompt editável**: usuário customiza personalidade/regras da IA em Configurações
