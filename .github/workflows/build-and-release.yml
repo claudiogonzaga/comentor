@@ -1,0 +1,67 @@
+name: Build APK e publicar release
+
+# Robô que assa o APK na EAS e publica a release no GitHub automaticamente.
+#
+# Pré-requisito (feito uma vez): criar o secret EXPO_TOKEN no repositório
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+#   Name: EXPO_TOKEN   Value: token gerado em expo.dev/settings/access-tokens
+#
+# Como disparar: aba "Actions" -> "Build APK e publicar release" ->
+#   "Run workflow" -> escolher a branch -> Run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Texto que aparece na release do GitHub'
+        required: false
+        default: 'Nova versão do CoMentor'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Configurar a EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Ler a versão do app.json
+        id: ver
+        run: echo "version=$(node -p "require('./app.json').expo.version")" >> "$GITHUB_OUTPUT"
+
+      - name: Buildar o APK na EAS (aguarda terminar)
+        run: eas build --platform android --profile preview --non-interactive --wait --json > build-output.json
+
+      - name: Descobrir o link do APK
+        id: apk
+        run: |
+          URL=$(node -p "const a=JSON.parse(require('fs').readFileSync('build-output.json','utf8'))[0].artifacts; a.applicationArchiveUrl || a.buildUrl")
+          echo "Link do APK: $URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Baixar o APK gerado
+        run: curl -fL -o "comentor-${{ steps.ver.outputs.version }}.apk" "${{ steps.apk.outputs.url }}"
+
+      - name: Publicar release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: CoMentor v${{ steps.ver.outputs.version }}
+          body: ${{ inputs.notes }}
+          files: comentor-${{ steps.ver.outputs.version }}.apk
