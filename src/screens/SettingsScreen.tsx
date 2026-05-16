@@ -87,6 +87,9 @@ export function SettingsScreen() {
   const [awarenessEnabled, setAwarenessEnabled] = useState(
     config?.sleepAwarenessEnabled ?? true,
   );
+  const [notifPerDay, setNotifPerDay] = useState(
+    config?.notificationsPerDay ?? 4,
+  );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
@@ -107,6 +110,7 @@ export function SettingsScreen() {
       setPrepEnabled(config.prepRemindersEnabled);
       setVoiceEnabled(config.voiceModeEnabled);
       setAwarenessEnabled(config.sleepAwarenessEnabled);
+      setNotifPerDay(config.notificationsPerDay ?? 4);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -243,6 +247,7 @@ export function SettingsScreen() {
         prepRemindersEnabled: prepEnabled,
         voiceModeEnabled: voiceEnabled,
         sleepAwarenessEnabled: awarenessEnabled,
+        notificationsPerDay: notifPerDay,
         aiBackend,
         localModelId: aiBackend === 'local' ? localModelId : config?.localModelId ?? null,
         allowMobileDataDownload: allowMobileData,
@@ -406,12 +411,11 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Lembretes de conscientização 🌙
+                Lembretes da Comentora 🌙
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 Pequenas notificações ao longo do dia com fatos sobre a
-                importância do sono — 1 de manhã, 1 de tarde e 2 à noite, em
-                horários variados, conforme a hora de dormir se aproxima.
+                importância do sono, em horários variados.
               </Text>
             </View>
             <Switch
@@ -421,6 +425,70 @@ export function SettingsScreen() {
               thumbColor={awarenessEnabled ? colors.text.onGold : colors.text.tertiary}
             />
           </View>
+
+          {awarenessEnabled && (
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                  Quantos por dia
+                </Text>
+                <Text style={[typography.small, { color: colors.text.secondary }]}>
+                  Número de lembretes por dia. A frequência dobra depois do
+                  pôr do sol (~18h), conforme a hora de dormir se aproxima.
+                </Text>
+              </View>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: spacing.sm,
+                }}
+              >
+                <Pressable
+                  onPress={() => setNotifPerDay((n) => Math.max(1, n - 1))}
+                  hitSlop={8}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: colors.accent.gold,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>
+                    −
+                  </Text>
+                </Pressable>
+                <Text
+                  style={[
+                    typography.subtitle,
+                    { color: colors.text.primary, minWidth: 26, textAlign: 'center' },
+                  ]}
+                >
+                  {notifPerDay}
+                </Text>
+                <Pressable
+                  onPress={() => setNotifPerDay((n) => Math.min(12, n + 1))}
+                  hitSlop={8}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: colors.accent.gold,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>
+                    +
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             O lembrete de respiração antes de dormir agora vive em &quot;Nudges&quot; abaixo

@@ -1,15 +1,13 @@
-// Notificações de conscientização sobre o sono.
+// Notificações de conscientização sobre o sono — os "lembretes da Comentora".
 //
-// Ao longo do dia o app dispara pequenos "nudges" informativos — citações da
-// base SLEEP_AWARENESS_CARDS — lembrando o usuário da importância do sono.
-// São 4 por dia em horários aleatórios: 1 de manhã, 1 de tarde e 2 à noite
-// (estas se aproximam da hora de dormir). O card de cada notificação também
-// é sorteado.
+// Ao longo do dia o app dispara pequenos lembretes — citações da base
+// SLEEP_AWARENESS_CARDS. Quantos por dia é configurável
+// (config.notificationsPerDay); a densidade DOBRA depois do pôr do sol
+// (~18h), que é quando preparar o sono mais importa.
 //
 // Como notificações DATE disparam uma única vez, reagenda-se uma janela de
-// alguns dias a cada abertura do app. Para que reabrir o app não gere
-// notificações duplicadas, o sorteio é determinístico por dia (semente =
-// a data), então cancelar e reagendar o mesmo dia produz os mesmos horários.
+// alguns dias a cada abertura do app. O sorteio é determinístico por dia
+// (semente = a data), então reabrir o app não gera notificações duplicadas.
 
 import * as Notifications from 'expo-notifications';
 import { getUserConfig } from './database';
@@ -19,6 +17,13 @@ import { SLEEP_AWARENESS_CARDS } from '../constants/sleepAwarenessCards';
 
 const AWARENESS_TYPE = 'awareness';
 const DAYS_AHEAD = 3;
+
+/** Início do dia ativo e pôr do sol aproximado (o app não usa geolocalização). */
+const DAY_START = 8 * 60;
+const SUNSET = 18 * 60;
+
+const MIN_PER_DAY = 1;
+const MAX_PER_DAY = 12;
 
 const TITLES = [
   '🦉 Sono é saúde',
@@ -62,6 +67,49 @@ function dayMidnight(offsetDays: number): Date {
   return d;
 }
 
+/** Sorteia `count` horários espalhados em [start,end], um por sub-intervalo. */
+function spread(
+  rng: () => number,
+  start: number,
+  end: number,
+  count: number,
+): number[] {
+  if (count <= 0 || end <= start) return [];
+  const step = (end - start) / count;
+  const out: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const a = start + i * step;
+    out.push(randInt(rng, Math.round(a), Math.round(a + step)));
+  }
+  return out;
+}
+
+/**
+ * Distribui `total` lembretes de um dia entre o período diurno e o noturno,
+ * com a noite (após o pôr do sol) recebendo o DOBRO da densidade por hora.
+ */
+function daySlots(rng: () => number, total: number, bedtime: number): number[] {
+  const windowEnd = bedtime - 20; // último lembrete 20 min antes de dormir
+  if (windowEnd > DAY_START) {
+    const dayEnd = Math.min(SUNSET, windowEnd);
+    const eveStart = Math.max(SUNSET, DAY_START);
+    const dayHours = Math.max(0, dayEnd - DAY_START) / 60;
+    const eveHours = Math.max(0, windowEnd - eveStart) / 60;
+    const weighted = dayHours + 2 * eveHours; // noite vale o dobro
+    if (weighted > 0) {
+      let nEve = Math.round((total * 2 * eveHours) / weighted);
+      nEve = Math.min(total, Math.max(0, nEve));
+      return [
+        ...spread(rng, DAY_START, dayEnd, total - nEve),
+        ...spread(rng, eveStart, windowEnd, nEve),
+      ];
+    }
+  }
+  // Janela inválida (hora de dormir muito cedo): concentra perto da noite.
+  const start = Math.max(DAY_START, windowEnd - 180);
+  return spread(rng, start, Math.max(start + 30, windowEnd), total);
+}
+
 export async function cancelSleepAwarenessNotifications(): Promise<void> {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
@@ -73,8 +121,8 @@ export async function cancelSleepAwarenessNotifications(): Promise<void> {
 }
 
 /**
- * Cancela e reagenda as notificações de conscientização para os próximos
- * dias. Se a opção estiver desligada, apenas cancela. Idempotente.
+ * Cancela e reagenda os lembretes da Comentora para os próximos dias.
+ * Se a opção estiver desligada, apenas cancela. Idempotente.
  */
 export async function scheduleSleepAwarenessNotifications(): Promise<void> {
   await cancelSleepAwarenessNotifications();
@@ -87,6 +135,11 @@ export async function scheduleSleepAwarenessNotifications(): Promise<void> {
   }
   if (!config.sleepAwarenessEnabled) return;
   if (SLEEP_AWARENESS_CARDS.length === 0) return;
+
+  const perDay = Math.min(
+    MAX_PER_DAY,
+    Math.max(MIN_PER_DAY, Math.round(config.notificationsPerDay ?? 4)),
+  );
 
   const channelId = await ensureChannel();
   const sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
@@ -101,26 +154,14 @@ export async function scheduleSleepAwarenessNotifications(): Promise<void> {
       midnight.getDate();
     const rng = makeRng(seed);
 
-    // Manhã e tarde.
-    const morning = randInt(rng, 8 * 60, 11 * 60);
-    const afternoon = randInt(rng, 13 * 60, 17 * 60);
-
-    // Noite: dois lembretes que se aproximam da hora de dormir.
-    const evEnd = bt - 20;
-    let evStart = Math.max(18 * 60, bt - 240);
-    if (evStart > evEnd - 60) evStart = Math.max(17 * 60, evEnd - 120);
-    const evMid = Math.floor((evStart + evEnd) / 2);
-    const evening1 = randInt(rng, evStart, evMid);
-    const evening2 = randInt(rng, evMid, evEnd);
-
-    const slots = [morning, afternoon, evening1, evening2];
+    const slots = daySlots(rng, perDay, bt);
     for (const slotMin of slots) {
       const fireAt = midnight.getTime() + slotMin * 60_000;
       // Card e título sorteados sempre (mantém o RNG sincronizado entre
       // reagendamentos, mesmo quando o horário já passou).
       const card = pick(rng, SLEEP_AWARENESS_CARDS);
       const title = pick(rng, TITLES);
-      if (fireAt <= now + 60_000) continue; // horário já passou hoje
+      if (fireAt <= now + 60_000) continue; // horário já passou
 
       try {
         await Notifications.scheduleNotificationAsync({

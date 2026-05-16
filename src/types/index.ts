@@ -34,11 +34,8 @@ export type OwlMood = 'calm' | 'worried' | 'serious' | 'sleeping' | 'celebrating
 
 export type OwlSpeciesId =
   | 'cabure'
-  | 'suindara'
   | 'buraqueira'
   | 'murucututu'
-  | 'mocho'
-  | 'listrada'
   | 'default';
 
 export type IntensityLevel = 1 | 2 | 3 | 4 | 5;
@@ -69,6 +66,8 @@ export interface UserConfig {
   voiceLanguage: string | null;
   owlSpecies: OwlSpeciesId;
   sleepAwarenessEnabled: boolean;
+  /** Quantos lembretes da Comentora por dia (a densidade dobra após o pôr do sol). */
+  notificationsPerDay: number;
 }
 
 export interface InterviewSummary {

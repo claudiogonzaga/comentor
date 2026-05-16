@@ -8,7 +8,7 @@ import { getUserConfig } from './database';
 // Android notification channels are immutable once created — changing a
 // channel's sound has no effect. Bump this when an owl .wav is replaced so a
 // fresh channel is created with the new audio.
-const CHANNEL_VERSION = 2;
+const CHANNEL_VERSION = 3;
 
 /** Category that gives sleep reminders their "Vou dormir" / "Adiar" buttons. */
 export const SLEEP_CATEGORY = 'comentor-sleep-actions';
