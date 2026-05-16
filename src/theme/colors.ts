@@ -1,25 +1,28 @@
+// Paleta de vaso grego — figura negra sobre terracota. O fundo (claro de dia,
+// escuro à noite) é aplicado em VaseBackground; aqui ficam os tons fixos.
+
 export const colors = {
   bg: {
-    primary: '#1B1F3B',
-    gradientEnd: '#2D2B55',
-    surface: 'rgba(255,255,255,0.06)',
-    surfaceStrong: 'rgba(255,255,255,0.10)',
-    overlay: 'rgba(0,0,0,0.55)',
+    primary: '#C8703F',
+    gradientEnd: '#B05A30',
+    surface: 'rgba(42,26,16,0.07)',
+    surfaceStrong: 'rgba(42,26,16,0.13)',
+    overlay: 'rgba(28,15,8,0.62)',
   },
   accent: {
-    gold: '#F4C553',
-    goldDim: '#C99A3A',
-    lavender: '#A78BFA',
-    success: '#7DD3A8',
-    warning: '#F59E5C',
-    danger: '#E47878',
+    gold: '#2A1A10', // ação primária = preto (figura negra)
+    goldDim: '#6B4528',
+    lavender: '#7C4A2C',
+    success: '#5E7C46', // verde-oliva (louro)
+    warning: '#B5611E',
+    danger: '#9E3327', // vermelho de cerâmica
   },
   text: {
-    primary: 'rgba(255,255,255,0.92)',
-    secondary: 'rgba(255,255,255,0.55)',
-    tertiary: 'rgba(255,255,255,0.35)',
-    onGold: '#1B1F3B',
+    primary: '#2A1A10',
+    secondary: 'rgba(42,26,16,0.62)',
+    tertiary: 'rgba(42,26,16,0.40)',
+    onGold: '#F2DCC0', // texto creme sobre o botão preto
   },
-  border: 'rgba(255,255,255,0.08)',
-  star: 'rgba(255,255,255,0.6)',
+  border: 'rgba(42,26,16,0.20)',
+  star: 'rgba(42,26,16,0.50)',
 } as const;

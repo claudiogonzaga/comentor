@@ -1,26 +1,24 @@
 import { ReactNode } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StarryBackground } from './StarryBackground';
+import { VaseBackground } from './VaseBackground';
 
 interface Props {
   children: ReactNode;
-  showMoon?: boolean;
-  starDensity?: number;
   contentStyle?: ViewStyle;
   edges?: ('top' | 'bottom' | 'left' | 'right')[];
+  meander?: boolean;
 }
 
 export function ScreenContainer({
   children,
-  showMoon = true,
-  starDensity = 60,
   contentStyle,
   edges = ['top', 'bottom'],
+  meander = true,
 }: Props) {
   return (
     <View style={styles.root}>
-      <StarryBackground showMoon={showMoon} density={starDensity} />
+      <VaseBackground meander={meander} />
       <SafeAreaView style={styles.safe} edges={edges}>
         <View style={[styles.content, contentStyle]}>{children}</View>
       </SafeAreaView>

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Comentora",
     "slug": "comentor",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,7 +13,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1B1F3B"
+      "backgroundColor": "#C2683B"
     },
     "ios": {
       "supportsTablet": true,
@@ -27,7 +27,7 @@
       "package": "com.claudiogonzaga.comentor",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1B1F3B"
+        "backgroundColor": "#C2683B"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -54,7 +54,7 @@
       [
         "expo-notifications",
         {
-          "color": "#F4C553",
+          "color": "#C2683B",
           "androidMode": "default",
           "androidCollapsedTitle": "Comentora",
           "sounds": [
@@ -70,7 +70,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#1B1F3B",
+          "backgroundColor": "#C2683B",
           "image": "./assets/splash-icon.png",
           "imageWidth": 220
         }
