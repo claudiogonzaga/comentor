@@ -25,6 +25,7 @@ import {
   sendUserMessage,
   type ConvinceFocus,
 } from '../services/coach';
+import { playOwlCall } from '../services/owlSound';
 import { getRecentChat } from '../services/database';
 import { cancelAllReminders } from '../services/notifications';
 import { speak, startListening, stopListening, stopSpeaking } from '../services/voice';
@@ -107,6 +108,8 @@ export function ChatScreen() {
         setHabitId(resultHabitId);
         setLevel(resultLevel);
         setOffline(resultOffline);
+        // A coruja "fala" ao abrir o chat — som tocado dentro do app.
+        playOwlCall(config?.owlSpecies);
         const recent = await getRecentChat(resultHabitId, 20);
         if (mounted) setMessages(recent);
       } finally {

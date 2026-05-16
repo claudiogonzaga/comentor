@@ -44,7 +44,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Ler a versão e checar se a release já existe
         id: ver
@@ -63,7 +62,7 @@ jobs:
 
       - name: Instalar dependências
         if: steps.ver.outputs.build == 'true'
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Configurar a EAS CLI
         if: steps.ver.outputs.build == 'true'
