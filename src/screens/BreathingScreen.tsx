@@ -107,7 +107,7 @@ export function BreathingScreen() {
   const cue = CYCLE[cueIdx];
 
   return (
-    <ScreenContainer showMoon={false}>
+    <ScreenContainer>
       <View style={styles.header}>
         <Pressable
           onPress={() => {
