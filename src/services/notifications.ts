@@ -208,27 +208,3 @@ export async function snoozeFor(minutes: number, level: IntensityLevel, habitId:
 export async function listScheduled() {
   return Notifications.getAllScheduledNotificationsAsync();
 }
-
-/**
- * Fires an immediate notification so the user can hear what a given owl
- * species sounds like before choosing it.
- */
-export async function previewSpeciesSound(species: OwlSpeciesId): Promise<boolean> {
-  if (!(await ensurePermissions())) return false;
-  const channelId = await ensureChannel(species);
-  const spec = getOwlSpecies(species);
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: `${spec.emoji} ${spec.name}`,
-      body: spec.call,
-      sound: spec.soundFile ?? 'default',
-      data: { type: 'sound-preview' },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds: 1,
-      channelId,
-    },
-  });
-  return true;
-}

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from './Card';
 import { colors, radius, spacing, typography } from '../theme';
 import { OWL_SPECIES } from '../constants/owlSpecies';
-import { previewSpeciesSound } from '../services/notifications';
+import { playOwlCall } from '../services/owlSound';
 import type { OwlSpeciesId } from '../types';
 
 interface Props {
@@ -16,19 +16,10 @@ interface Props {
 export function OwlSoundPicker({ value, onChange }: Props) {
   const [previewing, setPreviewing] = useState<OwlSpeciesId | null>(null);
 
-  const handlePreview = async (id: OwlSpeciesId) => {
+  const handlePreview = (id: OwlSpeciesId) => {
     setPreviewing(id);
-    try {
-      const ok = await previewSpeciesSound(id);
-      if (!ok) {
-        Alert.alert(
-          'Permissão necessária',
-          'Ative as notificações da Comentora para ouvir o som de teste.',
-        );
-      }
-    } finally {
-      setTimeout(() => setPreviewing((c) => (c === id ? null : c)), 2500);
-    }
+    playOwlCall(id);
+    setTimeout(() => setPreviewing((c) => (c === id ? null : c)), 2500);
   };
 
   return (
@@ -36,7 +27,7 @@ export function OwlSoundPicker({ value, onChange }: Props) {
       <Text style={styles.section}>Som das notificações 🦉</Text>
       <Text style={styles.subtitle}>
         Escolha qual espécie de coruja faz o som dos lembretes. Toque em
-        &quot;ouvir&quot; para testar — a notificação aparece em 1 segundo.
+        &quot;ouvir&quot; para escutar o canto na hora.
       </Text>
 
       {OWL_SPECIES.map((s) => {

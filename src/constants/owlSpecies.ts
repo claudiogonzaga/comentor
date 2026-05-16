@@ -13,6 +13,11 @@ export interface OwlSpecies {
    * `null` = usa o som padrão do sistema (sem coruja).
    */
   soundFile: string | null;
+  /**
+   * Asset empacotado para tocar o canto dentro do app (expo-audio).
+   * `null` = sem áudio próprio (usa o som padrão do sistema).
+   */
+  soundAsset: number | null;
   emoji: string;
 }
 
@@ -29,6 +34,7 @@ export const OWL_SPECIES: OwlSpecies[] = [
     scientific: 'Glaucidium brasilianum',
     call: 'Série de assobios curtos e ritmados',
     soundFile: 'owl_cabure.wav',
+    soundAsset: require('../../assets/sounds/owl_cabure.wav'),
     emoji: '🦉',
   },
   {
@@ -37,6 +43,7 @@ export const OWL_SPECIES: OwlSpecies[] = [
     scientific: 'Athene cunicularia',
     call: 'Dois toques suaves "cu-cuuu"',
     soundFile: 'owl_buraqueira.wav',
+    soundAsset: require('../../assets/sounds/owl_buraqueira.wav'),
     emoji: '🦉',
   },
   {
@@ -45,6 +52,7 @@ export const OWL_SPECIES: OwlSpecies[] = [
     scientific: 'Pulsatrix perspicillata',
     call: 'Batidas graves que aceleram',
     soundFile: 'owl_murucututu.wav',
+    soundAsset: require('../../assets/sounds/owl_murucututu.wav'),
     emoji: '🦉',
   },
   {
@@ -53,6 +61,7 @@ export const OWL_SPECIES: OwlSpecies[] = [
     scientific: '',
     call: 'Toque de notificação do próprio celular — escolha esta opção se o som da coruja não tocar',
     soundFile: null,
+    soundAsset: null,
     emoji: '🔔',
   },
 ];
