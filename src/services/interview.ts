@@ -20,7 +20,7 @@ import { continueConversation as continueConversationRemote } from './gemini';
 import { generateLocal, type LocalChatMessage } from './localModel';
 import { getApiKey } from './secureStore';
 
-const INTERVIEW_SYSTEM_PROMPT = `Você é o CoMentor conduzindo uma entrevista breve, calorosa e investigativa para entender por que esta pessoa específica tem dificuldade em deitar no horário que ela mesma escolheu.
+const INTERVIEW_SYSTEM_PROMPT = `Você é a Comentora conduzindo uma entrevista breve, calorosa e investigativa para entender por que esta pessoa específica tem dificuldade em deitar no horário que ela mesma escolheu.
 
 Regras:
 - Faça UMA pergunta por mensagem. Curta. Conversacional.
@@ -154,7 +154,7 @@ export async function summarizeInterview(
   history: InterviewExchange[],
 ): Promise<InterviewSummary> {
   const transcript = history
-    .map((m) => `${m.role === 'corujinha' ? 'CoMentor' : 'Pessoa'}: ${m.content}`)
+    .map((m) => `${m.role === 'corujinha' ? 'Comentora' : 'Pessoa'}: ${m.content}`)
     .join('\n');
 
   const userPrompt = `${SUMMARY_PROMPT}\n\nCONVERSA:\n${transcript}`;

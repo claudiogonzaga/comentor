@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "CoMentor",
+    "name": "Comentora",
     "slug": "comentor",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.claudiogonzaga.comentor",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "O CoMentor precisa do microfone para te ouvir quando você fala com ele.",
+        "NSMicrophoneUsageDescription": "A Comentora precisa do microfone para te ouvir quando você fala com ela.",
         "NSSpeechRecognitionUsageDescription": "Usado para transcrever sua fala em texto e responder na conversa."
       }
     },
@@ -56,7 +56,7 @@
         {
           "color": "#F4C553",
           "androidMode": "default",
-          "androidCollapsedTitle": "CoMentor",
+          "androidCollapsedTitle": "Comentora",
           "sounds": [
             "./assets/sounds/owl_suindara.wav",
             "./assets/sounds/owl_cabure.wav",
@@ -79,7 +79,7 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "O CoMentor precisa do microfone para te ouvir.",
+          "microphonePermission": "A Comentora precisa do microfone para te ouvir.",
           "speechRecognitionPermission": "Usado para transcrever sua fala em texto.",
           "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
         }

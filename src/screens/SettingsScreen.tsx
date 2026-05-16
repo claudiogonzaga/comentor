@@ -449,7 +449,7 @@ export function SettingsScreen() {
         <NudgesCard />
 
         <Card style={styles.card}>
-          <Text style={styles.section}>Tom do CoMentor</Text>
+          <Text style={styles.section}>Tom da Comentora</Text>
           <View style={styles.row}>
             {TONES.map((t) => (
               <Pressable
@@ -470,7 +470,7 @@ export function SettingsScreen() {
           <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
             {config?.interviewCompletedAt
               ? 'Você já fez a entrevista inicial. Pode refazer ou aprofundar a qualquer momento.'
-              : 'Faça uma entrevista guiada para o CoMentor entender melhor suas dificuldades.'}
+              : 'Faça uma entrevista guiada para a Comentora entender melhor suas dificuldades.'}
           </Text>
           <Pressable onPress={handleRedoInterview} style={styles.outlineBtn}>
             <Text style={styles.outlineBtnText}>
@@ -677,7 +677,7 @@ export function SettingsScreen() {
 
         <Card style={styles.card}>
           <View style={styles.promptHeader}>
-            <Text style={styles.section}>Prompt do CoMentor</Text>
+            <Text style={styles.section}>Prompt da Comentora</Text>
             <Pressable
               onPress={() => setPromptExpanded((v) => !v)}
               style={styles.promptToggleBtn}
@@ -690,7 +690,7 @@ export function SettingsScreen() {
           {!promptExpanded ? (
             <Text style={[typography.small, { color: colors.text.secondary }]}>
               {systemPrompt.length} caracteres. As regras e a personalidade do
-              CoMentor estão escondidas pra não tomar espaço. Toque em
+              Comentora estão escondidas pra não tomar espaço. Toque em
               &quot;Editar prompt&quot; pra ler ou alterar.
             </Text>
           ) : (
@@ -728,7 +728,7 @@ export function SettingsScreen() {
                 multiline
                 textAlignVertical="top"
                 style={[styles.input, styles.promptInput]}
-                placeholder="Prompt do CoMentor…"
+                placeholder="Prompt da Comentora…"
                 placeholderTextColor={colors.text.tertiary}
               />
               <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>

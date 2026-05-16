@@ -91,7 +91,7 @@ export function VoicePicker({ value, onChange }: Props) {
   return (
     <Card style={styles.card}>
       <View style={styles.header}>
-        <Text style={styles.title}>Voz do CoMentor 🦉</Text>
+        <Text style={styles.title}>Voz da Comentora 🦉</Text>
         <Pressable onPress={reload} style={styles.reloadBtn} hitSlop={8}>
           <Text style={styles.reloadIcon}>↻</Text>
         </Pressable>
@@ -109,7 +109,7 @@ export function VoicePicker({ value, onChange }: Props) {
             Nenhuma voz em português instalada
           </Text>
           <Text style={styles.warningBody}>
-            Seu celular não tem voz em português. Sem isso, o CoMentor vai usar
+            Seu celular não tem voz em português. Sem isso, a Comentora vai usar
             a voz padrão (provavelmente em inglês).
           </Text>
           <Pressable style={styles.installBtn} onPress={handleOpenSettings}>
@@ -124,7 +124,7 @@ export function VoicePicker({ value, onChange }: Props) {
             Você só tem voz de Portugal (pt-PT)
           </Text>
           <Text style={styles.warningBody}>
-            Pra ouvir o CoMentor em português brasileiro, instale as vozes
+            Pra ouvir a Comentora em português brasileiro, instale as vozes
             pt-BR do Google: <Text style={styles.warningBold}>
             Acessibilidade → Saída de texto para voz → motor do Google →
             Instalar dados de voz → Português (Brasil) → marcar todas

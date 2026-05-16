@@ -9,8 +9,8 @@ export function SplashScreen() {
     <ScreenContainer>
       <View style={styles.wrap}>
         <Owl mood="calm" size={180} />
-        <Text style={[typography.hero, styles.name]}>CoMentor</Text>
-        <Text style={[typography.body, styles.sub]}>sua corujinha de sabedoria</Text>
+        <Text style={[typography.hero, styles.name]}>Comentora</Text>
+        <Text style={[typography.body, styles.sub]}>sua coruja de sabedoria</Text>
         <ActivityIndicator color={colors.accent.gold} style={{ marginTop: spacing.xl }} />
       </View>
     </ScreenContainer>

@@ -220,7 +220,7 @@ export function InterviewScreen() {
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                O CoMentor está pensando…
+                A Comentora está pensando…
               </Text>
             </View>
           ) : (
