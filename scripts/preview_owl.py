@@ -1,186 +1,132 @@
 #!/usr/bin/env python3
-"""Previa da coruja-rede da Comentora (mascote) — conferencia visual.
+"""Previa do mascote: coruja de Atena de PERFIL, estilo vaso grego (figura
+negra), emoldurada por ramos de louro.
 
-NAO faz parte do app. Replica a geometria de buildGraph() de
-src/components/Owl.tsx. Coruja sem tufos de orelha (estilo coruja de Atena),
-com disco facial em coracao, sobrancelha e bico marcados.
+NAO faz parte do app — so conferencia visual. Gera /tmp/owl_preview.png.
 """
 
 import math
-import random
 
 from PIL import Image, ImageDraw
 
 W = 760
-S = W / 200.0
-
-GOLD = (244, 197, 83)
-TINT = (142, 138, 200)
-BG = (24, 27, 52)
-
-# Silhueta: cabeca larga, leve estreitamento no "pescoco", corpo afunilando.
-OUTLINE = [
-    (100, 28), (126, 32), (149, 47), (161, 75), (151, 101),
-    (145, 110), (154, 135), (148, 163), (124, 183), (100, 189),
-    (76, 183), (52, 163), (46, 135), (55, 110), (49, 101),
-    (39, 75), (51, 47), (74, 32),
-]
-# Disco facial em formato de coracao (anel marcante = traco-chave de coruja).
-HEART = [
-    (100, 60), (86, 50), (68, 48), (54, 60), (47, 82), (53, 106),
-    (70, 128), (88, 140), (100, 145), (112, 140), (130, 128),
-    (147, 106), (153, 82), (146, 60), (132, 48), (114, 50),
-]
-EYE_L = (77, 88)
-EYE_R = (123, 88)
-EYE_OUT = 19
+BG = (201, 109, 63)       # terracota
+INK = (26, 18, 13)        # figura negra
+CLAY = (224, 146, 96)     # incisao / detalhe terracota claro
 
 
-def sample_closed(pts, n, rng, jit):
-    segs, total = [], 0.0
-    for i in range(len(pts)):
-        a, b = pts[i], pts[(i + 1) % len(pts)]
-        d = math.hypot(b[0] - a[0], b[1] - a[1])
-        segs.append((a, b, d))
-        total += d
-    out = []
-    for k in range(n):
-        target = (k / n) * total
-        acc = 0.0
-        for a, b, d in segs:
-            if acc + d >= target:
-                t = (target - acc) / d
-                out.append((a[0] + (b[0] - a[0]) * t + (rng.random() * 2 - 1) * jit,
-                            a[1] + (b[1] - a[1]) * t + (rng.random() * 2 - 1) * jit))
-                break
-            acc += d
-    return out
+def T(x, y, ox, oy, s):
+    return (ox + x * s, oy + y * s)
 
 
-def in_poly(x, y, poly):
-    inside, j = False, len(poly) - 1
-    for i in range(len(poly)):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        if ((yi > y) != (yj > y)) and \
-                (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
-            inside = not inside
-        j = i
-    return inside
+def leaf(d, x, y, ang, ln, wd, fill, vein):
+    """Folha de louro pontuda."""
+    dx, dy = math.cos(ang), math.sin(ang)
+    px, py = -dy, dx
+    tip = (x + dx * ln, y + dy * ln)
+    base = (x, y)
+    s1 = (x + dx * ln * 0.45 + px * wd, y + dy * ln * 0.45 + py * wd)
+    s2 = (x + dx * ln * 0.45 - px * wd, y + dy * ln * 0.45 - py * wd)
+    d.polygon([base, s1, tip, s2], fill=fill)
+    d.line([base, tip], fill=vein, width=2)
 
 
-def build():
-    rng = random.Random(13)
-    nodes, edges = [], []
+def laurel(d, ox, oy, s, mirror):
+    """Ramo de louro curvando de baixo para cima."""
+    sign = -1 if mirror else 1
+    pts = []
+    for t in range(13):
+        f = t / 12
+        # curva subindo e fechando para dentro no topo
+        x = 120 + sign * (96 - 70 * f - 26 * math.sin(f * math.pi))
+        y = 250 - 232 * f
+        pts.append((x, y))
+    sm = [T(x, y, ox, oy, s) for x, y in pts]
+    d.line(sm, fill=INK, width=max(2, int(2.4 * s)), joint="curve")
+    for i in range(1, len(pts) - 1):
+        x, y = pts[i]
+        nx, ny = pts[i + 1]
+        ang = math.atan2(ny - y, nx - x)
+        for side in (1, -1):
+            leaf(d, *T(x, y, ox, oy, s), ang + side * 1.05,
+                 26 * s, 7.5 * s, INK, CLAY)
 
-    def push(x, y, r, kind):
-        nodes.append((x, y, r, 0.6 + rng.random() * 0.4, kind))
-        return len(nodes) - 1
 
-    def loop(idx, struct=True):
-        for i in range(len(idx)):
-            edges.append((idx[i], idx[(i + 1) % len(idx)], struct))
+def owl(d, ox, oy, s):
+    """Coruja de perfil, virada para a direita, figura negra."""
+    def t(x, y):
+        return T(x, y, ox, oy, s)
 
-    def link(a, b, struct=True):
-        edges.append((a, b, struct))
+    def disc(cx, cy, rx, ry, fill):
+        d.ellipse([*t(cx - rx, cy - ry), *t(cx + rx, cy + ry)], fill=fill)
 
-    # contorno do corpo
-    body = [push(x, y, 1.7 + rng.random() * 1.1, "body")
-            for x, y in sample_closed(OUTLINE, 30, rng, 1.9)]
-    loop(body)
+    def poly(pts, fill):
+        d.polygon([t(x, y) for x, y in pts], fill=fill)
 
-    # disco facial (coracao)
-    disc = [push(x, y, 1.9 + rng.random() * 0.9, "disc")
-            for x, y in sample_closed(HEART, 24, rng, 1.6)]
-    loop(disc)
+    def line(pts, fill, w):
+        d.line([t(x, y) for x, y in pts], fill=fill, width=max(2, int(w * s)),
+               joint="curve")
 
-    # sobrancelha: V que desce ao centro (cara classica de coruja)
-    brow_l = [push(64, 74, 1.6, "brow"), push(82, 66, 1.6, "brow"),
-              push(99, 62, 1.8, "brow")]
-    brow_r = [push(136, 74, 1.6, "brow"), push(118, 66, 1.6, "brow"),
-              brow_l[2]]
-    for b in (brow_l, brow_r):
-        for i in range(len(b) - 1):
-            link(b[i], b[i + 1])
+    # ---- silhueta preta ----
+    # cauda (atras/baixo, lado esquerdo)
+    poly([(74, 196), (54, 250), (96, 232), (102, 206)], INK)
+    # pernas
+    line([(108, 214), (106, 250)], INK, 4)
+    line([(132, 216), (134, 250)], INK, 4)
+    for fx in (106, 134):
+        for dxt in (-9, 0, 9):
+            line([(fx, 250), (fx + dxt, 262)], INK, 3)
+    # corpo
+    disc(116, 158, 52, 66, INK)
+    # cabeca (deslocada para a frente / direita)
+    disc(132, 80, 45, 43, INK)
+    # bico ganchudo apontando para a direita
+    poly([(170, 74), (196, 90), (168, 100)], INK)
 
-    # olhos: anel + pupila
-    pupils = []
-    for ex, ey in (EYE_L, EYE_R):
-        ring = []
-        for i in range(12):
-            a = (i / 12) * math.tau
-            ring.append(push(ex + math.cos(a) * EYE_OUT,
-                             ey + math.sin(a) * EYE_OUT, 1.6, "eye"))
-        loop(ring)
-        p = push(ex, ey, 3.8, "pupil")
-        pupils.append(p)
-        for i in range(0, 12, 2):
-            link(p, ring[i])
-
-    # bico: triangulo descendo do centro da sobrancelha
-    beak = [push(100, 100, 1.7, "beak"), push(92, 122, 1.6, "beak"),
-            push(100, 134, 2.0, "beak"), push(108, 122, 1.6, "beak")]
-    loop(beak)
-    link(brow_l[2], beak[0])
-
-    # poucos nos internos (preenchimento leve do corpo, fora do disco)
-    inner = []
-    tries = 0
-    while len(inner) < 7 and tries < 700:
-        tries += 1
-        x = 100 + (rng.random() * 2 - 1) * 48
-        y = 132 + (rng.random() * 2 - 1) * 44
-        if not in_poly(x, y, OUTLINE):
-            continue
-        if in_poly(x, y, HEART):
-            continue
-        inner.append(push(x, y, 1.2 + rng.random() * 1.1, "inner"))
-
-    # arestas de proximidade (teia que liga tudo)
-    pool = [i for i, n in enumerate(nodes)
-            if n[4] in ("body", "inner", "disc")]
-    seen = set()
-    for i in pool:
-        n = nodes[i]
-        near = sorted(((j, math.hypot(nodes[j][0] - n[0], nodes[j][1] - n[1]))
-                       for j in pool if j != i), key=lambda t: t[1])
-        a = 0
-        for j, dd in near:
-            if a >= 2 or dd > 32:
-                break
-            k = (min(i, j), max(i, j))
-            if k not in seen:
-                seen.add(k)
-                link(i, j, False)
-            a += 1
-
-    return nodes, edges
+    # ---- detalhes em terracota (incisao) ----
+    # olho grande, voltado para a frente-direita
+    ex, ey = 150, 74
+    d.ellipse([*t(ex - 14, ey - 14), *t(ex + 14, ey + 14)], fill=CLAY)
+    d.ellipse([*t(ex - 6, ey - 6), *t(ex + 6, ey + 6)], fill=INK)
+    d.ellipse([*t(ex - 11, ey - 4), *t(ex - 5, ey + 2)], fill=CLAY)
+    # sobrancelha
+    line([(120, 56), (158, 52)], CLAY, 3)
+    # contorno da asa dobrada (separa dorso do peito)
+    line([(96, 108), (88, 160), (104, 204)], CLAY, 2.5)
+    # penas da asa — fileiras de escamas
+    for row in range(4):
+        yy = 120 + row * 24
+        for k in range(3):
+            xx = 92 + k * 22
+            d.arc([*t(xx - 11, yy - 9), *t(xx + 11, yy + 11)],
+                  200, 340, fill=CLAY, width=max(2, int(1.8 * s)))
+    # penas primarias na ponta da asa
+    for k in range(3):
+        line([(86 + k * 12, 196), (80 + k * 12, 230)], CLAY, 2)
+    # pintas no peito (coruja-de-Atena e malhada)
+    for row in range(3):
+        for k in range(2):
+            cxp = 134 + k * 16
+            cyp = 124 + row * 22
+            d.ellipse([*t(cxp - 3, cyp - 3), *t(cxp + 3, cyp + 3)], fill=CLAY)
+    # garras
+    for fx in (106, 134):
+        d.ellipse([*t(fx - 4, 248), *t(fx + 4, 256)], fill=CLAY)
+    # poleiro
+    line([(46, 264), (196, 264)], INK, 3)
 
 
 def main():
-    nodes, edges = build()
     img = Image.new("RGB", (W, W), BG)
-    layer = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-
-    for a, b, struct in edges:
-        d.line([(nodes[a][0] * S, nodes[a][1] * S),
-                (nodes[b][0] * S, nodes[b][1] * S)],
-               fill=TINT + (110 if struct else 52,), width=2)
-    for x, y, r, op, kind in nodes:
-        col = TINT if kind in ("inner", "wing") else GOLD
-        px, py = x * S, y * S
-        if kind == "pupil":
-            d.ellipse([px - 9 * S, py - 9 * S, px + 9 * S, py + 9 * S],
-                      fill=GOLD + (55,))
-        alpha = int(255 * (1.0 if kind == "pupil" else op))
-        rr = r * S
-        d.ellipse([px - rr, py - rr, px + rr, py + rr], fill=col + (alpha,))
-
-    img.paste(layer, (0, 0), layer)
+    d = ImageDraw.Draw(img)
+    s = W / 290.0
+    ox, oy = (W - 240 * s) / 2, 14
+    laurel(d, ox, oy, s, mirror=False)
+    laurel(d, ox, oy, s, mirror=True)
+    owl(d, ox, oy, s)
     out = "/tmp/owl_preview.png"
     img.save(out)
-    print(f"{len(nodes)} nos, {len(edges)} arestas -> {out}")
+    print("ok ->", out)
 
 
 if __name__ == "__main__":
