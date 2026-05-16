@@ -220,7 +220,7 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
 
 export async function previewVoice(voice: EnrichedVoice): Promise<void> {
   await speak(
-    'Oi, eu sou a sua corujinha. Vamos dormir melhor essa noite?',
+    'Oi, eu sou Comentora, sua IA que usa o poder da IA e das ciências comportamentais para melhorar sua saúde física e mental.',
     { voiceId: voice.identifier, language: voice.language || DEFAULT_LANGUAGE },
   );
 }

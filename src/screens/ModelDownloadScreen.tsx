@@ -181,7 +181,7 @@ export function ModelDownloadScreen() {
           )}
           {phase === 'done' && (
             <Button
-              label={fromOnboarding ? 'Ativar CoMentor 🦉' : 'Pronto'}
+              label={fromOnboarding ? 'Ativar Comentora 🦉' : 'Pronto'}
               onPress={handleFinish}
             />
           )}

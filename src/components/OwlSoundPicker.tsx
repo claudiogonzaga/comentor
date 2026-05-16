@@ -23,7 +23,7 @@ export function OwlSoundPicker({ value, onChange }: Props) {
       if (!ok) {
         Alert.alert(
           'Permissão necessária',
-          'Ative as notificações do CoMentor para ouvir o som de teste.',
+          'Ative as notificações da Comentora para ouvir o som de teste.',
         );
       }
     } finally {

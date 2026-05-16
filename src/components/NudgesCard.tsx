@@ -129,7 +129,7 @@ export function NudgesCard() {
         </Pressable>
       </View>
       <Text style={styles.subtitle}>
-        Pequenos lembretes que o CoMentor pode te mandar todos os dias em
+        Pequenos lembretes que a Comentora pode te mandar todos os dias em
         horários fixos. Ligue só os que fazem sentido pra você.
       </Text>
 

@@ -8,7 +8,7 @@ import { getUserConfig } from './database';
 // Android notification channels are immutable once created — changing a
 // channel's sound has no effect. Bump this when an owl .wav is replaced so a
 // fresh channel is created with the new audio.
-const CHANNEL_VERSION = 1;
+const CHANNEL_VERSION = 2;
 
 /** Category that gives sleep reminders their "Vou dormir" / "Adiar" buttons. */
 export const SLEEP_CATEGORY = 'comentor-sleep-actions';
@@ -78,7 +78,7 @@ export async function ensureChannel(species?: OwlSpeciesId): Promise<string> {
   if (Platform.OS !== 'android') return id;
   const spec = getOwlSpecies(sp);
   await Notifications.setNotificationChannelAsync(id, {
-    name: `CoMentor — ${spec.name}`,
+    name: `Comentora — ${spec.name}`,
     description: 'Lembretes de sono e nudges, com som de coruja',
     importance: Notifications.AndroidImportance.HIGH,
     sound: spec.soundFile ?? 'default',

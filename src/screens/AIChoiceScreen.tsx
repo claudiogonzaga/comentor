@@ -113,7 +113,7 @@ export function AIChoiceScreen() {
             <Owl mood="serious" size={120} />
             <Text style={[typography.title, styles.title]}>Como você quer usar?</Text>
             <Text style={[typography.body, styles.subtitle]}>
-              Escolha como o CoMentor vai pensar.
+              Escolha como a Comentora vai pensar.
             </Text>
           </View>
 

@@ -1,6 +1,6 @@
-# CoMentor 🦉
+# Comentora 🦉
 
-Coach de vida com IA. Uma corujinha sábia que usa argumentação persuasiva, ciências comportamentais e escalonamento emocional para te ajudar a manter hábitos saudáveis. **v1 foca em sono.**
+Coach de vida com IA. A Comentora é uma coruja sábia que usa argumentação persuasiva, ciências comportamentais e escalonamento emocional para te ajudar a manter hábitos saudáveis. **v1 foca em sono.**
 
 > "porque toda pessoa precisa de uma voz sábia no ombro."
 
@@ -29,7 +29,7 @@ Coach de vida com IA. Uma corujinha sábia que usa argumentação persuasiva, ci
   com citações de especialistas (base de 94 cards em
   `assets/data/sleep_awareness_cards.xlsx`) — 1 de manhã, 1 de tarde e 2 à
   noite, em horários aleatórios que se intensificam perto da hora de dormir
-- **Voz opcional no chat**: por padrão a Corujinha só escreve; a leitura em voz
+- **Voz opcional no chat**: por padrão a Comentora só escreve; a leitura em voz
   alta é ligada/desligada pelo botão 🔊 dentro da conversa (ou em Configurações)
 - **Voz nativa**: STT em pt-BR — o usuário responde segurando o microfone
 - **Argumento contra adiamento**: toda vez que o usuário aperta "+15min", a IA gera um contra-argumento e fala em voz alta antes de aceitar o snooze
@@ -141,7 +141,7 @@ A chave era obrigatória até a v1.2; a partir da v1.3 é opcional — alternati
 modelo open-source que roda no celular (Gemma 4 E4B, Qwen3-4B-Thinking-2507, Qwen3.5-4B).
 
 Em runtime, se o Gemini falhar (rede/quota) ou o modelo local não estiver carregado, a
-Corujinha usa o banco offline (45 mensagens pré-escritas, 3 tons × 5 níveis × 3 variações).
+Comentora usa o banco offline (45 mensagens pré-escritas, 3 tons × 5 níveis × 3 variações).
 
 ### Modelos suportados
 
@@ -164,7 +164,7 @@ mais antigos automaticamente se o escolhido não existir.
 | 4 | Confronto firme | +3 intervalos |
 | 5 | Ultimato compassivo | +4 intervalos |
 
-A Corujinha muda de expressão visual conforme o nível.
+A Comentora muda de expressão visual conforme o nível.
 
 ## Permissões Android
 

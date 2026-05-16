@@ -99,7 +99,7 @@ export function ChatScreen() {
     };
   }, []);
 
-  // Read the most recent CoMentor message aloud — only when the user has
+  // Read the most recent Comentora message aloud — only when the user has
   // explicitly turned the speaker on.
   useEffect(() => {
     if (!speechEnabled || messages.length === 0) return;
@@ -213,7 +213,7 @@ export function ChatScreen() {
     navigation.navigate('SnoozeFeedback', { habitId, level });
   };
 
-  // Reload messages when returning from SnoozeFeedback so the new corujinha
+  // Reload messages when returning from SnoozeFeedback so the new Comentora
   // counter-argument shows up.
   useFocusEffect(
     useCallback(() => {
@@ -250,7 +250,7 @@ export function ChatScreen() {
             <Owl mood={owlMood} size={48} animated={false} />
             <View>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                CoMentor
+                Comentora
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 {INTENSITY_LEVELS[level].title} · nível {level}/5
@@ -278,7 +278,7 @@ export function ChatScreen() {
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                O CoMentor está pensando…
+                A Comentora está pensando…
               </Text>
             </View>
           ) : (

@@ -392,7 +392,7 @@ export async function markSleepDone(habitId: number) {
 }
 
 /**
- * Re-registers every CoMentor notification (night escalation chain + daily
+ * Re-registers every Comentora notification (night escalation chain + daily
  * nudges) onto the channel for the user's currently selected owl sound.
  * Call after the owl species changes so the new sound takes effect without
  * waiting for the next Settings save.
