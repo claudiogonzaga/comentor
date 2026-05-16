@@ -2,14 +2,28 @@ name: Build APK e publicar release
 
 # Robô que assa o APK na EAS e publica a release no GitHub automaticamente.
 #
+# Quando roda:
+#   - Automaticamente, a cada push na branch `main` (ex.: ao mergear um PR).
+#   - Manualmente, pela aba "Actions" -> "Run workflow".
+#   - Mudanças que mexem só em arquivos .md NÃO disparam o robô.
+#
+# O robô só builda quando a versão em app.json (expo.version) ainda não tem
+# release publicada. Ou seja: para gerar uma versão nova, suba o número da
+# versão em app.json. Se a release daquela versão já existir, o robô apenas
+# registra um aviso e encerra, sem gastar build da EAS.
+#
+# Para forçar a regeração de uma versão que já existe: apague a release e a
+# tag correspondente no GitHub e rode de novo.
+#
 # Pré-requisito (feito uma vez): criar o secret EXPO_TOKEN no repositório
 #   Settings -> Secrets and variables -> Actions -> New repository secret
 #   Name: EXPO_TOKEN   Value: token gerado em expo.dev/settings/access-tokens
-#
-# Como disparar: aba "Actions" -> "Build APK e publicar release" ->
-#   "Run workflow" -> escolher a branch -> Run.
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch:
     inputs:
       notes:
@@ -32,36 +46,53 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Ler a versão e checar se a release já existe
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./app.json').expo.version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release v$VERSION ja existe — nada a buildar. Suba expo.version em app.json para gerar uma nova versao."
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Versao nova (v$VERSION) — iniciando o build."
+          fi
+
       - name: Instalar dependências
+        if: steps.ver.outputs.build == 'true'
         run: npm ci
 
       - name: Configurar a EAS CLI
+        if: steps.ver.outputs.build == 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Ler a versão do app.json
-        id: ver
-        run: echo "version=$(node -p "require('./app.json').expo.version")" >> "$GITHUB_OUTPUT"
-
       - name: Buildar o APK na EAS (aguarda terminar)
+        if: steps.ver.outputs.build == 'true'
         run: eas build --platform android --profile preview --non-interactive --wait --json > build-output.json
 
       - name: Descobrir o link do APK
         id: apk
+        if: steps.ver.outputs.build == 'true'
         run: |
           URL=$(node -p "const a=JSON.parse(require('fs').readFileSync('build-output.json','utf8'))[0].artifacts; a.applicationArchiveUrl || a.buildUrl")
           echo "Link do APK: $URL"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
       - name: Baixar o APK gerado
+        if: steps.ver.outputs.build == 'true'
         run: curl -fL -o "comentor-${{ steps.ver.outputs.version }}.apk" "${{ steps.apk.outputs.url }}"
 
       - name: Publicar release no GitHub
+        if: steps.ver.outputs.build == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: CoMentor v${{ steps.ver.outputs.version }}
-          body: ${{ inputs.notes }}
+          body: ${{ inputs.notes || 'Nova versão do CoMentor' }}
           files: comentor-${{ steps.ver.outputs.version }}.apk
