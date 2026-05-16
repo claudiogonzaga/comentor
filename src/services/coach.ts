@@ -317,6 +317,124 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   return { message: result.text, level, offline: result.offline, habitId: habit.id };
 }
 
+export interface ConvinceFocus {
+  emoji: string;
+  title: string;
+  blurb: string;
+}
+
+export interface ConvinceResult {
+  message: string;
+  level: IntensityLevel;
+  offline: boolean;
+  habitId: number;
+  focus: ConvinceFocus;
+}
+
+function minutesUntilBedtime(bedtime: string): number {
+  const [h, m] = bedtime.split(':').map(Number);
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  let diff = Math.round((target.getTime() - Date.now()) / 60_000);
+  if (diff < -720) diff += 1440;
+  return diff;
+}
+
+/** Escolhe o comportamento de sono mais relevante para o momento atual. */
+function pickConvinceFocus(bedtime: string): ConvinceFocus {
+  const until = minutesUntilBedtime(bedtime);
+  const hour = new Date().getHours();
+  if (until <= 0) {
+    return {
+      emoji: '🌙',
+      title: 'Ir para a cama agora',
+      blurb: 'Já passou do seu horário — cada minuto acordado é sono profundo perdido.',
+    };
+  }
+  if (until <= 45) {
+    return {
+      emoji: '🌬️',
+      title: 'Começar a desacelerar',
+      blurb: 'Falta pouco pra dormir: respiração lenta e telas longe preparam o corpo.',
+    };
+  }
+  if (hour >= 18) {
+    return {
+      emoji: '🕶️',
+      title: 'Cortar a luz azul',
+      blurb: 'O sol já se foi — luz de telas agora atrasa a melatonina e empurra seu sono.',
+    };
+  }
+  if (hour >= 12) {
+    return {
+      emoji: '☕',
+      title: 'Chega de cafeína por hoje',
+      blurb: 'Café da tarde ainda está no seu corpo na hora de dormir.',
+    };
+  }
+  return {
+    emoji: '☀️',
+    title: 'Pegar sol da manhã',
+    blurb: 'Luz natural cedo acerta seu relógio e melhora o sono desta noite.',
+  };
+}
+
+/**
+ * Abre uma conversa de persuasão: escolhe o comportamento de sono mais
+ * relevante para o momento e gera a primeira fala da Comentora convencendo
+ * a pessoa a adotá-lo agora. A instrução enviada à IA é efêmera — só a
+ * resposta dela é salva no histórico.
+ */
+export async function getConvinceMessageForNow(): Promise<ConvinceResult> {
+  const config = await getUserConfig();
+  const habit = await ensureSleepHabit(config.bedtime);
+  const log = await getOrCreateLog(habit.id, todayISO(), config.bedtime);
+  await incrementReminders(log.id);
+
+  const minutesLate = minutesPast(config.bedtime);
+  const level = getIntensityForMinutesLate(minutesLate, config.reminderIntervalMinutes);
+  const streak = await getStreak(habit.id);
+  const recentLogs = await getRecentLogs(habit.id, 14);
+  const history = await getRecentChat(habit.id, 6);
+  const personalization = await buildPersonalizationContext(habit.id);
+  const focus = pickConvinceFocus(config.bedtime);
+
+  const instruction =
+    `[Instrução interna: o usuário tocou em "Me convença a ser saudável". ` +
+    `Comportamento-foco para agora (${nowHHMM()}): ${focus.title} — ${focus.blurb} ` +
+    `Escreva a PRIMEIRA mensagem da conversa: convença a pessoa, de forma calorosa ` +
+    `e persuasiva (sem moralismo, no máximo 4 frases), a adotar esse comportamento ` +
+    `agora. Use uma técnica de persuasão concreta (benefício imediato, identidade ou ` +
+    `aversão à perda). Termine com uma pergunta que abra o diálogo.]`;
+
+  const result = await runChatGeneration(
+    config,
+    {
+      userName: config.name,
+      bedtime: config.bedtime,
+      currentTime: nowHHMM(),
+      minutesLate,
+      level,
+      streak: streak.currentStreak,
+      tone: config.tone,
+      recentLogsSummary: summarizeRecentLogs(recentLogs),
+      systemPrompt: config.systemPrompt,
+      ...personalization,
+    },
+    history,
+    instruction,
+  );
+
+  await addChatMessage(habit.id, 'corujinha', result.text, level);
+  return {
+    message: result.text,
+    level,
+    offline: result.offline,
+    habitId: habit.id,
+    focus,
+  };
+}
+
 export async function sendUserMessage(
   habitId: number,
   text: string,

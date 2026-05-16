@@ -10,17 +10,20 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
+import { Card } from '../components/Card';
 import { ChatBubble } from '../components/ChatBubble';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { MicButton } from '../components/MicButton';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   getCoachMessageForNow,
+  getConvinceMessageForNow,
   markSleepDone,
   sendUserMessage,
+  type ConvinceFocus,
 } from '../services/coach';
 import { getRecentChat } from '../services/database';
 import { cancelAllReminders } from '../services/notifications';
@@ -31,8 +34,11 @@ import type { ChatMessage, IntensityLevel, OwlMood } from '../types';
 
 export function ChatScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const convinceMode = route.params?.mode === 'convince';
   const { config } = useAppStore();
 
+  const [focus, setFocus] = useState<ConvinceFocus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,12 +87,27 @@ export function ChatScreen() {
     (async () => {
       setBusy(true);
       try {
-        const result = await getCoachMessageForNow();
-        if (!mounted) return;
-        setHabitId(result.habitId);
-        setLevel(result.level);
-        setOffline(result.offline);
-        const recent = await getRecentChat(result.habitId, 20);
+        let resultHabitId: number;
+        let resultLevel: IntensityLevel;
+        let resultOffline: boolean;
+        if (convinceMode) {
+          const r = await getConvinceMessageForNow();
+          if (!mounted) return;
+          setFocus(r.focus);
+          resultHabitId = r.habitId;
+          resultLevel = r.level;
+          resultOffline = r.offline;
+        } else {
+          const r = await getCoachMessageForNow();
+          if (!mounted) return;
+          resultHabitId = r.habitId;
+          resultLevel = r.level;
+          resultOffline = r.offline;
+        }
+        setHabitId(resultHabitId);
+        setLevel(resultLevel);
+        setOffline(resultOffline);
+        const recent = await getRecentChat(resultHabitId, 20);
         if (mounted) setMessages(recent);
       } finally {
         if (mounted) setBusy(false);
@@ -274,6 +295,15 @@ export function ChatScreen() {
           style={styles.messages}
           contentContainerStyle={styles.messagesContent}
         >
+          {focus && (
+            <Card style={styles.focusCard}>
+              <Text style={styles.focusLabel}>FOCO DE AGORA</Text>
+              <Text style={styles.focusTitle}>
+                {focus.emoji} {focus.title}
+              </Text>
+              <Text style={styles.focusBlurb}>{focus.blurb}</Text>
+            </Card>
+          )}
           {busy && messages.length === 0 ? (
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
@@ -397,6 +427,27 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
     flexGrow: 1,
+  },
+  focusCard: {
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  focusLabel: {
+    ...typography.label,
+    color: colors.accent.gold,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
+  },
+  focusTitle: {
+    ...typography.subtitle,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
+  focusBlurb: {
+    ...typography.small,
+    color: colors.text.secondary,
+    lineHeight: 18,
   },
   loading: {
     flex: 1,
