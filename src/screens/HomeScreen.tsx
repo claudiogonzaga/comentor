@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
@@ -6,6 +6,7 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
+import { SLEEP_AWARENESS_CARDS } from '../constants/sleepAwarenessCards';
 import { getDashboardData, markSleepDone } from '../services/coach';
 import type { OwlMood } from '../types';
 import { cancelAllReminders } from '../services/notifications';
@@ -43,6 +44,14 @@ export function HomeScreen() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [marking, setMarking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  // Frase sobre os benefícios do sono — muda a cada dia.
+  const benefitCard = useMemo(() => {
+    if (SLEEP_AWARENESS_CARDS.length === 0) return null;
+    const d = new Date();
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    return SLEEP_AWARENESS_CARDS[seed % SLEEP_AWARENESS_CARDS.length];
+  }, []);
 
   useEffect(() => {
     // Throttled background check (only fires if 6h+ since last check).
@@ -173,11 +182,18 @@ export function HomeScreen() {
           </Card>
         </View>
 
+        {benefitCard && (
+          <Card style={styles.benefitCard}>
+            <Text style={styles.benefitLabel}>POR QUE DORMIR BEM 🦉</Text>
+            <Text style={styles.benefitText}>{benefitCard.text}</Text>
+          </Card>
+        )}
+
         {!data?.todayLog?.completed && (
           <View style={styles.actions}>
             <Button
-              label="Conversar com a Comentora"
-              onPress={() => navigation.navigate('Chat')}
+              label="Me convença a ser saudável"
+              onPress={() => navigation.navigate('Chat', { mode: 'convince' })}
             />
             <View style={{ height: spacing.sm }} />
             <Button
@@ -226,6 +242,20 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+  benefitCard: {
+    marginBottom: spacing.xl,
+  },
+  benefitLabel: {
+    ...typography.label,
+    color: colors.accent.gold,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  benefitText: {
+    ...typography.body,
+    color: colors.text.primary,
+    lineHeight: 24,
   },
   label: {
     color: colors.text.tertiary,

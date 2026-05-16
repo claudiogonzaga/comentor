@@ -26,7 +26,7 @@ export type RootStackParamList = {
   SnoozeFeedback: { habitId: number; level: 1 | 2 | 3 | 4 | 5 };
   Main: undefined;
   Home: undefined;
-  Chat: undefined;
+  Chat: { mode?: 'convince' } | undefined;
   Settings: undefined;
   History: undefined;
   Breathing: undefined;
