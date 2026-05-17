@@ -5,8 +5,8 @@ export const colors = {
   bg: {
     primary: '#C8703F',
     gradientEnd: '#B05A30',
-    surface: 'rgba(42,26,16,0.07)',
-    surfaceStrong: 'rgba(42,26,16,0.13)',
+    surface: 'rgba(42,26,16,0.16)',
+    surfaceStrong: 'rgba(42,26,16,0.26)',
     overlay: 'rgba(28,15,8,0.62)',
   },
   accent: {
@@ -23,6 +23,6 @@ export const colors = {
     tertiary: 'rgba(42,26,16,0.40)',
     onGold: '#F2DCC0', // texto creme sobre o botão preto
   },
-  border: 'rgba(42,26,16,0.20)',
+  border: 'rgba(42,26,16,0.28)',
   star: 'rgba(42,26,16,0.50)',
 } as const;

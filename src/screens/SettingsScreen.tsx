@@ -28,6 +28,7 @@ import {
   ensureChannel,
   ensurePermissions,
   scheduleNightReminders,
+  sendTestNotification,
 } from '../services/notifications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { testApiKey } from '../services/gemini';
@@ -92,6 +93,7 @@ export function SettingsScreen() {
   );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingNotif, setTestingNotif] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [keyError, setKeyError] = useState<string | null>(null);
   const [showPlaceholders, setShowPlaceholders] = useState(false);
@@ -135,6 +137,28 @@ export function SettingsScreen() {
   const canSave =
     (aiBackend === 'remote' && (hasStoredKey || trimmedKey.length >= 20)) ||
     (aiBackend === 'local' && localCurrentDownloaded);
+
+  const handleTestNotification = async () => {
+    setTestingNotif(true);
+    try {
+      const { granted, scheduledCount } = await sendTestNotification();
+      if (!granted) {
+        Alert.alert(
+          'Notificações desligadas',
+          'O Android está bloqueando as notificações da Comentora. Vá em Configurações do Android → Apps → Comentor → Notificações e ative tudo.',
+        );
+        return;
+      }
+      Alert.alert(
+        'Teste enviado 🦉',
+        `Uma notificação deve aparecer em ~3 segundos.\n\n` +
+          `${scheduledCount} lembrete(s) já agendado(s) para os próximos dias.\n\n` +
+          `Se a notificação NÃO aparecer, o problema é a permissão ou a otimização de bateria do aparelho.`,
+      );
+    } finally {
+      setTestingNotif(false);
+    }
+  };
 
   const handleTestKey = async () => {
     if (!trimmedKey) {
@@ -493,6 +517,18 @@ export function SettingsScreen() {
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             O lembrete de respiração antes de dormir agora vive em &quot;Nudges&quot; abaixo
             (você pode escolher horário, ligar/desligar como qualquer outro).
+          </Text>
+
+          <View style={{ height: spacing.md }} />
+          <Button
+            label="Testar notificação agora"
+            variant="secondary"
+            onPress={handleTestNotification}
+            loading={testingNotif}
+          />
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
+            Não está recebendo lembretes? Toque acima — se a notificação de teste
+            não aparecer, o Android está bloqueando (permissão ou bateria).
           </Text>
         </Card>
 
