@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { GestureResponderEvent, View } from 'react-native';
+import { AppState, GestureResponderEvent, View } from 'react-native';
+import * as Updates from 'expo-updates';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreenAPI from 'expo-splash-screen';
 import {
@@ -23,7 +24,7 @@ import {
 } from './src/services/notifications';
 import { scheduleAllNudges } from './src/services/nudges';
 import { scheduleSleepAwarenessNotifications } from './src/services/sleepAwareness';
-import { colors } from './src/theme';
+import { colors, activeTheme, themePreference, isNightNow } from './src/theme';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
 
@@ -55,6 +56,20 @@ export default function App() {
         await scheduleSleepAwarenessNotifications().catch(() => {});
       }
     })();
+  }, []);
+
+  // Tema automático: ao voltar para o app, se o pôr do sol já passou (ou o
+  // dia nasceu) e o tema em uso não bate mais, recarrega para trocar.
+  useEffect(() => {
+    if (themePreference !== 'auto') return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const want = isNightNow() ? 'dark' : 'light';
+      if (want !== activeTheme) {
+        Updates.reloadAsync().catch(() => {});
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {
