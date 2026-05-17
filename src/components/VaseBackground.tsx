@@ -36,11 +36,17 @@ function mix(a: string, b: string, t: number): string {
   return '#' + out.map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
-/** 0 = noite profunda, 1 = pico do dia. */
+/**
+ * Luminosidade do fundo. O texto do app é escuro (figura negra), então o
+ * fundo é mantido sempre claro o suficiente para o texto ficar legível —
+ * varia só de leve entre dia e noite. (O modo escuro de verdade é uma
+ * troca de tema, não um escurecer do fundo.)
+ */
 function daylight(): number {
   const d = new Date();
   const hour = d.getHours() + d.getMinutes() / 60;
-  return (Math.cos(((hour - 14) / 24) * 2 * Math.PI) + 1) / 2;
+  const raw = (Math.cos(((hour - 14) / 24) * 2 * Math.PI) + 1) / 2;
+  return 0.82 + raw * 0.18;
 }
 
 export function VaseBackground({ meander = true }: VaseBackgroundProps) {

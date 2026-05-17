@@ -208,3 +208,33 @@ export async function snoozeFor(minutes: number, level: IntensityLevel, habitId:
 export async function listScheduled() {
   return Notifications.getAllScheduledNotificationsAsync();
 }
+
+/**
+ * Diagnóstico: dispara uma notificação imediata e informa quantos lembretes
+ * já estão na fila. Serve para o usuário checar, no próprio aparelho, se as
+ * notificações da Comentora conseguem chegar.
+ */
+export async function sendTestNotification(): Promise<{
+  granted: boolean;
+  scheduledCount: number;
+}> {
+  const granted = await ensurePermissions();
+  if (!granted) return { granted: false, scheduledCount: 0 };
+  const channelId = await ensureChannel();
+  const sound = await soundFor();
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: '🦉 Teste de notificação',
+      body: 'Funcionou! Se você está vendo isto, os lembretes da Comentora conseguem chegar no seu celular.',
+      sound,
+      data: { type: 'test' },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 3,
+      channelId,
+    },
+  });
+  return { granted: true, scheduledCount: scheduled.length };
+}

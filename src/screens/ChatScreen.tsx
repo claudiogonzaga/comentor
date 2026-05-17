@@ -21,6 +21,7 @@ import { colors, radius, spacing, typography } from '../theme';
 import {
   getCoachMessageForNow,
   getConvinceMessageForNow,
+  getSleepHabitId,
   markSleepDone,
   sendUserMessage,
   type ConvinceFocus,
@@ -88,29 +89,32 @@ export function ChatScreen() {
     (async () => {
       setBusy(true);
       try {
-        let resultHabitId: number;
-        let resultLevel: IntensityLevel;
-        let resultOffline: boolean;
-        if (convinceMode) {
-          const r = await getConvinceMessageForNow();
-          if (!mounted) return;
-          setFocus(r.focus);
-          resultHabitId = r.habitId;
-          resultLevel = r.level;
-          resultOffline = r.offline;
-        } else {
-          const r = await getCoachMessageForNow();
-          if (!mounted) return;
-          resultHabitId = r.habitId;
-          resultLevel = r.level;
-          resultOffline = r.offline;
+        // Resolve o hábito primeiro — assim o envio de mensagens já funciona
+        // mesmo que a geração da mensagem de abertura demore ou falhe.
+        const hid = await getSleepHabitId();
+        if (!mounted) return;
+        setHabitId(hid);
+        try {
+          if (convinceMode) {
+            const r = await getConvinceMessageForNow();
+            if (mounted) {
+              setFocus(r.focus);
+              setLevel(r.level);
+              setOffline(r.offline);
+            }
+          } else {
+            const r = await getCoachMessageForNow();
+            if (mounted) {
+              setLevel(r.level);
+              setOffline(r.offline);
+            }
+          }
+        } catch (err) {
+          console.warn('coach opening message failed:', err);
         }
-        setHabitId(resultHabitId);
-        setLevel(resultLevel);
-        setOffline(resultOffline);
         // A coruja "fala" ao abrir o chat — som tocado dentro do app.
         playOwlCall(config?.owlSpecies);
-        const recent = await getRecentChat(resultHabitId, 20);
+        const recent = await getRecentChat(hid, 20);
         if (mounted) setMessages(recent);
       } finally {
         if (mounted) setBusy(false);

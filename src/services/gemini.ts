@@ -55,6 +55,30 @@ interface GeminiResponse {
   error?: { message?: string };
 }
 
+/**
+ * POST JSON com timeout. Sem isto, uma rede lenta deixa o fetch pendurado
+ * para sempre — e a tela de chat trava em "pensando…". Ao estourar o tempo
+ * o AbortController dispara um erro que cai no fallback.
+ */
+async function postJson(
+  url: string,
+  body: unknown,
+  timeoutMs = 25000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function generateCoachMessage(
   context: CoachingContext,
   model: GeminiModel,
@@ -90,19 +114,15 @@ export async function generateCoachMessage(
     }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
-        contents,
-        generationConfig: {
-          maxOutputTokens: 1200,
-          temperature: 0.85,
-          topP: 0.95,
-          thinkingConfig: MAX_THINKING_CONFIG,
-        },
-      }),
+    const res = await postJson(url, {
+      system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
+      contents,
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.85,
+        topP: 0.95,
+        thinkingConfig: MAX_THINKING_CONFIG,
+      },
     });
 
     if (!res.ok) {
@@ -147,18 +167,14 @@ export async function continueConversation(
     contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: buildSystemPrompt(systemContext) }] },
-        contents,
-        generationConfig: {
-          maxOutputTokens: 1200,
-          temperature: 0.85,
-          thinkingConfig: MAX_THINKING_CONFIG,
-        },
-      }),
+    const res = await postJson(url, {
+      system_instruction: { parts: [{ text: buildSystemPrompt(systemContext) }] },
+      contents,
+      generationConfig: {
+        maxOutputTokens: 1200,
+        temperature: 0.85,
+        thinkingConfig: MAX_THINKING_CONFIG,
+      },
     });
 
     if (!res.ok) throw new Error(`Gemini ${res.status}`);
@@ -203,18 +219,14 @@ export async function generateSnoozeArgument(
       `Não seja moralista. Seja direto e respeitoso.]`;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
-        contents: [{ role: 'user', parts: [{ text: userMsg }] }],
-        generationConfig: {
-          maxOutputTokens: 800,
-          temperature: 0.9,
-          thinkingConfig: MAX_THINKING_CONFIG,
-        },
-      }),
+    const res = await postJson(url, {
+      system_instruction: { parts: [{ text: buildSystemPrompt(context) }] },
+      contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+      generationConfig: {
+        maxOutputTokens: 800,
+        temperature: 0.9,
+        thinkingConfig: MAX_THINKING_CONFIG,
+      },
     });
     if (!res.ok) throw new Error(`Gemini ${res.status}`);
     const json = (await res.json()) as GeminiResponse;
@@ -244,14 +256,14 @@ export async function testApiKey(
   for (const m of fallbacks) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${encodeURIComponent(trimmed)}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await postJson(
+        url,
+        {
           contents: [{ role: 'user', parts: [{ text: 'oi' }] }],
           generationConfig: { maxOutputTokens: 5 },
-        }),
-      });
+        },
+        15000,
+      );
       if (res.ok) {
         const j = (await res.json()) as GeminiResponse;
         if (!j.candidates?.[0]?.content?.parts?.[0]?.text) {

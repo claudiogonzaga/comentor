@@ -61,6 +61,17 @@ export async function ensureSleepHabit(bedtime: string) {
   return created;
 }
 
+/**
+ * Resolve rapidamente o id do hábito de sono (sem chamar a IA). A tela de
+ * chat usa isto para já habilitar o envio de mensagens enquanto a mensagem
+ * de abertura ainda está sendo gerada.
+ */
+export async function getSleepHabitId(): Promise<number> {
+  const config = await getUserConfig();
+  const habit = await ensureSleepHabit(config.bedtime);
+  return habit.id;
+}
+
 function todayISO(): string {
   return format(new Date(), 'yyyy-MM-dd');
 }
