@@ -22,8 +22,7 @@ import {
   ensureNotificationCategories,
   ensurePermissions,
 } from './src/services/notifications';
-import { scheduleAllNudges } from './src/services/nudges';
-import { scheduleSleepAwarenessNotifications } from './src/services/sleepAwareness';
+import { rescheduleAllNotifications } from './src/services/coach';
 import { colors, activeTheme, themePreference, isNightNow } from './src/theme';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
@@ -52,10 +51,23 @@ export default function App() {
         await ensureNotificationCategories();
         // Re-agenda após a permissão: numa instalação nova, init() pode rodar
         // antes de o usuário conceder a permissão, e aí nada seria entregue.
-        await scheduleAllNudges().catch(() => {});
-        await scheduleSleepAwarenessNotifications().catch(() => {});
+        // rescheduleAllNotifications cobre lembretes de sono, nudges e
+        // conscientização — assim o lembrete de "hora de dormir" também é
+        // garantido a cada abertura do app, e usa o horário local atual.
+        await rescheduleAllNotifications().catch(() => {});
       }
     })();
+  }, []);
+
+  // A cada vez que o app volta ao primeiro plano, reagenda os lembretes:
+  // notificações DATE só disparam uma vez, então sem isso o usuário ficaria
+  // sem lembrete de "hora de dormir" depois do primeiro dia.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      rescheduleAllNotifications().catch(() => {});
+    });
+    return () => sub.remove();
   }, []);
 
   // Tema automático: ao voltar para o app, se o pôr do sol já passou (ou o

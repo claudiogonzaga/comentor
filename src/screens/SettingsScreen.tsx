@@ -31,7 +31,8 @@ import {
   sendTestNotification,
 } from '../services/notifications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
-import { testApiKey } from '../services/gemini';
+import { testApiKey, testChatGeneration } from '../services/gemini';
+import { getOwlSpecies } from '../constants/owlSpecies';
 import {
   deleteAllDownloadedModels,
   deleteDownloadedModel,
@@ -102,6 +103,7 @@ export function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingNotif, setTestingNotif] = useState(false);
+  const [testingChat, setTestingChat] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
   const [keyError, setKeyError] = useState<string | null>(null);
   const [showPlaceholders, setShowPlaceholders] = useState(false);
@@ -165,6 +167,28 @@ export function SettingsScreen() {
       );
     } finally {
       setTestingNotif(false);
+    }
+  };
+
+  const handleTestChat = async () => {
+    setTestingChat(true);
+    try {
+      const result = await testChatGeneration(
+        (config?.geminiModel ?? 'gemini-2.5-flash-lite') as GeminiModel,
+      );
+      if (result.ok) {
+        Alert.alert(
+          'IA respondendo ✓',
+          `Conversa funcionando. Modelo em uso: ${result.modelUsed ?? '—'}.`,
+        );
+      } else {
+        Alert.alert(
+          'Falha na IA',
+          `${result.error ?? 'erro desconhecido'}\n\nVerifique a chave da API e a conexão.`,
+        );
+      }
+    } finally {
+      setTestingChat(false);
     }
   };
 
@@ -553,6 +577,18 @@ export function SettingsScreen() {
             Não está recebendo lembretes? Toque acima — se a notificação de teste
             não aparecer, o Android está bloqueando (permissão ou bateria).
           </Text>
+
+          <View style={{ height: spacing.md }} />
+          <Button
+            label="Testar conversa com a IA"
+            variant="secondary"
+            onPress={handleTestChat}
+            loading={testingChat}
+          />
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
+            A Comentora não responde no chat? Toque acima — o alerta vai dizer se
+            a IA está conectada e qual modelo está em uso.
+          </Text>
         </Card>
 
         <Card style={{ marginBottom: spacing.lg }}>
@@ -632,23 +668,51 @@ export function SettingsScreen() {
           })}
         </Card>
 
-        <OwlSoundPicker
-          value={(config?.owlSpecies ?? 'cabure') as OwlSpeciesId}
-          onChange={async (species: OwlSpeciesId) => {
-            await setConfig({ owlSpecies: species });
-            await rescheduleAllNotifications();
-          }}
-        />
-
-        <VoicePicker
-          value={config?.voiceId ?? null}
-          onChange={async (v: EnrichedVoice | null) => {
-            await setConfig({
-              voiceId: v?.identifier ?? null,
-              voiceLanguage: v?.language ?? null,
-            });
-          }}
-        />
+        <Card style={{ marginBottom: spacing.lg }}>
+          <Pressable
+            onPress={() => navigation.navigate('OwlSound')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: spacing.md,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                🦉  Som das corujas
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                {getOwlSpecies(config?.owlSpecies).name}
+              </Text>
+            </View>
+            <Text style={{ color: colors.accent.gold, fontSize: 22, marginLeft: spacing.sm }}>
+              ›
+            </Text>
+          </Pressable>
+          <View style={{ height: 1, backgroundColor: colors.border, marginVertical: spacing.xs }} />
+          <Pressable
+            onPress={() => navigation.navigate('Voice')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: spacing.md,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                🗣️  Voz da Comentora
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                {config?.voiceId
+                  ? config.voiceLanguage ?? 'Voz personalizada'
+                  : 'Voz padrão do sistema'}
+              </Text>
+            </View>
+            <Text style={{ color: colors.accent.gold, fontSize: 22, marginLeft: spacing.sm }}>
+              ›
+            </Text>
+          </Pressable>
+        </Card>
 
         <NudgesCard />
 
