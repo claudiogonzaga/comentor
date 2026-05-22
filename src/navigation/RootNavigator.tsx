@@ -10,6 +10,8 @@ import { SnoozeFeedbackScreen } from '../screens/SnoozeFeedbackScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { OwlSoundScreen } from '../screens/OwlSoundScreen';
+import { VoiceScreen } from '../screens/VoiceScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
@@ -28,6 +30,8 @@ export type RootStackParamList = {
   Home: undefined;
   Chat: { mode?: 'convince' } | undefined;
   Settings: undefined;
+  OwlSound: undefined;
+  Voice: undefined;
   History: undefined;
   Breathing: undefined;
 };
@@ -184,6 +188,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="OwlSound" component={OwlSoundScreen} />
+        <Stack.Screen name="Voice" component={VoiceScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
         <Stack.Screen name="Breathing" component={BreathingScreen} options={{ animation: 'fade' }} />
       </Stack.Navigator>
