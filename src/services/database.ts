@@ -42,7 +42,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       reminder_interval_minutes INTEGER NOT NULL DEFAULT 10,
       max_reminders INTEGER NOT NULL DEFAULT 12,
       tone TEXT NOT NULL DEFAULT 'firm',
-      gemini_model TEXT NOT NULL DEFAULT 'gemini-2.5-flash-lite',
+      gemini_model TEXT NOT NULL DEFAULT 'gemini-3.1-flash-lite',
       has_api_key INTEGER NOT NULL DEFAULT 0,
       onboarding_done INTEGER NOT NULL DEFAULT 0,
       system_prompt TEXT,
