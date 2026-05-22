@@ -51,7 +51,6 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       owl_species TEXT NOT NULL DEFAULT 'cabure',
       sleep_awareness_enabled INTEGER NOT NULL DEFAULT 1,
       notifications_per_day INTEGER NOT NULL DEFAULT 4,
-      theme_mode TEXT NOT NULL DEFAULT 'auto',
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -222,11 +221,6 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN notifications_per_day INTEGER NOT NULL DEFAULT 4`,
     );
   }
-  if (!colNames.includes('theme_mode')) {
-    await database.execAsync(
-      `ALTER TABLE user_config ADD COLUMN theme_mode TEXT NOT NULL DEFAULT 'auto'`,
-    );
-  }
 
   // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
   // existing per-user customizations from being overwritten on later runs.
@@ -347,7 +341,6 @@ interface UserConfigRow {
   owl_species: string | null;
   sleep_awareness_enabled: number;
   notifications_per_day: number | null;
-  theme_mode: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -373,7 +366,6 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   owlSpecies: (r.owl_species ?? 'cabure') as UserConfig['owlSpecies'],
   sleepAwarenessEnabled: (r.sleep_awareness_enabled ?? 1) === 1,
   notificationsPerDay: r.notifications_per_day ?? 4,
-  themeMode: (r.theme_mode ?? 'auto') as UserConfig['themeMode'],
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -411,7 +403,6 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     owlSpecies: 'owl_species',
     sleepAwarenessEnabled: 'sleep_awareness_enabled',
     notificationsPerDay: 'notifications_per_day',
-    themeMode: 'theme_mode',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
