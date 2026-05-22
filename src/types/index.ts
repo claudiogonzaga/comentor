@@ -32,8 +32,6 @@ export interface LocalModelInfo {
 
 export type OwlMood = 'calm' | 'worried' | 'serious' | 'sleeping' | 'celebrating';
 
-export type ThemeMode = 'light' | 'dark' | 'auto';
-
 export type OwlSpeciesId =
   | 'cabure'
   | 'buraqueira'
@@ -70,8 +68,6 @@ export interface UserConfig {
   sleepAwarenessEnabled: boolean;
   /** Quantos lembretes da Comentora por dia (a densidade dobra após o pôr do sol). */
   notificationsPerDay: number;
-  /** Tema visual: claro, escuro, ou automático (troca no pôr do sol). */
-  themeMode: ThemeMode;
 }
 
 export interface InterviewSummary {

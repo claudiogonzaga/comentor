@@ -2,8 +2,6 @@ import { ReactNode } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { VaseBackground } from './VaseBackground';
-import { StarryBackground } from './StarryBackground';
-import { activeTheme } from '../theme';
 
 interface Props {
   children: ReactNode;
@@ -20,11 +18,7 @@ export function ScreenContainer({
 }: Props) {
   return (
     <View style={styles.root}>
-      {activeTheme === 'dark' ? (
-        <StarryBackground />
-      ) : (
-        <VaseBackground meander={meander} />
-      )}
+      <VaseBackground meander={meander} />
       <SafeAreaView style={styles.safe} edges={edges}>
         <View style={[styles.content, contentStyle]}>{children}</View>
       </SafeAreaView>

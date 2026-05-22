@@ -49,15 +49,7 @@ import {
   PROMPT_PLACEHOLDERS,
 } from '../constants/promptTemplate';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
-import * as Updates from 'expo-updates';
-import type {
-  AIBackend,
-  GeminiModel,
-  LocalModelId,
-  OwlSpeciesId,
-  ThemeMode,
-  Tone,
-} from '../types';
+import type { AIBackend, GeminiModel, LocalModelId, OwlSpeciesId, Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
   { value: 'gentle', label: 'Gentil 🤗' },
@@ -166,21 +158,6 @@ export function SettingsScreen() {
     } finally {
       setTestingNotif(false);
     }
-  };
-
-  const handleThemeChange = async (mode: ThemeMode) => {
-    if (mode === (config?.themeMode ?? 'auto')) return;
-    await setConfig({ themeMode: mode });
-    Alert.alert('Tema alterado', 'O app vai reabrir para aplicar o novo tema.', [
-      {
-        text: 'OK',
-        onPress: () => {
-          Updates.reloadAsync().catch(() => {
-            Alert.alert('Quase lá', 'Feche e abra o app para ver o novo tema.');
-          });
-        },
-      },
-    ]);
   };
 
   const handleTestKey = async () => {
@@ -553,83 +530,6 @@ export function SettingsScreen() {
             Não está recebendo lembretes? Toque acima — se a notificação de teste
             não aparecer, o Android está bloqueando (permissão ou bateria).
           </Text>
-        </Card>
-
-        <Card style={{ marginBottom: spacing.lg }}>
-          <Text
-            style={[
-              typography.subtitle,
-              { color: colors.text.primary, marginBottom: spacing.xs },
-            ]}
-          >
-            Aparência 🎨
-          </Text>
-          <Text
-            style={[
-              typography.small,
-              {
-                color: colors.text.secondary,
-                marginBottom: spacing.md,
-                lineHeight: 18,
-              },
-            ]}
-          >
-            Tema claro (vaso grego) ou escuro (céu noturno). No automático, o app
-            troca sozinho no pôr do sol.
-          </Text>
-          {(
-            [
-              ['light', '☀️  Claro', 'Vaso grego — terracota'],
-              ['dark', '🌙  Escuro', 'Céu noturno índigo'],
-              ['auto', '🌗  Automático', 'Claro de dia, escuro à noite'],
-            ] as ReadonlyArray<readonly [ThemeMode, string, string]>
-          ).map(([mode, label, desc]) => {
-            const selected = (config?.themeMode ?? 'auto') === mode;
-            return (
-              <Pressable
-                key={mode}
-                onPress={() => handleThemeChange(mode)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: spacing.md,
-                  paddingHorizontal: spacing.md,
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: selected ? colors.accent.gold : 'transparent',
-                  backgroundColor: selected ? colors.bg.surface : 'transparent',
-                  marginBottom: spacing.xs,
-                }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[typography.bodyMedium, { color: colors.text.primary }]}
-                  >
-                    {label}
-                  </Text>
-                  <Text
-                    style={[typography.small, { color: colors.text.secondary }]}
-                  >
-                    {desc}
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 11,
-                    borderWidth: 2,
-                    borderColor: selected
-                      ? colors.accent.gold
-                      : colors.text.tertiary,
-                    backgroundColor: selected
-                      ? colors.accent.gold
-                      : 'transparent',
-                  }}
-                />
-              </Pressable>
-            );
-          })}
         </Card>
 
         <OwlSoundPicker
