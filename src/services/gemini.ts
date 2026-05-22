@@ -102,7 +102,6 @@ async function runGenerate(
         const j = (await res.json().catch(() => ({}))) as GeminiResponse;
         const msg = j.error?.message ?? `HTTP ${res.status}`;
         lastError = `${m}: ${msg}`;
-        // Modelo inexistente / servidor instável → tenta o próximo.
         if (
           res.status === 404 ||
           res.status >= 500 ||
@@ -110,7 +109,6 @@ async function runGenerate(
         ) {
           continue;
         }
-        // Auth / cota → não adianta trocar de modelo.
         throw new Error(msg);
       }
       const j = (await res.json()) as GeminiResponse;
@@ -122,7 +120,6 @@ async function runGenerate(
       return { text, modelUsed: m };
     } catch (e) {
       lastError = e instanceof Error ? e.message : 'erro de rede';
-      // Em erro de rede / abort, tenta o próximo modelo também.
     }
   }
   throw new Error(lastError || 'todas as tentativas falharam');
@@ -283,41 +280,6 @@ export async function testApiKey(
       15000,
     );
     return { ok: true, modelTested: modelUsed };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };
-  }
-}
-
-/**
- * Diagnóstico do chat. Diferente de testApiKey (que manda só "oi" com
- * 5 tokens de resposta), este faz uma chamada real de conversa para
- * detectar problemas no caminho exato que o chat usa.
- */
-export async function testChatGeneration(
-  model: GeminiModel,
-): Promise<{ ok: boolean; modelUsed?: GeminiModel; error?: string }> {
-  const apiKey = await getApiKey();
-  if (!apiKey) return { ok: false, error: 'sem chave da API configurada' };
-  try {
-    const { modelUsed } = await runGenerate(
-      model,
-      apiKey,
-      {
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: 'Diga apenas a palavra "ok", sem nada além disso.',
-              },
-            ],
-          },
-        ],
-        generationConfig: { maxOutputTokens: 30 },
-      },
-      15000,
-    );
-    return { ok: true, modelUsed };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };
   }
