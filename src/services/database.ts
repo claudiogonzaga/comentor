@@ -22,15 +22,24 @@ import type {
 import { DEFAULT_SYSTEM_PROMPT, LEGACY_DEFAULT_PROMPT_MARKER } from '../constants/promptTemplate';
 
 const DB_NAME = 'comentor.db';
-let db: SQLite.SQLiteDatabase | null = null;
+// Cacheia a Promise (não a instância) — chamadas concorrentes durante o boot
+// esperam o mesmo init em vez de cada uma abrir o DB e rodar runMigrations,
+// o que disparava UNIQUE constraint failed no seed do user_config.
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (!db) {
-    db = await SQLite.openDatabaseAsync(DB_NAME);
-    await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-    await runMigrations(db);
+  if (!dbPromise) {
+    dbPromise = (async () => {
+      const d = await SQLite.openDatabaseAsync(DB_NAME);
+      await d.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+      await runMigrations(d);
+      return d;
+    })().catch((err) => {
+      dbPromise = null;
+      throw err;
+    });
   }
-  return db;
+  return dbPromise;
 }
 
 async function runMigrations(database: SQLite.SQLiteDatabase) {
@@ -48,9 +57,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       system_prompt TEXT,
       prep_reminders_enabled INTEGER NOT NULL DEFAULT 1,
       voice_mode_enabled INTEGER NOT NULL DEFAULT 0,
-      owl_species TEXT NOT NULL DEFAULT 'cabure',
+      owl_species TEXT NOT NULL DEFAULT 'buraqueira',
       sleep_awareness_enabled INTEGER NOT NULL DEFAULT 1,
       notifications_per_day INTEGER NOT NULL DEFAULT 4,
+      voice_provider TEXT NOT NULL DEFAULT 'system',
+      gemini_voice_name TEXT NOT NULL DEFAULT 'Aoede',
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -207,7 +218,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   // unless the user explicitly turns the sound on).
   if (!colNames.includes('owl_species')) {
     await database.execAsync(
-      `ALTER TABLE user_config ADD COLUMN owl_species TEXT NOT NULL DEFAULT 'cabure'`,
+      `ALTER TABLE user_config ADD COLUMN owl_species TEXT NOT NULL DEFAULT 'buraqueira'`,
     );
     await database.execAsync(`UPDATE user_config SET voice_mode_enabled = 0`);
   }
@@ -219,6 +230,16 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('notifications_per_day')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN notifications_per_day INTEGER NOT NULL DEFAULT 4`,
+    );
+  }
+  if (!colNames.includes('voice_provider')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN voice_provider TEXT NOT NULL DEFAULT 'system'`,
+    );
+  }
+  if (!colNames.includes('gemini_voice_name')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN gemini_voice_name TEXT NOT NULL DEFAULT 'Aoede'`,
     );
   }
 
@@ -300,7 +321,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   );
   if (!existing) {
     await database.runAsync(
-      `INSERT INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt, prep_reminders_enabled, voice_mode_enabled)
+      `INSERT OR IGNORE INTO user_config (id, bedtime, reminder_interval_minutes, max_reminders, tone, gemini_model, has_api_key, onboarding_done, system_prompt, prep_reminders_enabled, voice_mode_enabled)
        VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 0)`,
       [DEFAULT_SYSTEM_PROMPT],
     );
@@ -341,6 +362,8 @@ interface UserConfigRow {
   owl_species: string | null;
   sleep_awareness_enabled: number;
   notifications_per_day: number | null;
+  voice_provider: string | null;
+  gemini_voice_name: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -363,9 +386,11 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   interviewCompletedAt: r.interview_completed_at,
   voiceId: r.voice_id,
   voiceLanguage: r.voice_language,
-  owlSpecies: (r.owl_species ?? 'cabure') as UserConfig['owlSpecies'],
+  owlSpecies: (r.owl_species ?? 'buraqueira') as UserConfig['owlSpecies'],
   sleepAwarenessEnabled: (r.sleep_awareness_enabled ?? 1) === 1,
   notificationsPerDay: r.notifications_per_day ?? 4,
+  voiceProvider: (r.voice_provider ?? 'system') as UserConfig['voiceProvider'],
+  geminiVoiceName: r.gemini_voice_name ?? 'Aoede',
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -403,6 +428,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     owlSpecies: 'owl_species',
     sleepAwarenessEnabled: 'sleep_awareness_enabled',
     notificationsPerDay: 'notifications_per_day',
+    voiceProvider: 'voice_provider',
+    geminiVoiceName: 'gemini_voice_name',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

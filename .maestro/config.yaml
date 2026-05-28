@@ -1,0 +1,6 @@
+flows:
+  - 01_smoke_app_abre.yaml
+  - 02_onboarding_intro.yaml
+  - 03_onboarding_config.yaml
+  - 04_chat_key_invalida.yaml
+  - 05_local_model_choice.yaml

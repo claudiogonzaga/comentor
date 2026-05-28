@@ -1,0 +1,21 @@
+appId: com.claudiogonzaga.comentor
+name: "Onboarding: avança pelos 3 steps de intro"
+tags:
+  - onboarding
+---
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible: "Me conta mais"
+    timeout: 15000
+- tapOn: "Me conta mais"
+- assertVisible: "Não sou um alarme."
+- assertVisible: "Gostei"
+- tapOn: "Gostei"
+- assertVisible: "Uso ciência. E carinho."
+- assertVisible: "Vamos começar"
+- tapOn: "Vamos começar"
+- extendedWaitUntil:
+    visible: "Como devo te chamar"
+    timeout: 8000
+- takeScreenshot: "02_config_form"

@@ -1,0 +1,47 @@
+appId: com.claudiogonzaga.comentor
+name: "AIChoice: caminho do modelo local — chega na tela de download sem disparar download"
+tags:
+  - onboarding
+  - local-model
+---
+- clearState
+- launchApp
+- runFlow:
+    when:
+      visible: "isn't responding"
+    commands:
+      - tapOn: "Wait"
+- extendedWaitUntil:
+    visible: "Me conta mais"
+    timeout: 20000
+- tapOn: "Me conta mais"
+- tapOn: "Gostei"
+- tapOn: "Vamos começar"
+- extendedWaitUntil:
+    visible: "Como devo te chamar"
+    timeout: 8000
+- tapOn:
+    text: "Como devo te chamar"
+    optional: true
+- inputText: "TestUser"
+- hideKeyboard
+- tapOn: "Brutalmente honesta"
+- scrollUntilVisible:
+    element:
+      text: "Continuar"
+    direction: DOWN
+- tapOn: "Continuar"
+- extendedWaitUntil:
+    visible: "Como você quer usar?"
+    timeout: 10000
+- assertVisible: "Usar API do Gemini"
+- assertVisible: "Usar modelo no celular"
+- tapOn: "Usar modelo no celular"
+- scrollUntilVisible:
+    element:
+      text: "Baixar modelo e continuar"
+    direction: DOWN
+- takeScreenshot: "06_local_model_selected"
+# Não tapamos em "Baixar modelo e continuar" — não queremos baixar GGUF de
+# verdade no CI. Validamos que chegamos até a tela e a opção está habilitada.
+- assertVisible: "Baixar modelo e continuar →"

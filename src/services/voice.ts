@@ -1,9 +1,16 @@
 import { Linking, Platform } from 'react-native';
 import * as Speech from 'expo-speech';
+import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import {
   ExpoSpeechRecognitionModule,
   type ExpoSpeechRecognitionOptions,
 } from 'expo-speech-recognition';
+import {
+  DEFAULT_GEMINI_VOICE,
+  GeminiTTSError,
+  synthesizeSpeechGemini,
+} from './geminiTTS';
+import type { VoiceProvider } from '../types';
 
 const DEFAULT_LANGUAGE = 'pt-BR';
 
@@ -34,10 +41,26 @@ let currentlySpeaking = false;
 // by callers (Settings/onboarding).
 let activeVoiceId: string | null = null;
 let activeLanguage: string | null = null;
+let activeProvider: VoiceProvider = 'system';
+let activeGeminiVoiceName: string = DEFAULT_GEMINI_VOICE;
+// Player do expo-audio em uso quando provider === 'gemini'.
+let activeGeminiPlayer: AudioPlayer | null = null;
 
 export function setActiveVoice(voiceId: string | null, language: string | null) {
   activeVoiceId = voiceId;
   activeLanguage = language;
+}
+
+export function setActiveVoiceProvider(
+  provider: VoiceProvider,
+  geminiVoiceName?: string,
+) {
+  activeProvider = provider;
+  if (geminiVoiceName) activeGeminiVoiceName = geminiVoiceName;
+}
+
+export function getActiveVoiceProvider(): VoiceProvider {
+  return activeProvider;
 }
 
 export function getActiveVoiceId(): string | null {
@@ -191,9 +214,26 @@ async function resolveVoice(): Promise<{ id: string | null; lang: string }> {
   return { id: first.identifier, lang: first.language || DEFAULT_LANGUAGE };
 }
 
-export async function speak(text: string, opts: SpeakOptions = {}): Promise<void> {
+interface SpeakExtraOptions {
+  /** Força um provider para esta chamada (preview). Padrão: o ativo. */
+  provider?: VoiceProvider;
+  /** Voz Gemini explícita (preview). Padrão: a ativa. */
+  geminiVoiceName?: string;
+}
+
+export async function speak(
+  text: string,
+  opts: SpeakOptions & SpeakExtraOptions = {},
+): Promise<void> {
   if (!text.trim()) return;
   await stopSpeaking();
+
+  const provider = opts.provider ?? activeProvider;
+  if (provider === 'gemini') {
+    await speakWithGemini(text, opts);
+    return;
+  }
+
   const resolved =
     opts.voiceId !== undefined
       ? { id: opts.voiceId, lang: opts.language ?? DEFAULT_LANGUAGE }
@@ -218,11 +258,66 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
   });
 }
 
+async function speakWithGemini(
+  text: string,
+  opts: SpeakOptions & SpeakExtraOptions,
+): Promise<void> {
+  const voice = opts.geminiVoiceName ?? activeGeminiVoiceName;
+  currentlySpeaking = true;
+  try {
+    const { uri } = await synthesizeSpeechGemini(text, voice);
+    if (!currentlySpeaking) return; // foi interrompido durante a síntese
+    const player = createAudioPlayer({ uri });
+    activeGeminiPlayer = player;
+    const sub = player.addListener('playbackStatusUpdate', (status) => {
+      if (status.didJustFinish) {
+        sub.remove();
+        releaseGeminiPlayer(player);
+        if (currentlySpeaking) {
+          currentlySpeaking = false;
+          opts.onDone?.();
+        }
+      }
+    });
+    player.play();
+  } catch (err) {
+    currentlySpeaking = false;
+    if (err instanceof GeminiTTSError) {
+      console.warn('Gemini TTS falhou, caindo no sistema:', err.message);
+      // Fallback transparente: usa expo-speech se a síntese remota falhar.
+      await speak(text, { ...opts, provider: 'system' });
+      return;
+    }
+    opts.onError?.(err);
+  }
+}
+
+function releaseGeminiPlayer(player: AudioPlayer) {
+  try {
+    player.remove();
+  } catch {
+    /* já liberado */
+  }
+  if (activeGeminiPlayer === player) activeGeminiPlayer = null;
+}
+
+const PREVIEW_TEXT =
+  'Oi, eu sou a Comentora, sua coruja de sabedoria. Vou te ajudar a dormir melhor.';
+
 export async function previewVoice(voice: EnrichedVoice): Promise<void> {
-  await speak(
-    'Oi, eu sou Comentora, sua IA que usa o poder da IA e das ciências comportamentais para melhorar sua saúde física e mental.',
-    { voiceId: voice.identifier, language: voice.language || DEFAULT_LANGUAGE },
-  );
+  await speak(PREVIEW_TEXT, {
+    provider: 'system',
+    voiceId: voice.identifier,
+    language: voice.language || DEFAULT_LANGUAGE,
+  });
+}
+
+/**
+ * Reproduz uma frase de demonstração com uma voz Gemini específica.
+ * Usado pelo picker em Configurações.
+ */
+export async function previewGeminiVoice(voiceName: string): Promise<void> {
+  await speak(PREVIEW_TEXT, { provider: 'gemini', geminiVoiceName: voiceName });
 }
 
 export async function stopSpeaking() {
@@ -230,6 +325,14 @@ export async function stopSpeaking() {
     await Speech.stop();
   } catch {
     /* noop */
+  }
+  if (activeGeminiPlayer) {
+    try {
+      activeGeminiPlayer.pause();
+    } catch {
+      /* noop */
+    }
+    releaseGeminiPlayer(activeGeminiPlayer);
   }
   currentlySpeaking = false;
 }

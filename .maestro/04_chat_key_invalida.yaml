@@ -1,0 +1,54 @@
+appId: com.claudiogonzaga.comentor
+name: "AIChoice: API key inválida deve mostrar erro (não crashar)"
+tags:
+  - chat
+  - error-handling
+---
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible: "Me conta mais"
+    timeout: 15000
+- tapOn: "Me conta mais"
+- tapOn: "Gostei"
+- tapOn: "Vamos começar"
+- extendedWaitUntil:
+    visible: "Como devo te chamar"
+    timeout: 8000
+- tapOn:
+    text: "Como devo te chamar"
+    optional: true
+- inputText: "TestUser"
+- hideKeyboard
+- tapOn: "Brutalmente honesta"
+- scrollUntilVisible:
+    element:
+      text: "Continuar"
+    direction: DOWN
+- tapOn: "Continuar"
+- extendedWaitUntil:
+    visible: "IA"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Gemini"
+    direction: DOWN
+    optional: true
+- runFlow:
+    when:
+      visible: "Gemini"
+    commands:
+      - tapOn: "Gemini"
+      - extendedWaitUntil:
+          visible: "chave"
+          timeout: 5000
+      - tapOn:
+          text: "chave"
+          optional: true
+      - inputText: "AIzaSyDUMMY_INVALID_KEY_FOR_TEST_ONLY"
+      - hideKeyboard
+      - tapOn:
+          text: "Testar"
+          optional: true
+      - takeScreenshot: "05_invalid_key_error"
+- takeScreenshot: "05_final_state"

@@ -9,8 +9,8 @@ export interface OwlSpecies {
   /** Descrição curta da vocalização. */
   call: string;
   /**
-   * Nome do arquivo de som empacotado no app (assets/sounds/<file>).
-   * `null` = usa o som padrão do sistema (sem coruja).
+   * Nome do arquivo usado no canal de notificação do Android
+   * (assets/sounds/<file>). `null` = usa o som padrão do sistema.
    */
   soundFile: string | null;
   /**
@@ -23,36 +23,36 @@ export interface OwlSpecies {
 
 /**
  * Espécie usada quando o usuário ainda não escolheu nenhuma.
- * Caburé: chamado distinto, alegre e não assustador — bom default noturno.
+ * Coruja-buraqueira: vocalização curta e ritmada, não assustadora.
  */
-export const DEFAULT_OWL_SPECIES: OwlSpeciesId = 'cabure';
+export const DEFAULT_OWL_SPECIES: OwlSpeciesId = 'buraqueira';
 
 export const OWL_SPECIES: OwlSpecies[] = [
-  {
-    id: 'cabure',
-    name: 'Caburé',
-    scientific: 'Glaucidium brasilianum',
-    call: 'Série de assobios curtos e ritmados',
-    soundFile: 'owl_cabure.wav',
-    soundAsset: require('../../assets/sounds/owl_cabure.wav'),
-    emoji: '🦉',
-  },
   {
     id: 'buraqueira',
     name: 'Coruja-buraqueira',
     scientific: 'Athene cunicularia',
-    call: 'Dois toques suaves "cu-cuuu"',
-    soundFile: 'owl_buraqueira.wav',
-    soundAsset: require('../../assets/sounds/owl_buraqueira.wav'),
+    call: '"coo-coooo" curto e ritmado — a coruja que vive em buracos no chão',
+    soundFile: 'owl_buraqueira.mp3',
+    soundAsset: require('../../assets/sounds/owl_buraqueira.mp3'),
     emoji: '🦉',
   },
   {
-    id: 'murucututu',
-    name: 'Murucututu',
-    scientific: 'Pulsatrix perspicillata',
-    call: 'Batidas graves que aceleram',
-    soundFile: 'owl_murucututu.wav',
-    soundAsset: require('../../assets/sounds/owl_murucututu.wav'),
+    id: 'corujinha_mato',
+    name: 'Corujinha-do-mato',
+    scientific: 'Megascops choliba',
+    call: '"krrrrr-krr-krr" crescente — pequena coruja brasileira com tufos',
+    soundFile: 'owl_corujinha_mato.mp3',
+    soundAsset: require('../../assets/sounds/owl_corujinha_mato.mp3'),
+    emoji: '🦉',
+  },
+  {
+    id: 'bubo_bubo',
+    name: 'Bufo-real',
+    scientific: 'Bubo bubo',
+    call: '"uhu" profundo e ressonante — uma das maiores corujas do mundo',
+    soundFile: 'owl_bubo_bubo.mp3',
+    soundAsset: require('../../assets/sounds/owl_bubo_bubo.mp3'),
     emoji: '🦉',
   },
   {

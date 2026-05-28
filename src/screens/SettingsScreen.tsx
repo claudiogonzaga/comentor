@@ -17,6 +17,7 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
 import { VoicePicker } from '../components/VoicePicker';
+import { VoiceProviderCard } from '../components/VoiceProviderCard';
 import { OwlSoundPicker } from '../components/OwlSoundPicker';
 import { NudgesCard } from '../components/NudgesCard';
 import type { EnrichedVoice } from '../services/voice';
@@ -533,22 +534,36 @@ export function SettingsScreen() {
         </Card>
 
         <OwlSoundPicker
-          value={(config?.owlSpecies ?? 'cabure') as OwlSpeciesId}
+          value={(config?.owlSpecies ?? 'buraqueira') as OwlSpeciesId}
           onChange={async (species: OwlSpeciesId) => {
             await setConfig({ owlSpecies: species });
             await rescheduleAllNotifications();
           }}
         />
 
-        <VoicePicker
-          value={config?.voiceId ?? null}
-          onChange={async (v: EnrichedVoice | null) => {
-            await setConfig({
-              voiceId: v?.identifier ?? null,
-              voiceLanguage: v?.language ?? null,
-            });
+        <VoiceProviderCard
+          provider={config?.voiceProvider ?? 'system'}
+          geminiVoiceName={config?.geminiVoiceName ?? 'Aoede'}
+          hasApiKey={!!config?.hasApiKey}
+          onProviderChange={async (p) => {
+            await setConfig({ voiceProvider: p });
+          }}
+          onGeminiVoiceChange={async (name) => {
+            await setConfig({ geminiVoiceName: name });
           }}
         />
+
+        {(config?.voiceProvider ?? 'system') === 'system' ? (
+          <VoicePicker
+            value={config?.voiceId ?? null}
+            onChange={async (v: EnrichedVoice | null) => {
+              await setConfig({
+                voiceId: v?.identifier ?? null,
+                voiceLanguage: v?.language ?? null,
+              });
+            }}
+          />
+        ) : null}
 
         <NudgesCard />
 

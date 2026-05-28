@@ -33,10 +33,17 @@ export interface LocalModelInfo {
 export type OwlMood = 'calm' | 'worried' | 'serious' | 'sleeping' | 'celebrating';
 
 export type OwlSpeciesId =
-  | 'cabure'
   | 'buraqueira'
-  | 'murucututu'
+  | 'corujinha_mato'
+  | 'bubo_bubo'
   | 'default';
+
+/**
+ * Provider de TTS. `system` usa expo-speech (vozes do Android, grátis mas
+ * pobres em pt-BR). `gemini` usa a API gemini-2.5-flash-preview-tts —
+ * voz neural muito superior, mas consome cota da API key configurada.
+ */
+export type VoiceProvider = 'system' | 'gemini';
 
 export type IntensityLevel = 1 | 2 | 3 | 4 | 5;
 
@@ -64,6 +71,10 @@ export interface UserConfig {
   interviewCompletedAt: string | null;
   voiceId: string | null;
   voiceLanguage: string | null;
+  /** Provider de TTS ativo. `system` é o default; `gemini` consome cota. */
+  voiceProvider: VoiceProvider;
+  /** Nome da voz Gemini pré-construída (Aoede, Charon, Kore, ...). */
+  geminiVoiceName: string;
   owlSpecies: OwlSpeciesId;
   sleepAwarenessEnabled: boolean;
   /** Quantos lembretes da Comentora por dia (a densidade dobra após o pôr do sol). */

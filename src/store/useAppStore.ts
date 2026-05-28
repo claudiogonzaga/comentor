@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { UserConfig } from '../types';
 import { getUserConfig, updateUserConfig } from '../services/database';
 import { getApiKey, saveApiKey } from '../services/secureStore';
-import { setActiveVoice } from '../services/voice';
+import { setActiveVoice, setActiveVoiceProvider } from '../services/voice';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 
@@ -18,6 +18,7 @@ interface AppState {
 
 function syncVoiceFromConfig(config: UserConfig) {
   setActiveVoice(config.voiceId ?? null, config.voiceLanguage ?? null);
+  setActiveVoiceProvider(config.voiceProvider, config.geminiVoiceName);
 }
 
 export const useAppStore = create<AppState>((set) => ({

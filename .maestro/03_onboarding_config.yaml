@@ -1,0 +1,33 @@
+appId: com.claudiogonzaga.comentor
+name: "Onboarding: preenche config e chega no AIChoice"
+tags:
+  - onboarding
+---
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible: "Me conta mais"
+    timeout: 15000
+- tapOn: "Me conta mais"
+- tapOn: "Gostei"
+- tapOn: "Vamos começar"
+- extendedWaitUntil:
+    visible: "Como devo te chamar"
+    timeout: 8000
+- tapOn:
+    text: "Como devo te chamar"
+    optional: true
+- inputText: "TestUser"
+- hideKeyboard
+- assertVisible: "Brutalmente honesta"
+- tapOn: "Brutalmente honesta"
+- scrollUntilVisible:
+    element:
+      text: "Continuar"
+    direction: DOWN
+- takeScreenshot: "03_config_filled"
+- tapOn: "Continuar"
+- extendedWaitUntil:
+    visible: "IA"
+    timeout: 10000
+- takeScreenshot: "04_ai_choice"

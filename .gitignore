@@ -40,6 +40,9 @@ yarn-error.*
 *.apk
 *.aab
 
+# e2e artifacts (logs, screenshots, junit) — gerados por scripts/run-e2e.sh
+test-results/
+
 # typescript
 *.tsbuildinfo
 

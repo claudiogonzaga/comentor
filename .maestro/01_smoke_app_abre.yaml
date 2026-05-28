@@ -1,0 +1,22 @@
+appId: com.claudiogonzaga.comentor
+name: "Smoke: app abre sem crash e chega no Onboarding"
+tags:
+  - smoke
+  - critical
+---
+- clearState
+- launchApp
+# O Pixel_7 AVD costuma mostrar "Process system isn't responding" durante
+# o boot do app. Não é bug do app — é o emulador travando o system_server.
+# Repetimos tapOn "Wait" várias vezes pra dismissar quando aparecer.
+- repeat:
+    times: 8
+    commands:
+      - tapOn:
+          text: "Wait"
+          optional: true
+- extendedWaitUntil:
+    visible: "Me conta mais"
+    timeout: 30000
+- assertVisible: "Me conta mais"
+- takeScreenshot: "01_onboarding_step1"

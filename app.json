@@ -2,7 +2,7 @@
   "expo": {
     "name": "Comentora",
     "slug": "comentor",
-    "version": "1.17.0",
+    "version": "1.18.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -58,9 +58,9 @@
           "androidMode": "default",
           "androidCollapsedTitle": "Comentora",
           "sounds": [
-            "./assets/sounds/owl_cabure.wav",
-            "./assets/sounds/owl_buraqueira.wav",
-            "./assets/sounds/owl_murucututu.wav"
+            "./assets/sounds/owl_buraqueira.mp3",
+            "./assets/sounds/owl_corujinha_mato.mp3",
+            "./assets/sounds/owl_bubo_bubo.mp3"
           ]
         }
       ],

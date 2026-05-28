@@ -35,11 +35,11 @@ export function playOwlCall(species?: OwlSpeciesId | null): void {
     const player = createAudioPlayer(asset);
     active = player;
     player.play();
-    // Os cantos têm 1,4–3 s; libera o player com folga depois disso.
+    // Os sons isolados têm ~5–12 s; libera o player com folga depois disso.
     setTimeout(() => {
       release(player);
       if (active === player) active = null;
-    }, 6000);
+    }, 15000);
   } catch (err) {
     console.warn('playOwlCall falhou:', err);
   }
