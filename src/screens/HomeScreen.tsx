@@ -10,7 +10,7 @@ import { colors, radius, spacing, typography } from '../theme';
 import { SLEEP_AWARENESS_CARDS } from '../constants/sleepAwarenessCards';
 import { getDashboardData, markSleepDone } from '../services/coach';
 import type { OwlMood } from '../types';
-import { cancelAllReminders } from '../services/notifications';
+import { cancelSleepEscalationReminders } from '../services/notifications';
 import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
 
 interface Dashboard {
@@ -89,7 +89,9 @@ export function HomeScreen() {
     setMarking(true);
     try {
       await markSleepDone(data.sleepHabit.id);
-      await cancelAllReminders();
+      // Só encerra a corrente de lembretes do sono desta noite — preserva
+      // os nudges de inspiração, de conscientização e os diários.
+      await cancelSleepEscalationReminders();
       await reload();
     } finally {
       setMarking(false);

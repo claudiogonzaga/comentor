@@ -20,7 +20,7 @@ import {
   SNOOZE_ACTION,
   NUDGE_DONE_ACTION,
   NUDGE_SNOOZE_ACTION,
-  cancelAllReminders,
+  cancelSleepEscalationReminders,
 } from '../services/notifications';
 import { confirmNudge, snoozeNudge } from '../services/nudges';
 import { markSleepDone } from '../services/coach';
@@ -95,7 +95,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
               /* still navigate even if logging fails */
             }
           }
-          await cancelAllReminders();
+          // Encerra só a corrente do sono — mantém inspiração/nudges vivos.
+          await cancelSleepEscalationReminders();
           nav.navigate('Home');
           return;
         }

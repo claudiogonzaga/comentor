@@ -28,7 +28,7 @@ import {
 } from '../services/coach';
 import { playOwlCall } from '../services/owlSound';
 import { getRecentChat } from '../services/database';
-import { cancelAllReminders } from '../services/notifications';
+import { cancelSleepEscalationReminders } from '../services/notifications';
 import { speak, startListening, stopListening, stopSpeaking } from '../services/voice';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { useAppStore } from '../store/useAppStore';
@@ -232,7 +232,9 @@ export function ChatScreen() {
     if (!habitId) return;
     await stopSpeaking();
     await markSleepDone(habitId);
-    await cancelAllReminders();
+    // Só encerra a corrente do sono desta noite — preserva inspiração,
+    // conscientização e nudges diários.
+    await cancelSleepEscalationReminders();
     navigation.navigate('Home');
   };
 
