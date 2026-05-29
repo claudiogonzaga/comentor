@@ -90,6 +90,11 @@ export interface UserConfig {
    * a Comentora também FALA o nudge por voz (TTS), além de mostrar o texto.
    */
   voiceNudgesEnabled: boolean;
+  /**
+   * Modo "inspiração": quando true, a Comentora envia alertas de hora em hora
+   * (janela diurna) com mensagens de otimismo, persistência e inspiração.
+   */
+  inspirationModeEnabled: boolean;
 }
 
 export interface InterviewSummary {

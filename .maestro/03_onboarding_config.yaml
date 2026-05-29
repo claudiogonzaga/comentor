@@ -5,6 +5,10 @@ tags:
 ---
 - clearState
 - launchApp
+# Dispensa o diálogo de permissão de notificação do primeiro launch.
+- tapOn:
+    text: "Allow|Permitir"
+    optional: true
 - extendedWaitUntil:
     visible: "Me conta mais"
     timeout: 15000

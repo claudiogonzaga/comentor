@@ -64,6 +64,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       gemini_voice_name TEXT NOT NULL DEFAULT 'Aoede',
       dnd_bypass_enabled INTEGER NOT NULL DEFAULT 0,
       voice_nudges_enabled INTEGER NOT NULL DEFAULT 0,
+      inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0,
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -265,6 +266,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN voice_nudges_enabled INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  if (!colNames.includes('inspiration_mode_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
 
   // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
   // existing per-user customizations from being overwritten on later runs.
@@ -389,6 +395,7 @@ interface UserConfigRow {
   gemini_voice_name: string | null;
   dnd_bypass_enabled: number | null;
   voice_nudges_enabled: number | null;
+  inspiration_mode_enabled: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -418,6 +425,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   geminiVoiceName: r.gemini_voice_name ?? 'Aoede',
   dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
+  inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -459,6 +467,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     geminiVoiceName: 'gemini_voice_name',
     dndBypassEnabled: 'dnd_bypass_enabled',
     voiceNudgesEnabled: 'voice_nudges_enabled',
+    inspirationModeEnabled: 'inspiration_mode_enabled',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

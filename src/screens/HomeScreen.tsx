@@ -4,6 +4,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { HealthCard } from '../components/HealthCard';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
 import { SLEEP_AWARENESS_CARDS } from '../constants/sleepAwarenessCards';
@@ -189,10 +190,12 @@ export function HomeScreen() {
           </Card>
         )}
 
+        <HealthCard />
+
         {!data?.todayLog?.completed && (
           <View style={styles.actions}>
             <Button
-              label="Me convença a ser saudável"
+              label="Vamos bater um papo"
               onPress={() => navigation.navigate('Chat', { mode: 'convince' })}
             />
             <View style={{ height: spacing.sm }} />

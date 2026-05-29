@@ -5,6 +5,7 @@ import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice, setActiveVoiceProvider } from '../services/voice';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
+import { scheduleInspirationNotifications } from '../services/inspiration';
 
 interface AppState {
   ready: boolean;
@@ -40,6 +41,10 @@ export const useAppStore = create<AppState>((set) => ({
     // Re-arm the daytime sleep-awareness nudges (random times per day).
     scheduleSleepAwarenessNotifications().catch((err) =>
       console.warn('scheduleSleepAwarenessNotifications on init failed:', err),
+    );
+    // Re-arm the hourly inspiration alerts (no-op when the mode is off).
+    scheduleInspirationNotifications().catch((err) =>
+      console.warn('scheduleInspirationNotifications on init failed:', err),
     );
   },
   refreshConfig: async () => {

@@ -34,6 +34,7 @@ import {
   openOwlChannelSettings,
 } from '../services/notifications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
+import { scheduleInspirationNotifications } from '../services/inspiration';
 import { testApiKey } from '../services/gemini';
 import {
   deleteAllDownloadedModels,
@@ -96,6 +97,9 @@ export function SettingsScreen() {
   );
   const [dndBypass, setDndBypass] = useState(config?.dndBypassEnabled ?? false);
   const [voiceNudges, setVoiceNudges] = useState(config?.voiceNudgesEnabled ?? false);
+  const [inspirationMode, setInspirationMode] = useState(
+    config?.inspirationModeEnabled ?? false,
+  );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingNotif, setTestingNotif] = useState(false);
@@ -120,6 +124,7 @@ export function SettingsScreen() {
       setNotifPerDay(config.notificationsPerDay ?? 4);
       setDndBypass(config.dndBypassEnabled ?? false);
       setVoiceNudges(config.voiceNudgesEnabled ?? false);
+      setInspirationMode(config.inspirationModeEnabled ?? false);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -548,6 +553,33 @@ export function SettingsScreen() {
               </View>
             </View>
           )}
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Modo inspiração ✨
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                A cada hora (das 8h às 21h) a Comentora te manda uma mensagem
+                curta de otimismo, persistência e inspiração. Ligue nos dias em
+                que precisar de um empurrãozinho de ânimo ao longo do dia.
+              </Text>
+            </View>
+            <Switch
+              value={inspirationMode}
+              onValueChange={async (next) => {
+                setInspirationMode(next);
+                try {
+                  await setConfig({ inspirationModeEnabled: next });
+                  await scheduleInspirationNotifications();
+                } catch (err) {
+                  console.warn('toggle inspiration mode failed:', err);
+                }
+              }}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={inspirationMode ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
 
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             O lembrete de respiração antes de dormir agora vive em &quot;Nudges&quot; abaixo

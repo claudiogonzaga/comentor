@@ -2,7 +2,7 @@
   "expo": {
     "name": "Comentora",
     "slug": "comentor",
-    "version": "1.19.0",
+    "version": "1.20.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -40,7 +40,10 @@
         "RECORD_AUDIO",
         "ACCESS_NETWORK_STATE",
         "INTERNET",
-        "ACCESS_NOTIFICATION_POLICY"
+        "ACCESS_NOTIFICATION_POLICY",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_STEPS"
       ]
     },
     "web": {
@@ -79,7 +82,18 @@
         {
           "microphonePermission": "A Comentora precisa do microfone para te ouvir.",
           "speechRecognitionPermission": "Usado para transcrever sua fala em texto.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
+      ],
+      "react-native-health-connect",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
         }
       ]
     ],

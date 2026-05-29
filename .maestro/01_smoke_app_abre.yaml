@@ -6,6 +6,11 @@ tags:
 ---
 - clearState
 - launchApp
+# No primeiro launch o Android pede a permissão de notificação
+# (POST_NOTIFICATIONS). O diálogo do sistema cobre a onboarding — dispensa.
+- tapOn:
+    text: "Allow|Permitir"
+    optional: true
 # O Pixel_7 AVD costuma mostrar "Process system isn't responding" durante
 # o boot do app. Não é bug do app — é o emulador travando o system_server.
 # Repetimos tapOn "Wait" várias vezes pra dismissar quando aparecer.
@@ -14,6 +19,9 @@ tags:
     commands:
       - tapOn:
           text: "Wait"
+          optional: true
+      - tapOn:
+          text: "Allow|Permitir"
           optional: true
 - extendedWaitUntil:
     visible: "Me conta mais"

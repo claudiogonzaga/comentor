@@ -23,6 +23,7 @@ import {
 } from './src/services/notifications';
 import { scheduleAllNudges } from './src/services/nudges';
 import { scheduleSleepAwarenessNotifications } from './src/services/sleepAwareness';
+import { scheduleInspirationNotifications } from './src/services/inspiration';
 import { colors } from './src/theme';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
@@ -53,6 +54,7 @@ export default function App() {
         // antes de o usuário conceder a permissão, e aí nada seria entregue.
         await scheduleAllNudges().catch(() => {});
         await scheduleSleepAwarenessNotifications().catch(() => {});
+        await scheduleInspirationNotifications().catch(() => {});
       }
     })();
   }, []);

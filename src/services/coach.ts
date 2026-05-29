@@ -28,6 +28,8 @@ import {
 } from './notifications';
 import { scheduleAllNudges } from './nudges';
 import { scheduleSleepAwarenessNotifications } from './sleepAwareness';
+import { scheduleInspirationNotifications } from './inspiration';
+import { getHealthSnapshot, formatHealthForCoach } from './health';
 import { summaryToCoachContext } from './interview';
 import { pickFallback } from './fallbackMessages';
 import { recordCompletion } from './streaks';
@@ -108,6 +110,21 @@ interface CoachingContext {
   systemPrompt?: string;
   interviewContext?: string;
   recentSnoozeFeedback?: string;
+  /** Resumo dos dados de saúde (sono/exercício/passos) do Health Connect. */
+  healthContext?: string;
+}
+
+/**
+ * Lê o retrato de saúde do Health Connect e o formata para o contexto da IA.
+ * Best-effort: devolve string vazia se indisponível / sem permissão / erro.
+ */
+async function getHealthContext(): Promise<string> {
+  try {
+    const snapshot = await getHealthSnapshot();
+    return snapshot ? formatHealthForCoach(snapshot) : '';
+  } catch {
+    return '';
+  }
 }
 
 function formatSnoozeFeedback(feedback: SnoozeFeedback[]): string {
@@ -155,6 +172,11 @@ function buildSystemPromptText(ctx: CoachingContext): string {
     extras.push(
       `\nADIAMENTOS RECENTES (motivos que a pessoa deu pra adiar nas últimas vezes):\n${ctx.recentSnoozeFeedback}\n` +
         `Use essa informação para personalizar a abordagem — não repita argumentos genéricos se já souber o motivo real.`,
+    );
+  }
+  if (ctx.healthContext && ctx.healthContext.trim().length > 0) {
+    extras.push(
+      `\nDADOS DE SAÚDE RECENTES (do Health Connect — use para personalizar, mas não soe robótico citando números crus):\n${ctx.healthContext}`,
     );
   }
   return extras.length ? `${base}\n${extras.join('\n')}` : base;
@@ -306,6 +328,7 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   const recentLogs = await getRecentLogs(habit.id, 14);
   const history = await getRecentChat(habit.id, 10);
   const personalization = await buildPersonalizationContext(habit.id);
+  const healthContext = await getHealthContext();
 
   const result = await runCoachGeneration(
     config,
@@ -320,6 +343,7 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
       ...personalization,
+      healthContext,
     },
     history,
   );
@@ -408,6 +432,7 @@ export async function getConvinceMessageForNow(): Promise<ConvinceResult> {
   const recentLogs = await getRecentLogs(habit.id, 14);
   const history = await getRecentChat(habit.id, 6);
   const personalization = await buildPersonalizationContext(habit.id);
+  const healthContext = await getHealthContext();
   const focus = pickConvinceFocus(config.bedtime);
 
   const instruction =
@@ -431,6 +456,7 @@ export async function getConvinceMessageForNow(): Promise<ConvinceResult> {
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
       ...personalization,
+      healthContext,
     },
     history,
     instruction,
@@ -458,6 +484,7 @@ export async function sendUserMessage(
   const recentLogs = await getRecentLogs(habitId, 14);
 
   const personalization = await buildPersonalizationContext(habitId);
+  const healthContext = await getHealthContext();
   const result = await runChatGeneration(
     config,
     {
@@ -471,6 +498,7 @@ export async function sendUserMessage(
       recentLogsSummary: summarizeRecentLogs(recentLogs),
       systemPrompt: config.systemPrompt,
       ...personalization,
+      healthContext,
     },
     history,
     text,
@@ -540,6 +568,7 @@ export async function rescheduleAllNotifications(): Promise<void> {
   });
   await scheduleAllNudges();
   await scheduleSleepAwarenessNotifications();
+  await scheduleInspirationNotifications();
 }
 
 export async function getDashboardData() {

@@ -14,13 +14,15 @@ interface CoachingContext {
   tone: Tone;
   recentLogsSummary: string;
   systemPrompt?: string;
+  /** Resumo dos dados de saúde (sono/exercício/passos) do Health Connect. */
+  healthContext?: string;
 }
 
 function buildSystemPrompt(ctx: CoachingContext): string {
   const template = ctx.systemPrompt && ctx.systemPrompt.trim().length > 0
     ? ctx.systemPrompt
     : DEFAULT_SYSTEM_PROMPT;
-  return fillTemplate(template, {
+  const base = fillTemplate(template, {
     userName: ctx.userName ?? 'amigo(a)',
     bedtime: ctx.bedtime,
     currentTime: ctx.currentTime,
@@ -31,6 +33,10 @@ function buildSystemPrompt(ctx: CoachingContext): string {
     tone: ctx.tone,
     recentLogsSummary: ctx.recentLogsSummary,
   });
+  if (ctx.healthContext && ctx.healthContext.trim().length > 0) {
+    return `${base}\n\nDADOS DE SAÚDE RECENTES (do Health Connect — use para personalizar, mas não soe robótico citando números crus):\n${ctx.healthContext}`;
+  }
+  return base;
 }
 
 interface GeminiContent {
