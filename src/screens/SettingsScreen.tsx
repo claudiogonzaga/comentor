@@ -30,6 +30,8 @@ import {
   ensurePermissions,
   scheduleNightReminders,
   sendTestNotification,
+  openDndAccessSettings,
+  openOwlChannelSettings,
 } from '../services/notifications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { testApiKey } from '../services/gemini';
@@ -92,6 +94,8 @@ export function SettingsScreen() {
   const [notifPerDay, setNotifPerDay] = useState(
     config?.notificationsPerDay ?? 4,
   );
+  const [dndBypass, setDndBypass] = useState(config?.dndBypassEnabled ?? false);
+  const [voiceNudges, setVoiceNudges] = useState(config?.voiceNudgesEnabled ?? false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingNotif, setTestingNotif] = useState(false);
@@ -114,6 +118,8 @@ export function SettingsScreen() {
       setVoiceEnabled(config.voiceModeEnabled);
       setAwarenessEnabled(config.sleepAwarenessEnabled);
       setNotifPerDay(config.notificationsPerDay ?? 4);
+      setDndBypass(config.dndBypassEnabled ?? false);
+      setVoiceNudges(config.voiceNudgesEnabled ?? false);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -436,6 +442,34 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Falar os nudges em voz alta 🗣️
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                Quando o app está aberto, a coruja também lê o lembrete em voz
+                alta (usa a voz escolhida acima). Ela não fala se já estiver
+                falando. Obs.: por limite do Android, isso só vale com o app em
+                primeiro plano — não dá pra detectar chamadas de Teams/Meet/
+                WhatsApp em segundo plano.
+              </Text>
+            </View>
+            <Switch
+              value={voiceNudges}
+              onValueChange={async (next) => {
+                setVoiceNudges(next);
+                try {
+                  await setConfig({ voiceNudgesEnabled: next });
+                } catch (err) {
+                  console.warn('toggle voice nudges failed:', err);
+                }
+              }}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={voiceNudges ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
                 Lembretes da Comentora 🌙
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
@@ -530,6 +564,55 @@ export function SettingsScreen() {
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             Não está recebendo lembretes? Toque acima — se a notificação de teste
             não aparecer, o Android está bloqueando (permissão ou bateria).
+          </Text>
+
+          <View style={{ height: spacing.md }} />
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Atravessar o Não Perturbe 🔕
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                No modo Não Perturbe a coruja ainda te alcança — só que sem
+                som: ela apenas vibra, no padrão do canto da coruja. Você
+                precisa liberar o &quot;acesso ao Não Perturbe&quot; do Android.
+              </Text>
+            </View>
+            <Switch
+              value={dndBypass}
+              onValueChange={async (next) => {
+                setDndBypass(next);
+                try {
+                  await setConfig({ dndBypassEnabled: next });
+                  await rescheduleAllNotifications();
+                  if (next) await openDndAccessSettings();
+                } catch (err) {
+                  console.warn('toggle dnd bypass failed:', err);
+                }
+              }}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={dndBypass ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+
+          {dndBypass && (
+            <Button
+              label="Liberar acesso ao Não Perturbe"
+              variant="secondary"
+              onPress={openDndAccessSettings}
+            />
+          )}
+
+          <View style={{ height: spacing.sm }} />
+          <Button
+            label="Ajustar volume / som das notificações"
+            variant="secondary"
+            onPress={openOwlChannelSettings}
+          />
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
+            O Android não permite que o app mude o volume da notificação — quem
+            controla é o sistema. Este botão abre a tela onde você ajusta
+            volume, som e importância da coruja.
           </Text>
         </Card>
 

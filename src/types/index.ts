@@ -79,6 +79,17 @@ export interface UserConfig {
   sleepAwarenessEnabled: boolean;
   /** Quantos lembretes da Comentora por dia (a densidade dobra após o pôr do sol). */
   notificationsPerDay: number;
+  /**
+   * Quando true, a coruja usa um canal que atravessa o "Não Perturbe": ela
+   * apenas vibra (padrão do canto da coruja), sem tocar som. Requer que o
+   * usuário conceda "acesso ao Não Perturbe" nas configurações do sistema.
+   */
+  dndBypassEnabled: boolean;
+  /**
+   * Quando true e o app está em primeiro plano (sem áudio tocando/gravando),
+   * a Comentora também FALA o nudge por voz (TTS), além de mostrar o texto.
+   */
+  voiceNudgesEnabled: boolean;
 }
 
 export interface InterviewSummary {

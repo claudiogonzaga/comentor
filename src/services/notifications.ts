@@ -1,19 +1,38 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import type { IntensityLevel, OwlSpeciesId } from '../types';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { DEFAULT_OWL_SPECIES, getOwlSpecies } from '../constants/owlSpecies';
 import { getUserConfig } from './database';
 
 // Android notification channels are immutable once created — changing a
-// channel's sound has no effect. Bump this when an owl .wav is replaced so a
-// fresh channel is created with the new audio.
-const CHANNEL_VERSION = 3;
+// channel's sound (or vibration pattern) has no effect on an existing channel.
+// Bump this when an owl sound is replaced, or when the vibration pattern below
+// changes, so a fresh channel is created with the new audio/vibration.
+//
+// v4: owl sounds replaced in 1.18.0 (owl_buraqueira / owl_corujinha_mato /
+//     owl_bubo_bubo) + owl-song vibration pattern introduced.
+const CHANNEL_VERSION = 4;
+
+// Vibração que imita o canto de uma coruja ("hoo, hoo-hoo, hoooo"): pulsos
+// curtos seguidos de um pulso longo. Formato Android: [espera, vibra, pausa,
+// vibra, ...] em milissegundos. Usado para que a coruja "cante" mesmo quando
+// o som está mudo (ex.: telefone no silencioso / vibração).
+const OWL_VIBRATION_PATTERN = [0, 200, 200, 200, 200, 200, 450, 550];
 
 /** Category that gives sleep reminders their "Vou dormir" / "Adiar" buttons. */
 export const SLEEP_CATEGORY = 'comentor-sleep-actions';
 export const SLEEP_NOW_ACTION = 'sleep-now';
 export const SNOOZE_ACTION = 'snooze-15';
+
+/**
+ * Category that gives "verify" behavior nudges (suplemento, óculos de luz
+ * azul, etc.) a confirmation button. The owl keeps insisting until the user
+ * taps "Já fiz ✅".
+ */
+export const NUDGE_CATEGORY = 'comentor-nudge-actions';
+export const NUDGE_DONE_ACTION = 'nudge-done';
+export const NUDGE_SNOOZE_ACTION = 'nudge-snooze';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -51,10 +70,26 @@ export async function ensureNotificationCategories() {
       options: { opensAppToForeground: true },
     },
   ]);
+  // Confirmation buttons for "verify" behavior nudges. Both open the app so
+  // RootNavigator can handle them reliably even from a cold start (a killed
+  // app can't run JS for a background action without a registered task), which
+  // matches the proven sleep-reminder buttons.
+  await Notifications.setNotificationCategoryAsync(NUDGE_CATEGORY, [
+    {
+      identifier: NUDGE_DONE_ACTION,
+      buttonTitle: 'Já fiz ✅',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: NUDGE_SNOOZE_ACTION,
+      buttonTitle: 'Lembrar depois',
+      options: { opensAppToForeground: true },
+    },
+  ]);
 }
 
-function channelIdFor(species: OwlSpeciesId): string {
-  return `comentor-owl-${species}-v${CHANNEL_VERSION}`;
+function channelIdFor(species: OwlSpeciesId, dnd: boolean): string {
+  return `comentor-owl-${species}-v${CHANNEL_VERSION}${dnd ? '-dnd' : ''}`;
 }
 
 async function resolveSpecies(species?: OwlSpeciesId): Promise<OwlSpeciesId> {
@@ -67,24 +102,48 @@ async function resolveSpecies(species?: OwlSpeciesId): Promise<OwlSpeciesId> {
   }
 }
 
+async function resolveDndBypass(): Promise<boolean> {
+  try {
+    const config = await getUserConfig();
+    return !!config.dndBypassEnabled;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ensures the Android notification channel for the given (or active) owl
  * species exists and returns its id. On iOS there are no channels, so it just
  * returns the synthetic id (unused there).
+ *
+ * When DND-bypass is on, a SEPARATE channel is used: it pierces Do Not Disturb
+ * but plays NO sound — only the owl-song vibration. (Android channels are
+ * immutable, so the bypass flag is baked into a distinct channel id; toggling
+ * the setting requires rescheduling so notifications land on the new channel.)
  */
-export async function ensureChannel(species?: OwlSpeciesId): Promise<string> {
+export async function ensureChannel(
+  species?: OwlSpeciesId,
+  dndOverride?: boolean,
+): Promise<string> {
   const sp = await resolveSpecies(species);
-  const id = channelIdFor(sp);
+  const dnd = dndOverride ?? (await resolveDndBypass());
+  const id = channelIdFor(sp, dnd);
   if (Platform.OS !== 'android') return id;
   const spec = getOwlSpecies(sp);
   await Notifications.setNotificationChannelAsync(id, {
-    name: `Comentora — ${spec.name}`,
-    description: 'Lembretes de sono e nudges, com som de coruja',
+    name: dnd
+      ? `Comentora — ${spec.name} (Não Perturbe)`
+      : `Comentora — ${spec.name}`,
+    description: dnd
+      ? 'Atravessa o Não Perturbe — só vibra no padrão do canto da coruja, sem som.'
+      : 'Lembretes de sono e nudges, com som de coruja',
     importance: Notifications.AndroidImportance.HIGH,
-    sound: spec.soundFile ?? 'default',
-    vibrationPattern: [0, 250, 250, 250],
+    // In DND-bypass mode the owl stays silent and only vibrates.
+    sound: dnd ? null : spec.soundFile ?? 'default',
+    vibrationPattern: OWL_VIBRATION_PATTERN,
+    enableVibrate: true,
     lightColor: '#F4C553',
-    bypassDnd: false,
+    bypassDnd: dnd,
   });
   return id;
 }
@@ -207,6 +266,51 @@ export async function snoozeFor(minutes: number, level: IntensityLevel, habitId:
 
 export async function listScheduled() {
   return Notifications.getAllScheduledNotificationsAsync();
+}
+
+// O pacote é fixo pra este app (igual ao app.json e ao run-e2e.sh).
+const ANDROID_PACKAGE = 'com.claudiogonzaga.comentor';
+
+/**
+ * Abre a tela do sistema "Acesso ao Não Perturbe", onde o usuário libera a
+ * Comentora a atravessar o modo Não Perturbe. Sem essa permissão o canal de
+ * bypass é criado mas o Android ignora o bypass.
+ */
+export async function openDndAccessSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Linking.sendIntent('android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS');
+  } catch {
+    try {
+      await Linking.sendIntent('android.settings.SETTINGS');
+    } catch {
+      /* desiste silenciosamente */
+    }
+  }
+}
+
+/**
+ * Abre as configurações do canal de notificação da coruja, onde o usuário
+ * ajusta volume/som/importância (o Android não deixa o app mudar isso
+ * programaticamente — o volume da notificação é controlado pelo sistema).
+ */
+export async function openOwlChannelSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const channelId = await ensureChannel();
+  try {
+    await Linking.sendIntent('android.settings.CHANNEL_NOTIFICATION_SETTINGS', [
+      { key: 'android.provider.extra.APP_PACKAGE', value: ANDROID_PACKAGE },
+      { key: 'android.provider.extra.CHANNEL_ID', value: channelId },
+    ]);
+  } catch {
+    try {
+      await Linking.sendIntent('android.settings.APP_NOTIFICATION_SETTINGS', [
+        { key: 'android.provider.extra.APP_PACKAGE', value: ANDROID_PACKAGE },
+      ]);
+    } catch {
+      /* desiste silenciosamente */
+    }
+  }
 }
 
 /**

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
@@ -14,8 +15,16 @@ import { HistoryScreen } from '../screens/HistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
-import { SLEEP_NOW_ACTION, SNOOZE_ACTION, cancelAllReminders } from '../services/notifications';
+import {
+  SLEEP_NOW_ACTION,
+  SNOOZE_ACTION,
+  NUDGE_DONE_ACTION,
+  NUDGE_SNOOZE_ACTION,
+  cancelAllReminders,
+} from '../services/notifications';
+import { confirmNudge, snoozeNudge } from '../services/nudges';
 import { markSleepDone } from '../services/coach';
+import { isSpeaking, speak } from '../services/voice';
 import { colors } from '../theme';
 
 export type RootStackParamList = {
@@ -69,6 +78,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         type?: string;
         habitId?: number;
         level?: number;
+        nudgeType?: string;
       };
       const type = data.type ?? '';
       const action = response.actionIdentifier;
@@ -107,6 +117,22 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
       } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
         nav.navigate('Breathing');
       } else if (type.startsWith('nudge:') || type === 'awareness') {
+        // Verify-behavior nudges (suplemento, óculos de luz azul) carry the
+        // "Já fiz ✅" / "Lembrar depois" buttons. Resolve the action, then go
+        // Home so the user lands somewhere sensible.
+        if (action === NUDGE_DONE_ACTION && data.nudgeType) {
+          try {
+            await confirmNudge(data.nudgeType);
+          } catch {
+            /* still navigate even if it fails */
+          }
+        } else if (action === NUDGE_SNOOZE_ACTION && data.nudgeType) {
+          try {
+            await snoozeNudge(data.nudgeType);
+          } catch {
+            /* still navigate even if it fails */
+          }
+        }
         nav.navigate('Home');
       }
     };
@@ -139,6 +165,41 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
     // Warm: app already running when the user taps.
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
 
+    // Voice nudges (foreground only): when an owl notification arrives while
+    // the app is open and "falar nudges" is on, read it aloud via TTS. A
+    // killed/background app can't run JS at fire time, so this is the honest,
+    // reliable subset — speaking when the user actually has the app open.
+    const speakIfEnabled = async (notification: Notifications.Notification) => {
+      try {
+        if (AppState.currentState !== 'active') return;
+        const cfg = useAppStore.getState().config;
+        if (!cfg?.voiceNudgesEnabled) return;
+        // Don't talk over the owl's own voice (chat reading / preview).
+        if (isSpeaking()) return;
+        const d = (notification.request.content.data ?? {}) as { type?: string };
+        const t = d.type ?? '';
+        const speakable =
+          t.startsWith('nudge:') || t === 'awareness' || t === 'sleep-reminder';
+        if (!speakable) return;
+        const title = notification.request.content.title ?? '';
+        const body = notification.request.content.body ?? '';
+        // Strip emojis/decoration so the TTS doesn't read "owl face" etc.
+        const text = [title, body]
+          .filter(Boolean)
+          .join('. ')
+          .replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!text) return;
+        await speak(text);
+      } catch {
+        /* speaking is best-effort */
+      }
+    };
+    const receivedSub = Notifications.addNotificationReceivedListener((n) => {
+      void speakIfEnabled(n);
+    });
+
     // Runs whatever notification response arrived before navigation was ready.
     const flush = () => {
       navReadyRef.current = true;
@@ -152,7 +213,10 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
     // Guard against onReady having already fired before this effect ran.
     if (navigationRef.current?.isReady?.()) flush();
 
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      receivedSub.remove();
+    };
   }, [navigationRef]);
 
   return (

@@ -62,6 +62,8 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       notifications_per_day INTEGER NOT NULL DEFAULT 4,
       voice_provider TEXT NOT NULL DEFAULT 'system',
       gemini_voice_name TEXT NOT NULL DEFAULT 'Aoede',
+      dnd_bypass_enabled INTEGER NOT NULL DEFAULT 0,
+      voice_nudges_enabled INTEGER NOT NULL DEFAULT 0,
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
       local_model_downloaded INTEGER NOT NULL DEFAULT 0,
@@ -161,6 +163,17 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- v1.19: registra que o usuário confirmou ter feito um comportamento
+    -- (ex.: tomou suplemento, colocou óculos) num dia. Enquanto não houver
+    -- registro do dia, a coruja insiste com a corrente de lembretes.
+    CREATE TABLE IF NOT EXISTS nudge_completions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nudge_type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(nudge_type, date)
+    );
   `);
 
   // Defensive migrations: add columns if missing (older installs).
@@ -240,6 +253,16 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('gemini_voice_name')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN gemini_voice_name TEXT NOT NULL DEFAULT 'Aoede'`,
+    );
+  }
+  if (!colNames.includes('dnd_bypass_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN dnd_bypass_enabled INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  if (!colNames.includes('voice_nudges_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN voice_nudges_enabled INTEGER NOT NULL DEFAULT 0`,
     );
   }
 
@@ -364,6 +387,8 @@ interface UserConfigRow {
   notifications_per_day: number | null;
   voice_provider: string | null;
   gemini_voice_name: string | null;
+  dnd_bypass_enabled: number | null;
+  voice_nudges_enabled: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -391,6 +416,8 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   notificationsPerDay: r.notifications_per_day ?? 4,
   voiceProvider: (r.voice_provider ?? 'system') as UserConfig['voiceProvider'],
   geminiVoiceName: r.gemini_voice_name ?? 'Aoede',
+  dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
+  voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -430,6 +457,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     notificationsPerDay: 'notifications_per_day',
     voiceProvider: 'voice_provider',
     geminiVoiceName: 'gemini_voice_name',
+    dndBypassEnabled: 'dnd_bypass_enabled',
+    voiceNudgesEnabled: 'voice_nudges_enabled',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
@@ -885,6 +914,40 @@ export async function updateNudge(
   return row ? rowToNudge(row) : null;
 }
 
+// --------- Nudge completions (verify-until-confirmed) ---------
+
+/**
+ * Marca um comportamento (ex.: 'supplements', 'bluelight') como feito no dia
+ * informado. Idempotente: chamar de novo no mesmo dia não duplica.
+ */
+export async function markNudgeDone(nudgeType: string, date: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT OR IGNORE INTO nudge_completions (nudge_type, date) VALUES (?, ?)`,
+    [nudgeType, date],
+  );
+}
+
+/** True se o usuário já confirmou esse comportamento no dia informado. */
+export async function isNudgeDone(nudgeType: string, date: string): Promise<boolean> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM nudge_completions WHERE nudge_type = ? AND date = ?`,
+    [nudgeType, date],
+  );
+  return (row?.n ?? 0) > 0;
+}
+
+/** Tipos de nudge já confirmados no dia informado. */
+export async function getDoneNudgeTypes(date: string): Promise<string[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ nudge_type: string }>(
+    `SELECT nudge_type FROM nudge_completions WHERE date = ?`,
+    [date],
+  );
+  return rows.map((r) => r.nudge_type);
+}
+
 export async function resetAllUserData(): Promise<void> {
   const d = await getDb();
   await d.execAsync(`
@@ -894,6 +957,7 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM chat_messages;
     DELETE FROM streaks;
     DELETE FROM daily_log;
+    DELETE FROM nudge_completions;
     DELETE FROM habits;
     DELETE FROM user_config WHERE id = 1;
   `);
