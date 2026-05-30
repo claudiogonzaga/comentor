@@ -15,7 +15,7 @@ import type { Nudge } from '../types';
  * usuário confirmar com "Já fiz ✅". Os demais nudges (ex.: respiração, que
  * abre uma tela própria) continuam sendo um lembrete diário único.
  */
-const VERIFY_NUDGE_TYPES = new Set(['bluelight', 'supplements']);
+const VERIFY_NUDGE_TYPES = new Set(['bluelight']);
 
 /** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial. */
 const NUDGE_MAX_REPEATS = 4;

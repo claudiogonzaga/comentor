@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from './Card';
 import { Button } from './Button';
@@ -69,7 +69,22 @@ export function HealthCard() {
     setConnecting(true);
     try {
       const ok = await requestHealthPermissions();
-      if (ok) await load();
+      if (ok) {
+        await load();
+        return;
+      }
+      // A permissão não foi concedida — pode ter sido recusada OU o sistema
+      // não conseguiu abrir o diálogo (alguns aparelhos não mostram o popup
+      // direto). Em vez de deixar o botão "sem fazer nada", oferecemos abrir o
+      // próprio Health Connect, onde dá pra liberar as permissões na mão.
+      Alert.alert(
+        'Conectar Health Connect',
+        'Não consegui abrir o pedido de permissão por aqui. Quer abrir o Health Connect para liberar o acesso (Sono, Exercício e Passos) manualmente?',
+        [
+          { text: 'Agora não', style: 'cancel' },
+          { text: 'Abrir Health Connect', onPress: () => openHealthSettings() },
+        ],
+      );
     } finally {
       setConnecting(false);
     }

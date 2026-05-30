@@ -10,6 +10,7 @@ import type {
   InterviewMessage,
   InterviewSummary,
   LocalModelId,
+  Medication,
   Nudge,
   NudgeType,
   SnoozeFeedback,
@@ -175,6 +176,22 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       completed_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(nudge_type, date)
     );
+
+    -- v1.21: lembretes de medicamentos/suplementos definidos pelo usuário.
+    -- A pessoa adiciona quantos quiser; cada um insiste (corrente
+    -- verify-until-confirmed) até ela marcar que tomou. Reusa
+    -- nudge_completions com a chave 'med:<id>' para registrar o dia feito.
+    CREATE TABLE IF NOT EXISTS medications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      dosage TEXT,
+      time TEXT NOT NULL,
+      emoji TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      order_index INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Defensive migrations: add columns if missing (older installs).
@@ -294,13 +311,6 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     const m = mins % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   })();
-  const suppTime = (() => {
-    let mins = bedtimeMins - 30;
-    if (mins < 0) mins += 24 * 60;
-    const h = Math.floor(mins / 60) % 24;
-    const m = mins % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  })();
 
   await database.runAsync(
     `INSERT OR IGNORE INTO nudges
@@ -321,20 +331,6 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
        (type, title, body, emoji, enabled, schedule_time, order_index)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
-      'supplements',
-      'Suplementos',
-      'Glicina + Magnésio (se você usa). Tomar agora ajuda a entrar em sono profundo.',
-      '💊',
-      0,
-      suppTime,
-      2,
-    ],
-  );
-  await database.runAsync(
-    `INSERT OR IGNORE INTO nudges
-       (type, title, body, emoji, enabled, schedule_time, order_index)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
       'breathing',
       'Respiração 2-2-4',
       'Bora desacelerar? 2 inspiradas curtas + 1 expirada longa. Toca aqui pra começar.',
@@ -344,6 +340,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       3,
     ],
   );
+
+  // v1.21: o lembrete fixo de "Suplementos" foi substituído pela tela de
+  // Medicamentos/Suplementos (lembretes ilimitados, definidos pelo usuário).
+  // Remove o nudge legado de instalações antigas — os lembretes agora vivem
+  // na tabela `medications`.
+  await database.execAsync(`DELETE FROM nudges WHERE type = 'supplements'`);
 
   const existing = await database.getFirstAsync<{ id: number; system_prompt: string | null }>(
     'SELECT id, system_prompt FROM user_config WHERE id = 1',
@@ -957,6 +959,118 @@ export async function getDoneNudgeTypes(date: string): Promise<string[]> {
   return rows.map((r) => r.nudge_type);
 }
 
+// --------- Medications / supplements (lembretes do usuário) ---------
+
+interface MedicationRow {
+  id: number;
+  name: string;
+  dosage: string | null;
+  time: string;
+  emoji: string | null;
+  enabled: number;
+  order_index: number;
+}
+
+const rowToMedication = (r: MedicationRow): Medication => ({
+  id: r.id,
+  name: r.name,
+  dosage: r.dosage,
+  time: r.time,
+  emoji: r.emoji,
+  enabled: r.enabled === 1,
+  orderIndex: r.order_index,
+});
+
+export async function listMedications(): Promise<Medication[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<MedicationRow>(
+    'SELECT * FROM medications ORDER BY order_index ASC, id ASC',
+  );
+  return rows.map(rowToMedication);
+}
+
+export async function getMedication(id: number): Promise<Medication | null> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<MedicationRow>(
+    'SELECT * FROM medications WHERE id = ?',
+    [id],
+  );
+  return row ? rowToMedication(row) : null;
+}
+
+export async function createMedication(input: {
+  name: string;
+  dosage?: string | null;
+  time: string;
+  emoji?: string | null;
+  enabled?: boolean;
+}): Promise<Medication> {
+  const d = await getDb();
+  // Novo lembrete entra no fim da lista.
+  const max = await d.getFirstAsync<{ m: number | null }>(
+    'SELECT MAX(order_index) AS m FROM medications',
+  );
+  const orderIndex = (max?.m ?? -1) + 1;
+  const res = await d.runAsync(
+    `INSERT INTO medications (name, dosage, time, emoji, enabled, order_index)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      input.name.trim(),
+      input.dosage?.trim() || null,
+      input.time,
+      input.emoji?.trim() || '💊',
+      input.enabled === false ? 0 : 1,
+      orderIndex,
+    ],
+  );
+  const created = await getMedication(res.lastInsertRowId as number);
+  // getMedication só retorna null se a linha sumiu entre INSERT e SELECT —
+  // impossível aqui, mas o tipo precisa ser estreitado.
+  if (!created) throw new Error('Falha ao criar o lembrete.');
+  return created;
+}
+
+export async function updateMedication(
+  id: number,
+  patch: Partial<Pick<Medication, 'name' | 'dosage' | 'time' | 'emoji' | 'enabled'>>,
+): Promise<Medication | null> {
+  const d = await getDb();
+  const fields: string[] = [];
+  const values: (string | number | null)[] = [];
+  if (typeof patch.name === 'string') {
+    fields.push('name = ?');
+    values.push(patch.name.trim());
+  }
+  if (patch.dosage !== undefined) {
+    fields.push('dosage = ?');
+    values.push(patch.dosage?.trim() || null);
+  }
+  if (typeof patch.time === 'string') {
+    fields.push('time = ?');
+    values.push(patch.time);
+  }
+  if (patch.emoji !== undefined) {
+    fields.push('emoji = ?');
+    values.push(patch.emoji?.trim() || '💊');
+  }
+  if (typeof patch.enabled === 'boolean') {
+    fields.push('enabled = ?');
+    values.push(patch.enabled ? 1 : 0);
+  }
+  if (fields.length === 0) return getMedication(id);
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  await d.runAsync(`UPDATE medications SET ${fields.join(', ')} WHERE id = ?`, values);
+  return getMedication(id);
+}
+
+export async function deleteMedication(id: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('DELETE FROM medications WHERE id = ?', [id]);
+  // Limpa os registros de "tomei hoje" deste lembrete.
+  await d.runAsync('DELETE FROM nudge_completions WHERE nudge_type = ?', [`med:${id}`]);
+}
+
 export async function resetAllUserData(): Promise<void> {
   const d = await getDb();
   await d.execAsync(`
@@ -967,6 +1081,7 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM streaks;
     DELETE FROM daily_log;
     DELETE FROM nudge_completions;
+    DELETE FROM medications;
     DELETE FROM habits;
     DELETE FROM user_config WHERE id = 1;
   `);

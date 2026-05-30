@@ -447,14 +447,16 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Falar os nudges em voz alta 🗣️
+                Falar as notificações em voz alta 🗣️
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Quando o app está aberto, a coruja também lê o lembrete em voz
-                alta (usa a voz escolhida acima). Ela não fala se já estiver
-                falando. Obs.: por limite do Android, isso só vale com o app em
-                primeiro plano — não dá pra detectar chamadas de Teams/Meet/
-                WhatsApp em segundo plano.
+                Alternativa ao som: a coruja lê a notificação em voz alta (usa a
+                voz escolhida acima) — útil se você não escuta o piado. Não fala
+                por cima de uma chamada: se Teams/Meet/WhatsApp estiver em uso,
+                esse app fica em primeiro plano e a Comentora não fala. Por
+                limite do Android, a leitura em voz só funciona com o app aberto
+                em primeiro plano — com a tela bloqueada quem te avisa é o piado
+                da coruja.
               </Text>
             </View>
             <Switch
@@ -681,6 +683,17 @@ export function SettingsScreen() {
         ) : null}
 
         <NudgesCard />
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Medicamentos e suplementos 💊</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
+            Crie lembretes para seus remédios e suplementos. No horário, a coruja
+            insiste até você marcar que tomou. Adicione quantos quiser.
+          </Text>
+          <Pressable onPress={() => navigation.navigate('Medications')} style={styles.outlineBtn}>
+            <Text style={styles.outlineBtnText}>Gerenciar lembretes</Text>
+          </Pressable>
+        </Card>
 
         <Card style={styles.card}>
           <Text style={styles.section}>Tom da Comentora</Text>

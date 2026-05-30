@@ -13,6 +13,7 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
+import { MedicationsScreen } from '../screens/MedicationsScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import {
@@ -20,9 +21,12 @@ import {
   SNOOZE_ACTION,
   NUDGE_DONE_ACTION,
   NUDGE_SNOOZE_ACTION,
+  MED_DONE_ACTION,
+  MED_SNOOZE_ACTION,
   cancelSleepEscalationReminders,
 } from '../services/notifications';
 import { confirmNudge, snoozeNudge } from '../services/nudges';
+import { confirmMedication, snoozeMedication } from '../services/medications';
 import { markSleepDone } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
 import { colors } from '../theme';
@@ -39,6 +43,7 @@ export type RootStackParamList = {
   Settings: undefined;
   History: undefined;
   Breathing: undefined;
+  Medications: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -79,6 +84,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         habitId?: number;
         level?: number;
         nudgeType?: string;
+        medId?: number;
       };
       const type = data.type ?? '';
       const action = response.actionIdentifier;
@@ -118,7 +124,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
       } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
         nav.navigate('Breathing');
       } else if (type.startsWith('nudge:') || type === 'awareness') {
-        // Verify-behavior nudges (suplemento, óculos de luz azul) carry the
+        // Verify-behavior nudges (óculos de luz azul) carry the
         // "Já fiz ✅" / "Lembrar depois" buttons. Resolve the action, then go
         // Home so the user lands somewhere sensible.
         if (action === NUDGE_DONE_ACTION && data.nudgeType) {
@@ -135,6 +141,23 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           }
         }
         nav.navigate('Home');
+      } else if (type.startsWith('med:')) {
+        // Medication/supplement reminders carry "Já tomei 💊" / "Lembrar
+        // depois". Resolve the action, then open the Medications screen.
+        if (action === MED_DONE_ACTION && typeof data.medId === 'number') {
+          try {
+            await confirmMedication(data.medId);
+          } catch {
+            /* still navigate even if it fails */
+          }
+        } else if (action === MED_SNOOZE_ACTION && typeof data.medId === 'number') {
+          try {
+            await snoozeMedication(data.medId);
+          } catch {
+            /* still navigate even if it fails */
+          }
+        }
+        nav.navigate('Medications');
       }
     };
 
@@ -180,7 +203,10 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         const d = (notification.request.content.data ?? {}) as { type?: string };
         const t = d.type ?? '';
         const speakable =
-          t.startsWith('nudge:') || t === 'awareness' || t === 'sleep-reminder';
+          t.startsWith('nudge:') ||
+          t.startsWith('med:') ||
+          t === 'awareness' ||
+          t === 'sleep-reminder';
         if (!speakable) return;
         const title = notification.request.content.title ?? '';
         const body = notification.request.content.body ?? '';
@@ -251,6 +277,11 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
         <Stack.Screen name="Breathing" component={BreathingScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen
+          name="Medications"
+          component={MedicationsScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

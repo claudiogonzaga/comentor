@@ -48,7 +48,8 @@ async function ensureInit(m: HealthConnectModule): Promise<boolean> {
   try {
     initialized = await m.initialize();
     return initialized;
-  } catch {
+  } catch (err) {
+    console.warn('[health] initialize() failed:', err);
     return false;
   }
 }
@@ -101,7 +102,8 @@ export async function requestHealthPermissions(): Promise<boolean> {
   try {
     const granted = await m.requestPermission(READ_PERMISSIONS);
     return hasAll(granted as { accessType?: string; recordType?: string }[]);
-  } catch {
+  } catch (err) {
+    console.warn('[health] requestPermission() failed:', err);
     return false;
   }
 }
@@ -112,8 +114,8 @@ export async function openHealthSettings(): Promise<void> {
   if (!m) return;
   try {
     await m.openHealthConnectSettings();
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    console.warn('[health] openHealthConnectSettings() failed:', err);
   }
 }
 

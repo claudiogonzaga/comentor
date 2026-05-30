@@ -4,6 +4,7 @@ import { getUserConfig, updateUserConfig } from '../services/database';
 import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice, setActiveVoiceProvider } from '../services/voice';
 import { scheduleAllNudges } from '../services/nudges';
+import { scheduleAllMedications } from '../services/medications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 
@@ -32,11 +33,15 @@ export const useAppStore = create<AppState>((set) => ({
     const hasApiKey = !!apiKey;
     syncVoiceFromConfig(config);
     set({ config: { ...config, hasApiKey }, hasApiKey, ready: true });
-    // Ensure daily nudges (bluelight, supplements, breathing) are scheduled
+    // Ensure daily nudges (bluelight, breathing) are scheduled
     // — seeded on first run, re-scheduled on every cold start so the
     // Android alarm queue stays consistent across reboots / OTA upgrades.
     scheduleAllNudges().catch((err) =>
       console.warn('scheduleAllNudges on init failed:', err),
+    );
+    // Re-arm the user's medication/supplement reminders (verify-until-taken).
+    scheduleAllMedications().catch((err) =>
+      console.warn('scheduleAllMedications on init failed:', err),
     );
     // Re-arm the daytime sleep-awareness nudges (random times per day).
     scheduleSleepAwarenessNotifications().catch((err) =>

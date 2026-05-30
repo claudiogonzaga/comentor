@@ -171,7 +171,6 @@ export interface Streak {
 }
 
 export type NudgeType =
-  | 'supplements'
   | 'bluelight'
   | 'breathing'
   | string; // forward-compat for custom user-defined nudges
@@ -184,5 +183,19 @@ export interface Nudge {
   emoji: string | null;
   enabled: boolean;
   scheduleTime: string; // HH:MM
+  orderIndex: number;
+}
+
+/**
+ * Lembrete de medicamento/suplemento definido pelo usuário. Insiste
+ * (corrente verify-until-confirmed) até a pessoa marcar que tomou.
+ */
+export interface Medication {
+  id: number;
+  name: string;
+  dosage: string | null;
+  time: string; // HH:MM
+  emoji: string | null;
+  enabled: boolean;
   orderIndex: number;
 }

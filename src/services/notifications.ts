@@ -12,7 +12,11 @@ import { getUserConfig } from './database';
 //
 // v4: owl sounds replaced in 1.18.0 (owl_buraqueira / owl_corujinha_mato /
 //     owl_bubo_bubo) + owl-song vibration pattern introduced.
-const CHANNEL_VERSION = 4;
+// v5: owl sounds trimmed to a brief, louder hoot (~3s, normalized) in 1.21.0.
+//     Bumping also rescues installs whose v4 channel got stuck silent (e.g.
+//     created in a bad state on an earlier upgrade) — a fresh channel id forces
+//     Android to re-read the (correct) sound.
+const CHANNEL_VERSION = 5;
 
 // Vibração que imita o canto de uma coruja ("hoo, hoo-hoo, hoooo"): pulsos
 // curtos seguidos de um pulso longo. Formato Android: [espera, vibra, pausa,
@@ -33,6 +37,15 @@ export const SNOOZE_ACTION = 'snooze-15';
 export const NUDGE_CATEGORY = 'comentor-nudge-actions';
 export const NUDGE_DONE_ACTION = 'nudge-done';
 export const NUDGE_SNOOZE_ACTION = 'nudge-snooze';
+
+/**
+ * Category for medication/supplement reminders. The owl keeps insisting until
+ * the user taps "Já tomei 💊". Separate from NUDGE_CATEGORY so the button copy
+ * matches taking a medication (vs. the generic "Já fiz ✅").
+ */
+export const MED_CATEGORY = 'comentor-med-actions';
+export const MED_DONE_ACTION = 'med-done';
+export const MED_SNOOZE_ACTION = 'med-snooze';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -82,6 +95,19 @@ export async function ensureNotificationCategories() {
     },
     {
       identifier: NUDGE_SNOOZE_ACTION,
+      buttonTitle: 'Lembrar depois',
+      options: { opensAppToForeground: true },
+    },
+  ]);
+  // Medication/supplement reminders: the owl insists until "Já tomei 💊".
+  await Notifications.setNotificationCategoryAsync(MED_CATEGORY, [
+    {
+      identifier: MED_DONE_ACTION,
+      buttonTitle: 'Já tomei 💊',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: MED_SNOOZE_ACTION,
       buttonTitle: 'Lembrar depois',
       options: { opensAppToForeground: true },
     },
@@ -224,8 +250,8 @@ export async function cancelAllReminders() {
 
 /**
  * Cancels only the night-time sleep escalation notifications (5 levels +
- * any snooze), leaving daily nudges (bluelight, supplements, breathing)
- * intact. Used by callers that re-schedule the night chain without
+ * any snooze), leaving daily nudges (bluelight, breathing) and medication
+ * reminders intact. Used by callers that re-schedule the night chain without
  * disturbing the unrelated daily nudges.
  */
 export async function cancelSleepEscalationReminders() {
