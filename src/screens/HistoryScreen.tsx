@@ -62,7 +62,7 @@ export function HistoryScreen() {
         <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.back}>‹ Voltar</Text>
         </Pressable>
-        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Histórico</Text>
+        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Estatísticas</Text>
         <View style={{ width: 60 }} />
       </View>
 

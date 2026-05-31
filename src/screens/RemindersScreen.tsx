@@ -16,6 +16,8 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { GreekIcon, type GreekIconName } from '../components/GreekIcon';
+import { NudgesCard } from '../components/NudgesCard';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
 import { colors, radius, spacing, typography } from '../theme';
@@ -27,9 +29,38 @@ import {
 } from '../services/database';
 import { scheduleAllMedications } from '../services/medications';
 import { ensurePermissions } from '../services/notifications';
+import { iconForEmoji } from '../services/todos';
 import type { Medication } from '../types';
 
-const EMOJI_CHOICES = ['💊', '💉', '🧴', '🌿', '🩹', '🫗', '🍵', '🧪'];
+/**
+ * #7 — Tela única "Lembretes e hábitos": junta os nudges diários da
+ * Comentora (respiração, pôr do sol…) com os lembretes personalizados do
+ * usuário — que agora cobrem qualquer hábito saudável: remédios, suplementos,
+ * beber água, comer algo, jejum, café, etc. No horário, a coruja insiste até
+ * a pessoa marcar como feito.
+ *
+ * O ícone é escolhido num seletor de ícones gregos (preto/terracota). Cada
+ * ícone guarda um emoji representativo, usado apenas no texto da notificação
+ * do Android — dentro do app mostramos sempre o ícone grego.
+ */
+
+interface IconChoice {
+  icon: GreekIconName;
+  emoji: string;
+  label: string;
+}
+
+const ICON_CHOICES: IconChoice[] = [
+  { icon: 'pill', emoji: '💊', label: 'Remédio' },
+  { icon: 'leaf', emoji: '🌿', label: 'Suplemento' },
+  { icon: 'drop', emoji: '💧', label: 'Água' },
+  { icon: 'bowl', emoji: '🍲', label: 'Comida' },
+  { icon: 'fasting', emoji: '⏳', label: 'Jejum' },
+  { icon: 'coffee', emoji: '☕', label: 'Café' },
+  { icon: 'sun', emoji: '☀️', label: 'Manhã' },
+  { icon: 'moon', emoji: '🌙', label: 'Noite' },
+  { icon: 'bell', emoji: '🔔', label: 'Lembrete' },
+];
 
 interface EditorState {
   visible: boolean;
@@ -46,10 +77,10 @@ const EMPTY_EDITOR: EditorState = {
   name: '',
   dosage: '',
   time: '08:00',
-  emoji: '💊',
+  emoji: '💧',
 };
 
-export function MedicationsScreen() {
+export function RemindersScreen() {
   const navigation = useNavigation<any>();
   const [meds, setMeds] = useState<Medication[] | null>(null);
   const [editor, setEditor] = useState<EditorState>(EMPTY_EDITOR);
@@ -83,7 +114,7 @@ export function MedicationsScreen() {
       name: med.name,
       dosage: med.dosage ?? '',
       time: med.time,
-      emoji: med.emoji ?? '💊',
+      emoji: med.emoji ?? '💧',
     });
   };
 
@@ -92,7 +123,7 @@ export function MedicationsScreen() {
   const handleSave = async () => {
     const name = editor.name.trim();
     if (!name) {
-      Alert.alert('Falta o nome', 'Dê um nome ao lembrete (ex.: "Vitamina D").');
+      Alert.alert('Falta o nome', 'Dê um nome ao lembrete (ex.: "Beber água").');
       return;
     }
     setSaving(true);
@@ -162,14 +193,19 @@ export function MedicationsScreen() {
         <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.back}>‹ Voltar</Text>
         </Pressable>
-        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Medicamentos</Text>
+        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Lembretes e hábitos</Text>
         <View style={{ width: 60 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Nudges diários da Comentora (respiração, pôr do sol…). */}
+        <NudgesCard />
+
+        <Text style={styles.sectionTitle}>Meus lembretes</Text>
         <Text style={styles.intro}>
-          Lembretes de medicamentos e suplementos. No horário, a coruja insiste
-          (e canta) até você marcar que tomou. Adicione quantos quiser.
+          Crie lembretes de saúde: remédios, suplementos, beber água, comer
+          algo, jejum, café… No horário, a coruja insiste (e canta) até você
+          marcar que fez. Adicione quantos quiser.
         </Text>
 
         {meds === null && (
@@ -180,7 +216,7 @@ export function MedicationsScreen() {
 
         {meds !== null && meds.length === 0 && (
           <Card style={styles.emptyCard}>
-            <Text style={styles.emptyEmoji}>💊</Text>
+            <GreekIcon name="leaf" size={40} color={colors.text.tertiary} />
             <Text style={styles.emptyText}>
               Nenhum lembrete ainda. Toque em “Adicionar lembrete” para criar o
               primeiro.
@@ -190,12 +226,15 @@ export function MedicationsScreen() {
 
         {meds?.map((med) => (
           <Card key={med.id} style={StyleSheet.flatten([styles.row, !med.enabled && styles.rowOff])}>
-            <Text style={styles.rowEmoji}>{med.emoji ?? '💊'}</Text>
+            <View style={styles.rowIcon}>
+              <GreekIcon name={iconForEmoji(med.emoji, 'med')} size={28} color={colors.text.primary} />
+            </View>
             <Pressable style={styles.rowMain} onPress={() => openEdit(med)}>
               <Text style={styles.rowName}>{med.name}</Text>
               {med.dosage ? <Text style={styles.rowDosage}>{med.dosage}</Text> : null}
               <View style={styles.timePill}>
-                <Text style={styles.timeText}>🕐 {med.time}</Text>
+                <GreekIcon name="clock" size={13} color={colors.accent.gold} />
+                <Text style={styles.timeText}>{med.time}</Text>
               </View>
             </Pressable>
             <View style={styles.rowRight}>
@@ -243,33 +282,40 @@ export function MedicationsScreen() {
             </Text>
 
             <Text style={styles.fieldLabel}>Ícone</Text>
-            <View style={styles.emojiRow}>
-              {EMOJI_CHOICES.map((e) => (
-                <Pressable
-                  key={e}
-                  onPress={() => setEditor((s) => ({ ...s, emoji: e }))}
-                  style={[styles.emojiChip, editor.emoji === e && styles.emojiChipOn]}
-                >
-                  <Text style={styles.emojiChipText}>{e}</Text>
-                </Pressable>
-              ))}
+            <View style={styles.iconRow}>
+              {ICON_CHOICES.map((c) => {
+                const on = editor.emoji === c.emoji;
+                return (
+                  <Pressable
+                    key={c.emoji}
+                    onPress={() => setEditor((s) => ({ ...s, emoji: c.emoji }))}
+                    style={[styles.iconChip, on && styles.iconChipOn]}
+                  >
+                    <GreekIcon
+                      name={c.icon}
+                      size={24}
+                      color={on ? colors.accent.gold : colors.text.primary}
+                    />
+                  </Pressable>
+                );
+              })}
             </View>
 
             <Text style={styles.fieldLabel}>Nome</Text>
             <TextInput
               value={editor.name}
               onChangeText={(t) => setEditor((s) => ({ ...s, name: t }))}
-              placeholder="Ex.: Vitamina D, Melatonina…"
+              placeholder="Ex.: Beber água, Vitamina D, Jejum…"
               placeholderTextColor={colors.text.tertiary}
               style={styles.input}
               returnKeyType="next"
             />
 
-            <Text style={styles.fieldLabel}>Dose (opcional)</Text>
+            <Text style={styles.fieldLabel}>Detalhe (opcional)</Text>
             <TextInput
               value={editor.dosage}
               onChangeText={(t) => setEditor((s) => ({ ...s, dosage: t }))}
-              placeholder="Ex.: 2 cápsulas, 5 mg…"
+              placeholder="Ex.: 1 copo, 2 cápsulas, 16h de jejum…"
               placeholderTextColor={colors.text.tertiary}
               style={styles.input}
             />
@@ -310,6 +356,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
   },
+  sectionTitle: {
+    ...typography.subtitle,
+    color: colors.text.primary,
+    marginBottom: spacing.xs,
+  },
   intro: {
     ...typography.small,
     color: colors.text.secondary,
@@ -324,10 +375,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.xl,
     marginBottom: spacing.lg,
-  },
-  emptyEmoji: {
-    fontSize: 40,
-    marginBottom: spacing.sm,
+    gap: spacing.sm,
   },
   emptyText: {
     ...typography.body,
@@ -344,8 +392,9 @@ const styles = StyleSheet.create({
   rowOff: {
     opacity: 0.55,
   },
-  rowEmoji: {
-    fontSize: 30,
+  rowIcon: {
+    width: 32,
+    alignItems: 'center',
   },
   rowMain: {
     flex: 1,
@@ -362,6 +411,9 @@ const styles = StyleSheet.create({
   timePill: {
     marginTop: spacing.sm,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
     borderRadius: radius.pill,
@@ -426,15 +478,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
   },
-  emojiRow: {
+  iconRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
-  emojiChip: {
-    width: 44,
-    height: 44,
+  iconChip: {
+    width: 48,
+    height: 48,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -442,11 +494,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  emojiChipOn: {
+  iconChipOn: {
     backgroundColor: 'rgba(42,26,16,0.18)',
     borderColor: colors.accent.gold,
-  },
-  emojiChipText: {
-    fontSize: 22,
   },
 });

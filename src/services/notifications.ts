@@ -16,7 +16,12 @@ import { getUserConfig } from './database';
 //     Bumping also rescues installs whose v4 channel got stuck silent (e.g.
 //     created in a bad state on an earlier upgrade) — a fresh channel id forces
 //     Android to re-read the (correct) sound.
-const CHANNEL_VERSION = 5;
+// v6: 1.22.0 — the DND-bypass channel now ALSO plays the owl call (was
+//     sound:null = silent), and every channel is lockscreenVisibility=PUBLIC so
+//     watches/wearables mirror the full notification. Bumping forces Android to
+//     rebuild the channels with the new (audible) config — the previous channel
+//     could be stuck silent.
+const CHANNEL_VERSION = 6;
 
 // Vibração que imita o canto de uma coruja ("hoo, hoo-hoo, hoooo"): pulsos
 // curtos seguidos de um pulso longo. Formato Android: [espera, vibra, pausa,
@@ -143,9 +148,13 @@ async function resolveDndBypass(): Promise<boolean> {
  * returns the synthetic id (unused there).
  *
  * When DND-bypass is on, a SEPARATE channel is used: it pierces Do Not Disturb
- * but plays NO sound — only the owl-song vibration. (Android channels are
- * immutable, so the bypass flag is baked into a distinct channel id; toggling
- * the setting requires rescheduling so notifications land on the new channel.)
+ * AND plays the owl call (v6: it used to be silent/vibrate-only, which the user
+ * read as "no sound"). (Android channels are immutable, so the bypass flag is
+ * baked into a distinct channel id; toggling the setting requires rescheduling
+ * so notifications land on the new channel.)
+ *
+ * Every channel is lockscreenVisibility=PUBLIC so paired watches/wearables
+ * (e.g. Huawei) mirror the full notification text instead of hiding it.
  */
 export async function ensureChannel(
   species?: OwlSpeciesId,
@@ -161,15 +170,18 @@ export async function ensureChannel(
       ? `Comentora — ${spec.name} (Não Perturbe)`
       : `Comentora — ${spec.name}`,
     description: dnd
-      ? 'Atravessa o Não Perturbe — só vibra no padrão do canto da coruja, sem som.'
+      ? 'Atravessa o Não Perturbe e ainda toca o canto da coruja.'
       : 'Lembretes de sono e nudges, com som de coruja',
     importance: Notifications.AndroidImportance.HIGH,
-    // In DND-bypass mode the owl stays silent and only vibrates.
-    sound: dnd ? null : spec.soundFile ?? 'default',
+    // The owl now sings on both channels — the DND one just also pierces DND.
+    sound: spec.soundFile ?? 'default',
     vibrationPattern: OWL_VIBRATION_PATTERN,
     enableVibrate: true,
     lightColor: '#F4C553',
     bypassDnd: dnd,
+    // PUBLIC = the full notification shows on the lock screen and is mirrored
+    // to paired wearables (watches hide PRIVATE/SECRET content).
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
   return id;
 }
@@ -339,23 +351,37 @@ export async function openOwlChannelSettings(): Promise<void> {
   }
 }
 
+/** Estado do canal lido de volta do Android — para diagnóstico no aparelho. */
+export interface ChannelDiagnostics {
+  /** Som configurado no canal: 'custom' (coruja), 'default' (sistema) ou null (mudo). */
+  sound: 'default' | 'custom' | null;
+  /** Importância numérica (HIGH=4 no enum nativo do Android, 6 no enum do expo). */
+  importance: number;
+  /** Se o canal atravessa o Não Perturbe. */
+  bypassDnd: boolean;
+  /** Visibilidade na tela de bloqueio (PUBLIC=1 mostra tudo, espelha no relógio). */
+  lockscreenVisibility: number;
+}
+
 /**
- * Diagnóstico: dispara uma notificação imediata e informa quantos lembretes
- * já estão na fila. Serve para o usuário checar, no próprio aparelho, se as
- * notificações da Comentora conseguem chegar.
+ * Diagnóstico: dispara uma notificação imediata, informa quantos lembretes já
+ * estão na fila e LÊ DE VOLTA o estado real do canal no Android (som,
+ * importância, DND, visibilidade). Como não dá para testar no emulador, este é
+ * o jeito honesto do usuário ver, no próprio aparelho, se o som está ligado.
  */
 export async function sendTestNotification(): Promise<{
   granted: boolean;
   scheduledCount: number;
+  channel: ChannelDiagnostics | null;
 }> {
   const granted = await ensurePermissions();
-  if (!granted) return { granted: false, scheduledCount: 0 };
+  if (!granted) return { granted: false, scheduledCount: 0, channel: null };
   const channelId = await ensureChannel();
   const sound = await soundFor();
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: '🦉 Teste de notificação',
+      title: 'Teste de notificação',
       body: 'Funcionou! Se você está vendo isto, os lembretes da Comentora conseguem chegar no seu celular.',
       sound,
       data: { type: 'test' },
@@ -366,5 +392,25 @@ export async function sendTestNotification(): Promise<{
       channelId,
     },
   });
-  return { granted: true, scheduledCount: scheduled.length };
+
+  // Lê o canal de volta — revela se o Android está com o som mudo (a causa
+  // mais comum de "não toca": canal preso silencioso ou volume zerado).
+  let channel: ChannelDiagnostics | null = null;
+  if (Platform.OS === 'android') {
+    try {
+      const ch = await Notifications.getNotificationChannelAsync(channelId);
+      if (ch) {
+        channel = {
+          sound: ch.sound,
+          importance: ch.importance,
+          bypassDnd: ch.bypassDnd,
+          lockscreenVisibility: ch.lockscreenVisibility,
+        };
+      }
+    } catch {
+      /* leitura do canal é best-effort */
+    }
+  }
+
+  return { granted: true, scheduledCount: scheduled.length, channel };
 }

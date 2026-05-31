@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Card } from './Card';
+import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { listNudges } from '../services/database';
 import { setNudgeEnabled, setNudgeTime } from '../services/nudges';
+import { iconForEmoji } from '../services/todos';
 import type { Nudge } from '../types';
 
 function parseHHMM(s: string): Date {
@@ -60,7 +62,9 @@ function NudgeRow({ nudge, onChange }: NudgeRowProps) {
 
   return (
     <View style={[styles.row, nudge.enabled && styles.rowEnabled]}>
-      <Text style={styles.emoji}>{nudge.emoji ?? '🦉'}</Text>
+      <View style={styles.iconWrap}>
+        <GreekIcon name={iconForEmoji(nudge.emoji, 'nudge')} size={26} color={colors.text.primary} />
+      </View>
       <View style={styles.rowMain}>
         <Text style={styles.title}>{nudge.title}</Text>
         <Text style={styles.body} numberOfLines={3}>
@@ -68,12 +72,11 @@ function NudgeRow({ nudge, onChange }: NudgeRowProps) {
         </Text>
         <Pressable
           onPress={() => setPickerOpen(true)}
-          style={styles.timeBtn}
+          style={[styles.timeBtn, !nudge.enabled && { opacity: 0.5 }]}
           disabled={!nudge.enabled || busy}
         >
-          <Text style={[styles.timeText, !nudge.enabled && { opacity: 0.5 }]}>
-            🕐 {nudge.scheduleTime}
-          </Text>
+          <GreekIcon name="clock" size={13} color={colors.accent.gold} />
+          <Text style={styles.timeText}>{nudge.scheduleTime}</Text>
         </Pressable>
       </View>
       <View style={styles.rowRight}>
@@ -193,8 +196,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingTop: 2,
   },
-  emoji: {
-    fontSize: 28,
+  iconWrap: {
+    width: 30,
+    alignItems: 'center',
     marginTop: 2,
   },
   title: {
@@ -210,6 +214,9 @@ const styles = StyleSheet.create({
   timeBtn: {
     marginTop: spacing.sm,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
     borderRadius: radius.pill,

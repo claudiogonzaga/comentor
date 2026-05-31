@@ -4,6 +4,7 @@ import {
   getUserConfig,
   listNudges,
   markNudgeDone,
+  markNudgeUndone,
   updateNudge,
 } from './database';
 import { NUDGE_CATEGORY, ensureChannel, ensureNotificationCategories } from './notifications';
@@ -191,6 +192,22 @@ export async function confirmNudge(nudgeType: string): Promise<void> {
   } catch {
     /* dismissal is best-effort */
   }
+}
+
+/**
+ * Desfaz o "Já fiz" de hoje: remove a marca de concluído e re-agenda os
+ * nudges, o que recria a corrente de insistências do dia (se ainda estiver
+ * dentro da janela). Usado quando o usuário desmarca um item da lista de
+ * tarefas na tela inicial.
+ */
+export async function unconfirmNudge(nudgeType: string): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeUndone(nudgeType, today);
+  } catch (err) {
+    console.warn(`failed to mark nudge undone ${nudgeType}:`, err);
+  }
+  await scheduleAllNudges();
 }
 
 /**

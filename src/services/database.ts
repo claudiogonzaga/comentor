@@ -192,6 +192,14 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- v1.22: armazenamento chave/valor leve para estado de UI persistente
+    -- (ex.: a última notificação exibida, mostrada no card da Home).
+    CREATE TABLE IF NOT EXISTS app_kv (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Defensive migrations: add columns if missing (older installs).
@@ -939,6 +947,19 @@ export async function markNudgeDone(nudgeType: string, date: string): Promise<vo
   );
 }
 
+/**
+ * Desfaz a confirmação de um comportamento no dia (desmarca o TODO). Remove o
+ * registro de "feito hoje" para que a corrente de insistências volte a ser
+ * agendada na próxima vez que os lembretes forem re-armados.
+ */
+export async function markNudgeUndone(nudgeType: string, date: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `DELETE FROM nudge_completions WHERE nudge_type = ? AND date = ?`,
+    [nudgeType, date],
+  );
+}
+
 /** True se o usuário já confirmou esse comportamento no dia informado. */
 export async function isNudgeDone(nudgeType: string, date: string): Promise<boolean> {
   const d = await getDb();
@@ -1071,6 +1092,28 @@ export async function deleteMedication(id: number): Promise<void> {
   await d.runAsync('DELETE FROM nudge_completions WHERE nudge_type = ?', [`med:${id}`]);
 }
 
+// --------- App key/value store (estado de UI persistente) ---------
+
+/** Lê um valor do armazenamento chave/valor; null se não existir. */
+export async function getKV(key: string): Promise<string | null> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ value: string | null }>(
+    'SELECT value FROM app_kv WHERE key = ?',
+    [key],
+  );
+  return row?.value ?? null;
+}
+
+/** Grava (ou substitui) um valor no armazenamento chave/valor. */
+export async function setKV(key: string, value: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO app_kv (key, value, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    [key, value],
+  );
+}
+
 export async function resetAllUserData(): Promise<void> {
   const d = await getDb();
   await d.execAsync(`
@@ -1082,6 +1125,7 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM daily_log;
     DELETE FROM nudge_completions;
     DELETE FROM medications;
+    DELETE FROM app_kv;
     DELETE FROM habits;
     DELETE FROM user_config WHERE id = 1;
   `);

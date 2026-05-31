@@ -13,7 +13,8 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
-import { MedicationsScreen } from '../screens/MedicationsScreen';
+import { RemindersScreen } from '../screens/RemindersScreen';
+import { SoundsVoiceScreen } from '../screens/SoundsVoiceScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import {
@@ -27,6 +28,7 @@ import {
 } from '../services/notifications';
 import { confirmNudge, snoozeNudge } from '../services/nudges';
 import { confirmMedication, snoozeMedication } from '../services/medications';
+import { saveLastNotification } from '../services/lastNotification';
 import { markSleepDone } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
 import { colors } from '../theme';
@@ -43,7 +45,8 @@ export type RootStackParamList = {
   Settings: undefined;
   History: undefined;
   Breathing: undefined;
-  Medications: undefined;
+  Reminders: undefined;
+  SonsVozes: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -157,7 +160,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
             /* still navigate even if it fails */
           }
         }
-        nav.navigate('Medications');
+        nav.navigate('Reminders');
       }
     };
 
@@ -224,6 +227,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
       }
     };
     const receivedSub = Notifications.addNotificationReceivedListener((n) => {
+      // #2 — guarda a última notificação exibida para a Home espelhar o card.
+      void saveLastNotification(n);
       void speakIfEnabled(n);
     });
 
@@ -278,8 +283,13 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="History" component={HistoryScreen} />
         <Stack.Screen name="Breathing" component={BreathingScreen} options={{ animation: 'fade' }} />
         <Stack.Screen
-          name="Medications"
-          component={MedicationsScreen}
+          name="Reminders"
+          component={RemindersScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="SonsVozes"
+          component={SoundsVoiceScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
       </Stack.Navigator>

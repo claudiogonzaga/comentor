@@ -16,11 +16,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
-import { VoicePicker } from '../components/VoicePicker';
-import { VoiceProviderCard } from '../components/VoiceProviderCard';
-import { OwlSoundPicker } from '../components/OwlSoundPicker';
-import { NudgesCard } from '../components/NudgesCard';
-import type { EnrichedVoice } from '../services/voice';
+import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
@@ -53,7 +49,7 @@ import {
   PROMPT_PLACEHOLDERS,
 } from '../constants/promptTemplate';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
-import type { AIBackend, GeminiModel, LocalModelId, OwlSpeciesId, Tone } from '../types';
+import type { AIBackend, GeminiModel, LocalModelId, Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
   { value: 'gentle', label: 'Gentil 🤗' },
@@ -153,7 +149,7 @@ export function SettingsScreen() {
   const handleTestNotification = async () => {
     setTestingNotif(true);
     try {
-      const { granted, scheduledCount } = await sendTestNotification();
+      const { granted, scheduledCount, channel } = await sendTestNotification();
       if (!granted) {
         Alert.alert(
           'Notificações desligadas',
@@ -161,11 +157,35 @@ export function SettingsScreen() {
         );
         return;
       }
+
+      // Diagnóstico do canal lido de volta do Android — ajuda a entender, no
+      // próprio aparelho, por que o som ou o espelhamento no relógio falham.
+      let diag = '';
+      if (channel) {
+        const soundLabel =
+          channel.sound === null
+            ? '🔇 SEM SOM (silencioso)'
+            : channel.sound === 'custom'
+              ? '🔊 canto da coruja'
+              : '🔊 som padrão';
+        const importanceOk = channel.importance >= 4;
+        diag =
+          `\n\nDiagnóstico do canal:\n` +
+          `• Som: ${soundLabel}\n` +
+          `• Importância: ${channel.importance}/5 ${importanceOk ? '✅' : '⚠️ baixa'}\n` +
+          `• Atravessa Não Perturbe: ${channel.bypassDnd ? 'sim ✅' : 'não'}\n` +
+          `• Visível na tela bloqueada/relógio: ${channel.lockscreenVisibility === 1 ? 'sim ✅' : 'restrito ⚠️'}` +
+          (channel.sound === null
+            ? `\n\n⚠️ O canal está SILENCIOSO. Toque em "Ajustar volume / som" e ative o som, ou apague os dados do app para recriar o canal.`
+            : '');
+      }
+
       Alert.alert(
-        'Teste enviado 🦉',
+        'Teste enviado',
         `Uma notificação deve aparecer em ~3 segundos.\n\n` +
-          `${scheduledCount} lembrete(s) já agendado(s) para os próximos dias.\n\n` +
-          `Se a notificação NÃO aparecer, o problema é a permissão ou a otimização de bateria do aparelho.`,
+          `${scheduledCount} lembrete(s) já agendado(s) para os próximos dias.` +
+          diag +
+          `\n\nSe a notificação NÃO aparecer, o problema é a permissão ou a otimização de bateria do aparelho.`,
       );
     } finally {
       setTestingNotif(false);
@@ -584,8 +604,8 @@ export function SettingsScreen() {
           </View>
 
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
-            O lembrete de respiração antes de dormir agora vive em &quot;Nudges&quot; abaixo
-            (você pode escolher horário, ligar/desligar como qualquer outro).
+            O lembrete de respiração antes de dormir agora vive em &quot;Lembretes e
+            hábitos&quot; (você pode escolher horário, ligar/desligar como qualquer outro).
           </Text>
 
           <View style={{ height: spacing.md }} />
@@ -650,50 +670,36 @@ export function SettingsScreen() {
           </Text>
         </Card>
 
-        <OwlSoundPicker
-          value={(config?.owlSpecies ?? 'buraqueira') as OwlSpeciesId}
-          onChange={async (species: OwlSpeciesId) => {
-            await setConfig({ owlSpecies: species });
-            await rescheduleAllNotifications();
-          }}
-        />
+        <Pressable onPress={() => navigation.navigate('SonsVozes')}>
+          <Card style={styles.linkCard}>
+            <View style={styles.linkIcon}>
+              <GreekIcon name="sound" size={24} color={colors.accent.gold} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkTitle}>Sons e Vozes</Text>
+              <Text style={styles.linkSub}>
+                Canto da coruja nas notificações e a voz da Comentora.
+              </Text>
+            </View>
+            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
+          </Card>
+        </Pressable>
 
-        <VoiceProviderCard
-          provider={config?.voiceProvider ?? 'system'}
-          geminiVoiceName={config?.geminiVoiceName ?? 'Aoede'}
-          hasApiKey={!!config?.hasApiKey}
-          onProviderChange={async (p) => {
-            await setConfig({ voiceProvider: p });
-          }}
-          onGeminiVoiceChange={async (name) => {
-            await setConfig({ geminiVoiceName: name });
-          }}
-        />
-
-        {(config?.voiceProvider ?? 'system') === 'system' ? (
-          <VoicePicker
-            value={config?.voiceId ?? null}
-            onChange={async (v: EnrichedVoice | null) => {
-              await setConfig({
-                voiceId: v?.identifier ?? null,
-                voiceLanguage: v?.language ?? null,
-              });
-            }}
-          />
-        ) : null}
-
-        <NudgesCard />
-
-        <Card style={styles.card}>
-          <Text style={styles.section}>Medicamentos e suplementos 💊</Text>
-          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
-            Crie lembretes para seus remédios e suplementos. No horário, a coruja
-            insiste até você marcar que tomou. Adicione quantos quiser.
-          </Text>
-          <Pressable onPress={() => navigation.navigate('Medications')} style={styles.outlineBtn}>
-            <Text style={styles.outlineBtnText}>Gerenciar lembretes</Text>
-          </Pressable>
-        </Card>
+        <Pressable onPress={() => navigation.navigate('Reminders')}>
+          <Card style={styles.linkCard}>
+            <View style={styles.linkIcon}>
+              <GreekIcon name="bell" size={24} color={colors.accent.gold} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkTitle}>Lembretes e hábitos</Text>
+              <Text style={styles.linkSub}>
+                Nudges diários + remédios, água, comida, jejum… A coruja insiste
+                até você marcar que fez.
+              </Text>
+            </View>
+            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
+          </Card>
+        </Pressable>
 
         <Card style={styles.card}>
           <Text style={styles.section}>Tom da Comentora</Text>
@@ -1392,6 +1398,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 48,
+  },
+  linkCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  linkIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bg.surfaceStrong,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  linkTitle: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+  },
+  linkSub: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 2,
+    lineHeight: 18,
   },
   outlineBtn: {
     paddingVertical: spacing.md,

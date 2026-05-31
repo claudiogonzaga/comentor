@@ -4,6 +4,7 @@ import {
   getUserConfig,
   listMedications,
   markNudgeDone,
+  markNudgeUndone,
 } from './database';
 import { MED_CATEGORY, ensureChannel, ensureNotificationCategories } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
@@ -193,6 +194,22 @@ export async function confirmMedication(medId: number): Promise<void> {
   } catch {
     /* dismissal is best-effort */
   }
+}
+
+/**
+ * Desfaz o "Já tomei" de hoje: remove a marca de concluído e re-agenda os
+ * lembretes, o que recria a corrente de insistências do dia (se ainda estiver
+ * dentro da janela). Usado quando o usuário desmarca um item da lista de
+ * tarefas na tela inicial.
+ */
+export async function unconfirmMedication(medId: number): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeUndone(completionKey(medId), today);
+  } catch (err) {
+    console.warn(`failed to mark medication undone ${medId}:`, err);
+  }
+  await scheduleAllMedications();
 }
 
 /**
