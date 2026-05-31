@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 
 interface Props {
@@ -44,7 +45,9 @@ export function TimePickerInput({ label, value, onChange }: Props) {
           pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] },
         ]}
       >
-        <Text style={styles.icon}>🕐</Text>
+        <View style={styles.icon}>
+          <GreekIcon name="clock" size={18} />
+        </View>
         <Text style={styles.value}>{value || '--:--'}</Text>
         <Text style={styles.hint}>tocar para alterar</Text>
       </Pressable>
@@ -86,7 +89,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
-  icon: { fontSize: 22 },
+  icon: { justifyContent: 'center' },
   value: {
     ...typography.title,
     color: colors.text.primary,

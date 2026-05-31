@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 
 interface Props {
@@ -71,9 +72,15 @@ export function MicButton({ state, onPressIn, onPressOut, hint }: Props) {
             pressed && state === 'idle' && { transform: [{ scale: 0.95 }] },
           ]}
         >
-          <Text style={styles.icon}>
-            {state === 'processing' ? '...' : '🎤'}
-          </Text>
+          {state === 'processing' ? (
+            <Text style={styles.icon}>...</Text>
+          ) : (
+            <GreekIcon
+              name="voice"
+              size={34}
+              color={state === 'listening' ? colors.text.onGold : colors.accent.gold}
+            />
+          )}
         </Pressable>
       </View>
       <Text style={styles.label}>

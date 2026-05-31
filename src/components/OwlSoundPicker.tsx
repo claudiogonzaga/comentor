@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from './Card';
+import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { OWL_SPECIES } from '../constants/owlSpecies';
 import { playOwlCall } from '../services/owlSound';
@@ -24,7 +25,10 @@ export function OwlSoundPicker({ value, onChange }: Props) {
 
   return (
     <Card style={styles.card}>
-      <Text style={styles.section}>Som das notificações 🦉</Text>
+      <View style={styles.sectionRow}>
+        <GreekIcon name="owl" size={20} />
+        <Text style={styles.section}>Som das notificações</Text>
+      </View>
       <Text style={styles.subtitle}>
         Escolha qual espécie de coruja faz o som dos lembretes. Toque em
         &quot;ouvir&quot; para escutar o canto na hora.
@@ -35,9 +39,7 @@ export function OwlSoundPicker({ value, onChange }: Props) {
         return (
           <View key={s.id} style={[styles.row, selected && styles.rowSelected]}>
             <Pressable style={styles.rowMain} onPress={() => onChange(s.id)}>
-              <Text style={styles.rowTitle}>
-                {s.emoji} {s.name}
-              </Text>
+              <Text style={styles.rowTitle}>{s.name}</Text>
               {s.scientific ? (
                 <Text style={styles.rowSci}>{s.scientific}</Text>
               ) : null}
@@ -49,9 +51,11 @@ export function OwlSoundPicker({ value, onChange }: Props) {
                 style={[styles.playBtn, previewing === s.id && styles.playBtnActive]}
                 hitSlop={6}
               >
-                <Text style={styles.playText}>
-                  {previewing === s.id ? '🔔' : 'ouvir'}
-                </Text>
+                {previewing === s.id ? (
+                  <GreekIcon name="bell" size={16} />
+                ) : (
+                  <Text style={styles.playText}>ouvir</Text>
+                )}
               </Pressable>
             ) : (
               <View style={{ width: 56 }} />
@@ -74,10 +78,15 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: spacing.lg,
   },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
   section: {
     ...typography.subtitle,
     color: colors.text.primary,
-    marginBottom: spacing.xs,
   },
   subtitle: {
     ...typography.small,

@@ -14,6 +14,7 @@ import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
+import { GreekIcon, type GreekIconName } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import type { Tone } from '../types';
 import { useAppStore } from '../store/useAppStore';
@@ -42,10 +43,10 @@ const STEPS = [
   },
 ];
 
-const TONE_OPTIONS: { value: Tone; label: string; emoji: string; desc: string }[] = [
-  { value: 'gentle', label: 'Gentil', emoji: '🤗', desc: 'leve, acolhedora' },
-  { value: 'firm', label: 'Firme', emoji: '💪', desc: 'direta, com dados' },
-  { value: 'brutal', label: 'Brutalmente honesta', emoji: '🔥', desc: 'sem panos quentes' },
+const TONE_OPTIONS: { value: Tone; label: string; icon: GreekIconName; desc: string }[] = [
+  { value: 'gentle', label: 'Gentil', icon: 'heart', desc: 'leve, acolhedora' },
+  { value: 'firm', label: 'Firme', icon: 'activity', desc: 'direta, com dados' },
+  { value: 'brutal', label: 'Brutalmente honesta', icon: 'flame', desc: 'sem panos quentes' },
 ];
 
 export function OnboardingScreen() {
@@ -158,7 +159,7 @@ export function OnboardingScreen() {
             style={[styles.toggleRow, prepEnabled && styles.toggleRowActive]}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.toggleLabel}>Lembrete de preparação 🌙</Text>
+              <Text style={styles.toggleLabel}>Lembrete de preparação</Text>
               <Text style={styles.toggleDesc}>
                 {`${interval} min antes da hora, sugiro uma respiração calmante. (recomendado)`}
               </Text>
@@ -179,7 +180,9 @@ export function OnboardingScreen() {
                   tone === opt.value && styles.toneRowActive,
                 ]}
               >
-                <Text style={styles.toneEmoji}>{opt.emoji}</Text>
+                <View style={styles.toneIcon}>
+                  <GreekIcon name={opt.icon} size={24} />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.toneLabel}>{opt.label}</Text>
                   <Text style={styles.toneDesc}>{opt.desc}</Text>
@@ -301,7 +304,7 @@ const styles = StyleSheet.create({
     borderColor: colors.accent.gold,
     backgroundColor: 'rgba(244,197,83,0.1)',
   },
-  toneEmoji: { fontSize: 28 },
+  toneIcon: { width: 34, alignItems: 'center' },
   toneLabel: { ...typography.bodyMedium, color: colors.text.primary },
   toneDesc: { ...typography.small, color: colors.text.secondary },
   radio: {

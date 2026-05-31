@@ -17,6 +17,8 @@ import { Card } from '../components/Card';
 import { ChatBubble } from '../components/ChatBubble';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { MicButton } from '../components/MicButton';
+import { GreekIcon } from '../components/GreekIcon';
+import { iconForEmoji } from '../services/todos';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   getCoachMessageForNow,
@@ -292,7 +294,7 @@ export function ChatScreen() {
             hitSlop={12}
             style={styles.speechToggle}
           >
-            <Text style={styles.muteIcon}>{speechEnabled ? '🔊' : '🔇'}</Text>
+            <GreekIcon name={speechEnabled ? 'sound' : 'mute'} size={20} />
             <Text style={styles.speechToggleLabel}>
               {speaking ? 'parar' : speechEnabled ? 'voz on' : 'voz off'}
             </Text>
@@ -307,9 +309,10 @@ export function ChatScreen() {
           {focus && (
             <Card style={styles.focusCard}>
               <Text style={styles.focusLabel}>FOCO DE AGORA</Text>
-              <Text style={styles.focusTitle}>
-                {focus.emoji} {focus.title}
-              </Text>
+              <View style={styles.focusTitleRow}>
+                <GreekIcon name={iconForEmoji(focus.emoji, 'nudge')} size={20} />
+                <Text style={styles.focusTitle}>{focus.title}</Text>
+              </View>
               <Text style={styles.focusBlurb}>{focus.blurb}</Text>
             </Card>
           )}
@@ -346,7 +349,7 @@ export function ChatScreen() {
 
         <View style={styles.actionsRow}>
           <Button
-            label="Vou dormir 🌙"
+            label="Vou dormir"
             variant="primary"
             onPress={handleSleepNow}
             fullWidth={false}
@@ -419,9 +422,6 @@ const styles = StyleSheet.create({
     minWidth: 60,
     alignItems: 'center',
   },
-  muteIcon: {
-    fontSize: 20,
-  },
   speechToggleLabel: {
     ...typography.small,
     color: colors.text.secondary,
@@ -448,10 +448,15 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: spacing.xs,
   },
+  focusTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
   focusTitle: {
     ...typography.subtitle,
     color: colors.text.primary,
-    marginBottom: spacing.xs,
   },
   focusBlurb: {
     ...typography.small,

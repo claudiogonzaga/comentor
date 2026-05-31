@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from './Card';
 import { Button } from './Button';
+import { GreekIcon, type GreekIconName } from './GreekIcon';
 import { colors, spacing, typography } from '../theme';
 import {
   formatSleepDuration,
@@ -17,15 +18,17 @@ import {
 type Status = 'loading' | 'unavailable' | 'denied' | 'granted';
 
 interface MetricRowProps {
-  emoji: string;
+  icon: GreekIconName;
   label: string;
   value: string;
 }
 
-function MetricRow({ emoji, label, value }: MetricRowProps) {
+function MetricRow({ icon, label, value }: MetricRowProps) {
   return (
     <View style={styles.metricRow}>
-      <Text style={styles.metricEmoji}>{emoji}</Text>
+      <View style={styles.metricIcon}>
+        <GreekIcon name={icon} size={24} />
+      </View>
       <View style={styles.metricMain}>
         <Text style={styles.metricLabel}>{label}</Text>
         <Text style={styles.metricValue}>{value}</Text>
@@ -94,7 +97,10 @@ export function HealthCard() {
 
   return (
     <Card style={styles.card}>
-      <Text style={styles.section}>Saúde 💪</Text>
+      <View style={styles.sectionRow}>
+        <GreekIcon name="heart" size={20} />
+        <Text style={styles.section}>Saúde</Text>
+      </View>
 
       {status === 'denied' && (
         <>
@@ -114,7 +120,7 @@ export function HealthCard() {
       {status === 'granted' && (
         <>
           <MetricRow
-            emoji="😴"
+            icon="moon"
             label="Sono na última noite"
             value={
               snapshot?.sleepMinutesLastNight != null
@@ -123,7 +129,7 @@ export function HealthCard() {
             }
           />
           <MetricRow
-            emoji="🏃"
+            icon="activity"
             label="Exercício (7 dias)"
             value={
               snapshot && snapshot.exerciseSessions7d > 0
@@ -134,7 +140,7 @@ export function HealthCard() {
             }
           />
           <MetricRow
-            emoji="👟"
+            icon="footsteps"
             label="Passos (7 dias)"
             value={
               snapshot && snapshot.steps7d > 0
@@ -153,10 +159,15 @@ export function HealthCard() {
 
 const styles = StyleSheet.create({
   card: { marginBottom: spacing.lg },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   section: {
     ...typography.subtitle,
     color: colors.text.primary,
-    marginBottom: spacing.sm,
   },
   subtitle: {
     ...typography.small,
@@ -170,10 +181,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     gap: spacing.md,
   },
-  metricEmoji: {
-    fontSize: 26,
+  metricIcon: {
     width: 32,
-    textAlign: 'center',
+    alignItems: 'center',
   },
   metricMain: {
     flex: 1,

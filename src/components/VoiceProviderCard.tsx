@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from './Card';
+import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { GEMINI_VOICES } from '../services/geminiTTS';
 import { previewGeminiVoice, stopSpeaking } from '../services/voice';
@@ -46,7 +47,10 @@ export function VoiceProviderCard({
 
   return (
     <Card style={styles.card}>
-      <Text style={styles.section}>Provedor de voz 🎙️</Text>
+      <View style={styles.sectionRow}>
+        <GreekIcon name="voice" size={20} />
+        <Text style={styles.section}>Provedor de voz</Text>
+      </View>
       <Text style={styles.subtitle}>
         A voz do sistema é grátis mas costuma soar artificial em português. A
         voz do Gemini é neural, muito mais realista — mas cada resposta
@@ -78,7 +82,7 @@ export function VoiceProviderCard({
               provider === 'gemini' && styles.segmentTextActive,
             ]}
           >
-            Gemini ✨
+            Gemini
           </Text>
           <Text style={styles.segmentSub}>premium</Text>
         </Pressable>
@@ -86,8 +90,7 @@ export function VoiceProviderCard({
 
       {provider === 'gemini' && !hasApiKey ? (
         <Text style={styles.warn}>
-          ⚠️ Voz Gemini precisa de chave da API configurada (mesma chave do
-          chat).
+          Voz Gemini precisa de chave da API configurada (mesma chave do chat).
         </Text>
       ) : null}
 
@@ -162,10 +165,15 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: spacing.lg,
   },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
   section: {
     ...typography.subtitle,
     color: colors.text.primary,
-    marginBottom: spacing.xs,
   },
   subtitle: {
     ...typography.small,

@@ -52,9 +52,9 @@ import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/
 import type { AIBackend, GeminiModel, LocalModelId, Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
-  { value: 'gentle', label: 'Gentil 🤗' },
-  { value: 'firm', label: 'Firme 💪' },
-  { value: 'brutal', label: 'Brutal 🔥' },
+  { value: 'gentle', label: 'Gentil' },
+  { value: 'firm', label: 'Firme' },
+  { value: 'brutal', label: 'Brutal' },
 ];
 
 const MODELS: { value: GeminiModel; label: string; sub: string }[] = [
@@ -164,19 +164,19 @@ export function SettingsScreen() {
       if (channel) {
         const soundLabel =
           channel.sound === null
-            ? '🔇 SEM SOM (silencioso)'
+            ? 'SEM SOM (silencioso)'
             : channel.sound === 'custom'
-              ? '🔊 canto da coruja'
-              : '🔊 som padrão';
+              ? 'canto da coruja'
+              : 'som padrão';
         const importanceOk = channel.importance >= 4;
         diag =
           `\n\nDiagnóstico do canal:\n` +
           `• Som: ${soundLabel}\n` +
-          `• Importância: ${channel.importance}/5 ${importanceOk ? '✅' : '⚠️ baixa'}\n` +
-          `• Atravessa Não Perturbe: ${channel.bypassDnd ? 'sim ✅' : 'não'}\n` +
-          `• Visível na tela bloqueada/relógio: ${channel.lockscreenVisibility === 1 ? 'sim ✅' : 'restrito ⚠️'}` +
+          `• Importância: ${channel.importance}/5 ${importanceOk ? '(ok)' : '(baixa)'}\n` +
+          `• Atravessa Não Perturbe: ${channel.bypassDnd ? 'sim' : 'não'}\n` +
+          `• Visível na tela bloqueada/relógio: ${channel.lockscreenVisibility === 1 ? 'sim' : 'restrito'}` +
           (channel.sound === null
-            ? `\n\n⚠️ O canal está SILENCIOSO. Toque em "Ajustar volume / som" e ative o som, ou apague os dados do app para recriar o canal.`
+            ? `\n\nO canal está SILENCIOSO. Toque em "Ajustar volume / som" e ative o som, ou apague os dados do app para recriar o canal.`
             : '');
       }
 
@@ -448,7 +448,7 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Abrir o chat com voz ligada 🔊
+                Abrir o chat com voz ligada
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 Por padrão a coruja só escreve. Ligando aqui, as conversas já
@@ -467,7 +467,7 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Falar as notificações em voz alta 🗣️
+                Falar as notificações em voz alta
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 Alternativa ao som: a coruja lê a notificação em voz alta (usa a
@@ -497,7 +497,7 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Lembretes da Comentora 🌙
+                Lembretes da Comentora
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 Pequenas notificações ao longo do dia com fatos sobre a
@@ -579,7 +579,7 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Modo inspiração ✨
+                Modo inspiração
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 A cada hora (das 8h às 21h) a Comentora te manda uma mensagem
@@ -624,7 +624,7 @@ export function SettingsScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Atravessar o Não Perturbe 🔕
+                Atravessar o Não Perturbe
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 No modo Não Perturbe a coruja ainda te alcança — só que sem
@@ -743,7 +743,9 @@ export function SettingsScreen() {
               onPress={() => setAIBackend('remote')}
               style={[styles.backendChip, aiBackend === 'remote' && styles.backendChipActive]}
             >
-              <Text style={styles.backendIcon}>☁️</Text>
+              <View style={styles.backendIcon}>
+                <GreekIcon name="cloud" size={22} />
+              </View>
               <Text style={[
                 styles.backendLabel,
                 aiBackend === 'remote' && styles.backendLabelActive,
@@ -753,7 +755,9 @@ export function SettingsScreen() {
               onPress={() => setAIBackend('local')}
               style={[styles.backendChip, aiBackend === 'local' && styles.backendChipActive]}
             >
-              <Text style={styles.backendIcon}>📱</Text>
+              <View style={styles.backendIcon}>
+                <GreekIcon name="phone" size={22} />
+              </View>
               <Text style={[
                 styles.backendLabel,
                 aiBackend === 'local' && styles.backendLabelActive,
@@ -865,7 +869,8 @@ export function SettingsScreen() {
                           </Text>
                           {m.hasThinking && (
                             <View style={styles.thinkingBadge}>
-                              <Text style={styles.thinkingBadgeText}>🧠 thinking</Text>
+                              <GreekIcon name="brain" size={12} color={colors.accent.lavender} />
+                              <Text style={styles.thinkingBadgeText}>thinking</Text>
                             </View>
                           )}
                         </View>
@@ -886,7 +891,8 @@ export function SettingsScreen() {
                           style={styles.deleteBtn}
                           hitSlop={8}
                         >
-                          <Text style={styles.deleteBtnText}>🗑  Deletar</Text>
+                          <GreekIcon name="trash" size={14} color={colors.accent.danger} />
+                          <Text style={styles.deleteBtnText}>Deletar</Text>
                         </Pressable>
                       ) : (
                         <Pressable
@@ -894,7 +900,8 @@ export function SettingsScreen() {
                           style={styles.downloadBtn}
                           hitSlop={8}
                         >
-                          <Text style={styles.downloadBtnText}>⬇  Baixar</Text>
+                          <GreekIcon name="download" size={14} color={colors.accent.gold} />
+                          <Text style={styles.downloadBtnText}>Baixar</Text>
                         </Pressable>
                       )}
                     </View>
@@ -1003,9 +1010,12 @@ export function SettingsScreen() {
           </View>
           {updateInfo?.available && updateInfo.latestVersion ? (
             <View style={styles.updateBox}>
-              <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
-                ✨ Nova versão disponível: v{updateInfo.latestVersion}
-              </Text>
+              <View style={styles.updateTitleRow}>
+                <GreekIcon name="sparkle" size={16} color={colors.accent.gold} />
+                <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
+                  Nova versão disponível: v{updateInfo.latestVersion}
+                </Text>
+              </View>
               {updateInfo.notes ? (
                 <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.xs }]} numberOfLines={4}>
                   {updateInfo.notes}
@@ -1156,7 +1166,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(244,197,83,0.1)',
   },
   backendIcon: {
-    fontSize: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   backendLabel: {
     ...typography.bodyMedium,
@@ -1210,6 +1221,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   thinkingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: 'rgba(167,139,250,0.2)',
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
@@ -1228,6 +1242,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
@@ -1239,6 +1256,9 @@ const styles = StyleSheet.create({
     color: colors.accent.danger,
   },
   downloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
@@ -1388,6 +1408,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.accent.gold,
+  },
+  updateTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   checkUpdateBtn: {
     paddingVertical: spacing.md,

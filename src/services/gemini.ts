@@ -197,7 +197,7 @@ export async function continueConversation(
   const apiKey = await getApiKey();
   if (!apiKey) {
     return {
-      text: 'Estou offline agora. Mas a resposta não muda: seu corpo precisa de sono. A gente conversa direito quando você configurar a chave da API. 🦉',
+      text: 'Estou offline agora. Mas a resposta não muda: seu corpo precisa de sono. A gente conversa direito quando você configurar a chave da API.',
       offline: true,
     };
   }
@@ -222,7 +222,7 @@ export async function continueConversation(
   } catch (err) {
     console.warn('Gemini chat failed:', err);
     return {
-      text: 'Tive um problema pra te responder agora. Mas o que importa: você ainda está acordado. O que vamos fazer sobre isso? 🦉',
+      text: 'Tive um problema pra te responder agora. Mas o que importa: você ainda está acordado. O que vamos fazer sobre isso?',
       offline: true,
     };
   }

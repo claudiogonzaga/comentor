@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import type { AIBackend, LocalModelId } from '../types';
 import { LOCAL_MODEL_LIST, formatModelSize } from '../constants/models';
@@ -122,7 +123,9 @@ export function AIChoiceScreen() {
             style={[styles.optionCard, backend === 'remote' && styles.optionCardActive]}
           >
             <View style={styles.optionHeader}>
-              <Text style={styles.optionIcon}>☁️</Text>
+              <View style={styles.optionIcon}>
+                <GreekIcon name="cloud" size={28} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.optionTitle}>Usar API do Gemini</Text>
                 <Text style={styles.optionDesc}>
@@ -186,7 +189,9 @@ export function AIChoiceScreen() {
             style={[styles.optionCard, backend === 'local' && styles.optionCardActive]}
           >
             <View style={styles.optionHeader}>
-              <Text style={styles.optionIcon}>📱</Text>
+              <View style={styles.optionIcon}>
+                <GreekIcon name="phone" size={28} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.optionTitle}>Usar modelo no celular</Text>
                 <Text style={styles.optionDesc}>
@@ -217,7 +222,8 @@ export function AIChoiceScreen() {
                       <Text style={styles.modelLabel}>{m.label}</Text>
                       {m.hasThinking && (
                         <View style={styles.thinkingBadge}>
-                          <Text style={styles.thinkingBadgeText}>🧠 thinking</Text>
+                          <GreekIcon name="brain" size={12} color={colors.accent.lavender} />
+                          <Text style={styles.thinkingBadgeText}>thinking</Text>
                         </View>
                       )}
                     </View>
@@ -258,7 +264,7 @@ export function AIChoiceScreen() {
           <View style={{ height: spacing.lg }} />
           {backend === 'remote' && (
             <Button
-              label="Ativar com Gemini 🦉"
+              label="Ativar com Gemini"
               onPress={submitRemote}
               loading={submitting}
               disabled={!trimmedKey || submitting}
@@ -319,7 +325,9 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   optionIcon: {
-    fontSize: 32,
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   optionTitle: {
     ...typography.bodyMedium,
@@ -432,6 +440,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   thinkingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: 'rgba(167,139,250,0.2)',
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,

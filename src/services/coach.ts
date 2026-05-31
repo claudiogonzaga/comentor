@@ -245,7 +245,7 @@ async function runChatGeneration(
   if (config.aiBackend === 'local') {
     if (!config.localModelId || !config.localModelDownloaded) {
       return {
-        text: 'O modelo local ainda não foi baixado. Vai em Configurações para baixar e voltamos a conversar. 🦉',
+        text: 'O modelo local ainda não foi baixado. Vai em Configurações para baixar e voltamos a conversar.',
         offline: true,
       };
     }
@@ -263,7 +263,7 @@ async function runChatGeneration(
     } catch (err) {
       console.warn('Local chat failed:', err);
       return {
-        text: 'Tive um problema pra te responder agora. Mas o que importa: você ainda está acordado. O que vamos fazer sobre isso? 🦉',
+        text: 'Tive um problema pra te responder agora. Mas o que importa: você ainda está acordado. O que vamos fazer sobre isso?',
         offline: true,
       };
     }

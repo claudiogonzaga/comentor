@@ -265,7 +265,7 @@ export function InterviewScreen() {
         <View style={styles.actions}>
           {readyToFinish ? (
             <Button
-              label={finishing ? 'Processando…' : 'Concluir entrevista 🦉'}
+              label={finishing ? 'Processando…' : 'Concluir entrevista'}
               onPress={finalize}
               loading={finishing}
             />

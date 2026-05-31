@@ -91,7 +91,7 @@ export function VoicePicker({ value, onChange }: Props) {
   return (
     <Card style={styles.card}>
       <View style={styles.header}>
-        <Text style={styles.title}>Voz da Comentora 🦉</Text>
+        <Text style={styles.title}>Voz da Comentora</Text>
         <Pressable onPress={reload} style={styles.reloadBtn} hitSlop={8}>
           <Text style={styles.reloadIcon}>↻</Text>
         </Pressable>
