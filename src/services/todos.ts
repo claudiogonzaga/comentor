@@ -132,8 +132,12 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
 
   try {
     const meds = await listMedications();
+    const todayDow = new Date().getDay(); // 0=domingo … 6=sábado
     for (const med of meds) {
       if (!med.enabled) continue;
+      // Lembretes semanais só aparecem na lista de hoje nos dias selecionados.
+      const days = med.daysOfWeek?.length ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
+      if (!days.includes(todayDow)) continue;
       const key = `med:${med.id}`;
       items.push({
         key,

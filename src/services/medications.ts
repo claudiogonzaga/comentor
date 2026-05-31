@@ -106,30 +106,68 @@ export async function scheduleAllMedications(): Promise<string[]> {
       ? `Hora de tomar: ${med.dosage.trim()}.`
       : 'Hora de tomar o seu lembrete.';
 
-    // Lembrete diário (âncora) — dispara todo dia no horário.
-    try {
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title,
-          body: baseBody,
-          data: { type: `med:${med.id}`, medId: med.id },
-          sound,
-          categoryIdentifier: MED_CATEGORY,
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DAILY,
-          hour: safeHour,
-          minute: safeMinute,
-          channelId,
-        },
-      });
-      ids.push(id);
-    } catch (err) {
-      console.warn(`failed to schedule medication anchor ${med.id}:`, err);
+    // Dias da semana em que o lembrete vale (0=domingo … 6=sábado, igual a
+    // Date.getDay()). Os 7 dias = diário; um subconjunto = semanal em dias
+    // específicos (ex.: [2, 4] = terça e quinta).
+    const activeDays =
+      med.daysOfWeek && med.daysOfWeek.length > 0
+        ? med.daysOfWeek
+        : [0, 1, 2, 3, 4, 5, 6];
+    const isDaily = activeDays.length >= 7;
+
+    const anchorContent = {
+      title,
+      body: baseBody,
+      data: { type: `med:${med.id}`, medId: med.id },
+      sound,
+      categoryIdentifier: MED_CATEGORY,
+    };
+
+    // Âncora recorrente. Diário → um gatilho DAILY; semanal → um gatilho
+    // WEEKLY por dia selecionado (no expo, weekday 1=domingo … 7=sábado, então
+    // somamos 1 ao índice 0–6).
+    if (isDaily) {
+      try {
+        const id = await Notifications.scheduleNotificationAsync({
+          content: anchorContent,
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
+            hour: safeHour,
+            minute: safeMinute,
+            channelId,
+          },
+        });
+        ids.push(id);
+      } catch (err) {
+        console.warn(`failed to schedule medication anchor ${med.id}:`, err);
+      }
+    } else {
+      for (const dow of activeDays) {
+        try {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: anchorContent,
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+              weekday: dow + 1,
+              hour: safeHour,
+              minute: safeMinute,
+              channelId,
+            },
+          });
+          ids.push(id);
+        } catch (err) {
+          console.warn(
+            `failed to schedule weekly medication anchor ${med.id} (dow ${dow}):`,
+            err,
+          );
+        }
+      }
     }
 
-    // Corrente de insistências de hoje — só para os ainda não tomados.
-    if (!doneKeys.includes(key)) {
+    // Corrente de insistências de hoje — só se HOJE for um dia ativo e o
+    // lembrete ainda não tiver sido marcado como feito.
+    const todayDow = new Date().getDay();
+    if (activeDays.includes(todayDow) && !doneKeys.includes(key)) {
       const base = buildTodayAt(safeHour, safeMinute);
       for (let k = 1; k <= MED_MAX_REPEATS; k++) {
         const fireAt = new Date(base.getTime() + k * intervalMin * 60_000);

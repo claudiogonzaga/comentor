@@ -198,4 +198,10 @@ export interface Medication {
   emoji: string | null;
   enabled: boolean;
   orderIndex: number;
+  /**
+   * Dias da semana em que o lembrete dispara (0=domingo … 6=sábado, igual a
+   * Date.getDay()). Os 7 dias = diário (padrão). Subconjunto = semanal em
+   * dias específicos (ex.: [2, 4] = terça e quinta).
+   */
+  daysOfWeek: number[];
 }

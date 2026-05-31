@@ -62,6 +62,18 @@ const ICON_CHOICES: IconChoice[] = [
   { icon: 'bell', emoji: '🔔', label: 'Lembrete' },
 ];
 
+/** Rótulos curtos por índice (0=domingo … 6=sábado, igual a Date.getDay()). */
+const DAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+/** Texto-resumo dos dias: "Todos os dias" ou "Ter, Qui". */
+function formatDays(days: number[]): string {
+  if (!days || days.length === 0 || days.length >= 7) return 'Todos os dias';
+  return [...days]
+    .sort((a, b) => a - b)
+    .map((d) => DAY_LABELS[d])
+    .join(', ');
+}
+
 interface EditorState {
   visible: boolean;
   id: number | null; // null = novo
@@ -69,6 +81,7 @@ interface EditorState {
   dosage: string;
   time: string;
   emoji: string;
+  daysOfWeek: number[];
 }
 
 const EMPTY_EDITOR: EditorState = {
@@ -78,6 +91,7 @@ const EMPTY_EDITOR: EditorState = {
   dosage: '',
   time: '08:00',
   emoji: '💧',
+  daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
 };
 
 export function RemindersScreen() {
@@ -115,15 +129,33 @@ export function RemindersScreen() {
       dosage: med.dosage ?? '',
       time: med.time,
       emoji: med.emoji ?? '💧',
+      daysOfWeek: med.daysOfWeek?.length ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6],
     });
   };
 
   const closeEditor = () => setEditor((e) => ({ ...e, visible: false }));
 
+  const toggleDay = (day: number) => {
+    setEditor((s) => {
+      const has = s.daysOfWeek.includes(day);
+      const next = has
+        ? s.daysOfWeek.filter((d) => d !== day)
+        : [...s.daysOfWeek, day];
+      return { ...s, daysOfWeek: next.sort((a, b) => a - b) };
+    });
+  };
+
   const handleSave = async () => {
     const name = editor.name.trim();
     if (!name) {
       Alert.alert('Falta o nome', 'Dê um nome ao lembrete (ex.: "Beber água").');
+      return;
+    }
+    if (editor.daysOfWeek.length === 0) {
+      Alert.alert(
+        'Escolha os dias',
+        'Selecione ao menos um dia da semana para o lembrete disparar.',
+      );
       return;
     }
     setSaving(true);
@@ -135,6 +167,7 @@ export function RemindersScreen() {
           time: editor.time,
           emoji: editor.emoji,
           enabled: true,
+          daysOfWeek: editor.daysOfWeek,
         });
       } else {
         await updateMedication(editor.id, {
@@ -142,6 +175,7 @@ export function RemindersScreen() {
           dosage: editor.dosage,
           time: editor.time,
           emoji: editor.emoji,
+          daysOfWeek: editor.daysOfWeek,
         });
       }
       await scheduleAllMedications();
@@ -236,6 +270,9 @@ export function RemindersScreen() {
                 <GreekIcon name="clock" size={13} color={colors.accent.gold} />
                 <Text style={styles.timeText}>{med.time}</Text>
               </View>
+              {med.daysOfWeek.length < 7 && (
+                <Text style={styles.rowDays}>{formatDays(med.daysOfWeek)}</Text>
+              )}
             </Pressable>
             <View style={styles.rowRight}>
               {busyId === med.id ? (
@@ -326,6 +363,41 @@ export function RemindersScreen() {
               value={editor.time}
               onChange={(hhmm) => setEditor((s) => ({ ...s, time: hhmm }))}
             />
+
+            <View style={{ height: spacing.md }} />
+            <View style={styles.daysLabelRow}>
+              <Text style={styles.fieldLabel}>Dias da semana</Text>
+              <Pressable
+                onPress={() =>
+                  setEditor((s) => ({
+                    ...s,
+                    daysOfWeek:
+                      s.daysOfWeek.length >= 7 ? [] : [0, 1, 2, 3, 4, 5, 6],
+                  }))
+                }
+              >
+                <Text style={styles.daysToggleAll}>
+                  {editor.daysOfWeek.length >= 7 ? 'Limpar' : 'Todos os dias'}
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.dayRow}>
+              {DAY_LABELS.map((lbl, idx) => {
+                const on = editor.daysOfWeek.includes(idx);
+                return (
+                  <Pressable
+                    key={idx}
+                    onPress={() => toggleDay(idx)}
+                    style={[styles.dayChip, on && styles.dayChipOn]}
+                  >
+                    <Text style={[styles.dayChipText, on && styles.dayChipTextOn]}>
+                      {lbl}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.daysHint}>{formatDays(editor.daysOfWeek)}</Text>
 
             <View style={{ height: spacing.lg }} />
             <Button label="Salvar" onPress={handleSave} loading={saving} />
@@ -425,6 +497,11 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.accent.gold,
   },
+  rowDays: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 4,
+  },
   rowRight: {
     alignItems: 'flex-end',
     gap: spacing.sm,
@@ -497,5 +574,47 @@ const styles = StyleSheet.create({
   iconChipOn: {
     backgroundColor: 'rgba(42,26,16,0.18)',
     borderColor: colors.accent.gold,
+  },
+  daysLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  daysToggleAll: {
+    ...typography.small,
+    color: colors.accent.gold,
+    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: spacing.xs,
+  },
+  dayChip: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bg.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  dayChipOn: {
+    backgroundColor: 'rgba(42,26,16,0.18)',
+    borderColor: colors.accent.gold,
+  },
+  dayChipText: {
+    ...typography.small,
+    color: colors.text.secondary,
+  },
+  dayChipTextOn: {
+    color: colors.accent.gold,
+    fontWeight: '700',
+  },
+  daysHint: {
+    ...typography.small,
+    color: colors.text.tertiary,
   },
 });

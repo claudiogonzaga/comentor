@@ -188,6 +188,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       time TEXT NOT NULL,
       emoji TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
+      days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6',
       order_index INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -294,6 +295,19 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('inspiration_mode_enabled')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+
+  // v1.23: dias da semana por lembrete (medications). Permite lembretes
+  // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
+  // 7 dias, ou seja, diário — preserva o comportamento das instalações antigas.
+  // Convenção 0=domingo … 6=sábado (igual a Date.getDay()).
+  const medCols = await database.getAllAsync<{ name: string }>(
+    "PRAGMA table_info('medications')",
+  );
+  if (!medCols.some((c) => c.name === 'days_of_week')) {
+    await database.execAsync(
+      `ALTER TABLE medications ADD COLUMN days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6'`,
     );
   }
 
@@ -989,7 +1003,30 @@ interface MedicationRow {
   time: string;
   emoji: string | null;
   enabled: number;
+  days_of_week: string | null;
   order_index: number;
+}
+
+const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6];
+
+/**
+ * Converte a coluna `days_of_week` ("0,1,2,…") numa lista normalizada de
+ * inteiros 0–6 (domingo–sábado), sem duplicatas e ordenada. Entrada vazia ou
+ * inválida vira "todos os dias" (= diário), o padrão seguro.
+ */
+function parseDaysOfWeek(raw: string | null | undefined): number[] {
+  if (!raw) return [...ALL_DAYS_OF_WEEK];
+  const parsed = raw
+    .split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  const uniq = Array.from(new Set(parsed)).sort((a, b) => a - b);
+  return uniq.length > 0 ? uniq : [...ALL_DAYS_OF_WEEK];
+}
+
+/** Serializa para o banco; nunca grava string vazia (cairia para diário). */
+function serializeDaysOfWeek(days: number[] | undefined): string {
+  return parseDaysOfWeek((days ?? ALL_DAYS_OF_WEEK).join(',')).join(',');
 }
 
 const rowToMedication = (r: MedicationRow): Medication => ({
@@ -1000,6 +1037,7 @@ const rowToMedication = (r: MedicationRow): Medication => ({
   emoji: r.emoji,
   enabled: r.enabled === 1,
   orderIndex: r.order_index,
+  daysOfWeek: parseDaysOfWeek(r.days_of_week),
 });
 
 export async function listMedications(): Promise<Medication[]> {
@@ -1025,6 +1063,7 @@ export async function createMedication(input: {
   time: string;
   emoji?: string | null;
   enabled?: boolean;
+  daysOfWeek?: number[];
 }): Promise<Medication> {
   const d = await getDb();
   // Novo lembrete entra no fim da lista.
@@ -1033,14 +1072,15 @@ export async function createMedication(input: {
   );
   const orderIndex = (max?.m ?? -1) + 1;
   const res = await d.runAsync(
-    `INSERT INTO medications (name, dosage, time, emoji, enabled, order_index)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO medications (name, dosage, time, emoji, enabled, days_of_week, order_index)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name.trim(),
       input.dosage?.trim() || null,
       input.time,
       input.emoji?.trim() || '💊',
       input.enabled === false ? 0 : 1,
+      serializeDaysOfWeek(input.daysOfWeek),
       orderIndex,
     ],
   );
@@ -1053,7 +1093,9 @@ export async function createMedication(input: {
 
 export async function updateMedication(
   id: number,
-  patch: Partial<Pick<Medication, 'name' | 'dosage' | 'time' | 'emoji' | 'enabled'>>,
+  patch: Partial<
+    Pick<Medication, 'name' | 'dosage' | 'time' | 'emoji' | 'enabled' | 'daysOfWeek'>
+  >,
 ): Promise<Medication | null> {
   const d = await getDb();
   const fields: string[] = [];
@@ -1077,6 +1119,10 @@ export async function updateMedication(
   if (typeof patch.enabled === 'boolean') {
     fields.push('enabled = ?');
     values.push(patch.enabled ? 1 : 0);
+  }
+  if (patch.daysOfWeek !== undefined) {
+    fields.push('days_of_week = ?');
+    values.push(serializeDaysOfWeek(patch.daysOfWeek));
   }
   if (fields.length === 0) return getMedication(id);
   fields.push("updated_at = datetime('now')");
