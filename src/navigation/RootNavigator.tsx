@@ -13,6 +13,7 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
+import { ReadAloudScreen } from '../screens/ReadAloudScreen';
 import { RemindersScreen } from '../screens/RemindersScreen';
 import { SoundsVoiceScreen } from '../screens/SoundsVoiceScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
@@ -45,6 +46,7 @@ export type RootStackParamList = {
   Settings: undefined;
   History: undefined;
   Breathing: undefined;
+  ReadAloud: undefined;
   Reminders: undefined;
   SonsVozes: undefined;
 };
@@ -282,6 +284,11 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
         <Stack.Screen name="Breathing" component={BreathingScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen
+          name="ReadAloud"
+          component={ReadAloudScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
         <Stack.Screen
           name="Reminders"
           component={RemindersScreen}

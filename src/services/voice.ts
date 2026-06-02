@@ -35,6 +35,13 @@ interface SpeakOptions {
 }
 
 let currentlySpeaking = false;
+// Token de "geração" de fala. Cada chamada que inicia uma fala reivindica um
+// token novo; quando a síntese assíncrona (Gemini) ou o encadeamento de
+// pedaços (texto longo) termina, só age se ainda for o token vigente. Isso
+// impede que duas vozes se sobreponham lendo mensagens diferentes — o bug em
+// que a síntese do Gemini de uma msg antiga voltava e tocava junto com a do
+// sistema de outra. stopSpeaking() incrementa o token, invalidando o que vier.
+let speakToken = 0;
 
 // Active voice state — set explicitly via setActiveVoice() OR resolved by
 // auto-pick when listing. Lives in module memory; persisted in user_config
@@ -226,11 +233,13 @@ export async function speak(
   opts: SpeakOptions & SpeakExtraOptions = {},
 ): Promise<void> {
   if (!text.trim()) return;
-  await stopSpeaking();
+  const myToken = ++speakToken; // reivindica esta geração de fala
+  await stopPlayback(); // para o que estiver tocando, sem mexer no token
+  if (myToken !== speakToken) return; // outra fala assumiu durante o await
 
   const provider = opts.provider ?? activeProvider;
   if (provider === 'gemini') {
-    await speakWithGemini(text, opts);
+    await speakWithGemini(text, opts, myToken);
     return;
   }
 
@@ -238,6 +247,7 @@ export async function speak(
     opts.voiceId !== undefined
       ? { id: opts.voiceId, lang: opts.language ?? DEFAULT_LANGUAGE }
       : await resolveVoice();
+  if (myToken !== speakToken) return; // resolveVoice() pode ter cedido a vez
   currentlySpeaking = true;
   Speech.speak(text, {
     language: resolved.lang,
@@ -245,13 +255,15 @@ export async function speak(
     rate: 1.0,
     pitch: 1.0,
     onDone: () => {
+      if (myToken !== speakToken) return;
       currentlySpeaking = false;
       opts.onDone?.();
     },
     onStopped: () => {
-      currentlySpeaking = false;
+      if (myToken === speakToken) currentlySpeaking = false;
     },
     onError: (e) => {
+      if (myToken !== speakToken) return;
       currentlySpeaking = false;
       opts.onError?.(e);
     },
@@ -261,19 +273,20 @@ export async function speak(
 async function speakWithGemini(
   text: string,
   opts: SpeakOptions & SpeakExtraOptions,
+  myToken: number,
 ): Promise<void> {
   const voice = opts.geminiVoiceName ?? activeGeminiVoiceName;
   currentlySpeaking = true;
   try {
     const { uri } = await synthesizeSpeechGemini(text, voice);
-    if (!currentlySpeaking) return; // foi interrompido durante a síntese
+    if (myToken !== speakToken) return; // superada durante a síntese — não toca
     const player = createAudioPlayer({ uri });
     activeGeminiPlayer = player;
     const sub = player.addListener('playbackStatusUpdate', (status) => {
       if (status.didJustFinish) {
         sub.remove();
         releaseGeminiPlayer(player);
-        if (currentlySpeaking) {
+        if (myToken === speakToken) {
           currentlySpeaking = false;
           opts.onDone?.();
         }
@@ -281,6 +294,7 @@ async function speakWithGemini(
     });
     player.play();
   } catch (err) {
+    if (myToken !== speakToken) return; // superada (não cair no fallback à toa)
     currentlySpeaking = false;
     if (err instanceof GeminiTTSError) {
       console.warn('Gemini TTS falhou, caindo no sistema:', err.message);
@@ -320,7 +334,98 @@ export async function previewGeminiVoice(voiceName: string): Promise<void> {
   await speak(PREVIEW_TEXT, { provider: 'gemini', geminiVoiceName: voiceName });
 }
 
-export async function stopSpeaking() {
+/**
+ * Quebra um texto grande em pedaços de até `maxLen` caracteres, respeitando
+ * limites de frase quando possível. O Android tem um limite por chamada de TTS
+ * (~4000 chars), então textos longos (visualização, oração) precisam ser lidos
+ * em sequência. Sem lookbehind (Hermes-safe).
+ */
+export function chunkText(text: string, maxLen = 3500): string[] {
+  const clean = text.replace(/\r\n/g, '\n').trim();
+  if (!clean) return [];
+  if (clean.length <= maxLen) return [clean];
+  const sentences = clean.match(/[^.!?…\n]+[.!?…]*\n*|\n+/g) ?? [clean];
+  const chunks: string[] = [];
+  let cur = '';
+  for (const s of sentences) {
+    if (s.length > maxLen) {
+      if (cur.trim()) {
+        chunks.push(cur.trim());
+        cur = '';
+      }
+      for (let i = 0; i < s.length; i += maxLen) chunks.push(s.slice(i, i + maxLen).trim());
+      continue;
+    }
+    if ((cur + s).length > maxLen) {
+      if (cur.trim()) chunks.push(cur.trim());
+      cur = s;
+    } else {
+      cur += s;
+    }
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks.filter(Boolean);
+}
+
+interface SpeakLongOptions {
+  voiceId?: string | null;
+  language?: string | null;
+  rate?: number;
+  onDone?: () => void;
+  onError?: (e: unknown) => void;
+  /** Progresso: pedaço atual (0-based) e total de pedaços. */
+  onProgress?: (index: number, total: number) => void;
+}
+
+/**
+ * Lê um texto longo em voz alta usando uma voz DO SISTEMA (expo-speech),
+ * quebrando em pedaços e encadeando um após o outro. Usado pela tela
+ * "Leia para mim" (visualização, auto-hipnose, oração). Respeita o token de
+ * geração, então `stopSpeaking()` interrompe na hora e não encadeia o próximo.
+ */
+export async function speakLongText(
+  text: string,
+  opts: SpeakLongOptions = {},
+): Promise<void> {
+  const chunks = chunkText(text);
+  if (chunks.length === 0) return;
+  const myToken = ++speakToken;
+  await stopPlayback();
+  if (myToken !== speakToken) return;
+
+  const lang = opts.language ?? DEFAULT_LANGUAGE;
+  let i = 0;
+  const speakNext = () => {
+    if (myToken !== speakToken) return; // parado ou superado
+    if (i >= chunks.length) {
+      currentlySpeaking = false;
+      opts.onDone?.();
+      return;
+    }
+    const idx = i++;
+    opts.onProgress?.(idx, chunks.length);
+    currentlySpeaking = true;
+    Speech.speak(chunks[idx], {
+      language: lang,
+      voice: opts.voiceId ?? undefined,
+      rate: opts.rate ?? 1.0,
+      pitch: 1.0,
+      onDone: () => speakNext(),
+      onStopped: () => {
+        if (myToken === speakToken) currentlySpeaking = false;
+      },
+      onError: (e) => {
+        if (myToken !== speakToken) return;
+        currentlySpeaking = false;
+        opts.onError?.(e);
+      },
+    });
+  };
+  speakNext();
+}
+
+/** Para a reprodução atual (sistema + player Gemini) SEM invalidar o token. */
+async function stopPlayback() {
   try {
     await Speech.stop();
   } catch {
@@ -335,6 +440,13 @@ export async function stopSpeaking() {
     releaseGeminiPlayer(activeGeminiPlayer);
   }
   currentlySpeaking = false;
+}
+
+export async function stopSpeaking() {
+  // Incrementa o token: qualquer síntese/encadeamento em voo vira "superado"
+  // e não vai tocar nem encadear o próximo pedaço.
+  speakToken++;
+  await stopPlayback();
 }
 
 export function isSpeaking(): boolean {

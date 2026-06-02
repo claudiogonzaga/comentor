@@ -316,6 +316,17 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN breathing_duration_minutes INTEGER NOT NULL DEFAULT 16`,
     );
   }
+  // v1.26: voz da tela "Leia para mim" (sistema), independente da voz do chat.
+  if (!colNames.includes('read_aloud_voice_id')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN read_aloud_voice_id TEXT`,
+    );
+  }
+  if (!colNames.includes('read_aloud_voice_language')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN read_aloud_voice_language TEXT`,
+    );
+  }
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
   // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
@@ -450,6 +461,8 @@ interface UserConfigRow {
   breathing_sound_id: string | null;
   breathing_sound_uri: string | null;
   breathing_duration_minutes: number | null;
+  read_aloud_voice_id: string | null;
+  read_aloud_voice_language: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -483,6 +496,8 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   breathingSoundId: r.breathing_sound_id ?? 'cello',
   breathingSoundUri: r.breathing_sound_uri ?? null,
   breathingDurationMinutes: r.breathing_duration_minutes ?? 16,
+  readAloudVoiceId: r.read_aloud_voice_id ?? null,
+  readAloudVoiceLanguage: r.read_aloud_voice_language ?? null,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -528,6 +543,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     breathingSoundId: 'breathing_sound_id',
     breathingSoundUri: 'breathing_sound_uri',
     breathingDurationMinutes: 'breathing_duration_minutes',
+    readAloudVoiceId: 'read_aloud_voice_id',
+    readAloudVoiceLanguage: 'read_aloud_voice_language',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

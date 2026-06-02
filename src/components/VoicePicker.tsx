@@ -25,11 +25,13 @@ interface Props {
   value: string | null;
   /** called when the user picks a different voice */
   onChange: (voice: EnrichedVoice | null) => void;
+  /** título do card (padrão: "Voz da Comentora") */
+  title?: string;
 }
 
 const PLAY_HOLD_MS = 6000;
 
-export function VoicePicker({ value, onChange }: Props) {
+export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Props) {
   const [voices, setVoices] = useState<EnrichedVoice[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function VoicePicker({ value, onChange }: Props) {
   return (
     <Card style={styles.card}>
       <View style={styles.header}>
-        <Text style={styles.title}>Voz da Comentora</Text>
+        <Text style={styles.title}>{title}</Text>
         <Pressable onPress={reload} style={styles.reloadBtn} hitSlop={8}>
           <Text style={styles.reloadIcon}>↻</Text>
         </Pressable>

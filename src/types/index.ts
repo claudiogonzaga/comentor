@@ -105,6 +105,12 @@ export interface UserConfig {
   breathingSoundUri: string | null;
   /** Duração desejada do exercício de respiração, em minutos (vira nº de ciclos). */
   breathingDurationMinutes: number;
+  /**
+   * Voz do sistema usada na tela "Leia para mim" (independente da voz do chat).
+   * null = automática (melhor pt-* disponível).
+   */
+  readAloudVoiceId: string | null;
+  readAloudVoiceLanguage: string | null;
 }
 
 export interface InterviewSummary {

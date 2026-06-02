@@ -308,6 +308,14 @@ export function HomeScreen() {
           </View>
         )}
 
+        <View style={styles.secondaryActions}>
+          <Button
+            label="Leia para mim"
+            variant="secondary"
+            onPress={() => navigation.navigate('ReadAloud')}
+          />
+        </View>
+
         <Pressable onPress={() => navigation.navigate('History')} style={styles.historyLink}>
           <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>
             Ver estatísticas →
@@ -444,6 +452,9 @@ const styles = StyleSheet.create({
   },
   actions: {
     marginBottom: spacing.xl,
+  },
+  secondaryActions: {
+    marginBottom: spacing.sm,
   },
   historyLink: {
     alignItems: 'center',
