@@ -45,7 +45,7 @@ export function SoundsVoiceScreen() {
         />
 
         <BreathingSoundPicker
-          value={config?.breathingSoundId ?? 'tone'}
+          value={config?.breathingSoundId ?? 'cello'}
           customUri={config?.breathingSoundUri ?? null}
           onSelect={async (id: string) => {
             await setConfig({ breathingSoundId: id });

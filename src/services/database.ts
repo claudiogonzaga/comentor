@@ -301,7 +301,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   // próprio do usuário).
   if (!colNames.includes('breathing_sound_id')) {
     await database.execAsync(
-      `ALTER TABLE user_config ADD COLUMN breathing_sound_id TEXT NOT NULL DEFAULT 'tone'`,
+      `ALTER TABLE user_config ADD COLUMN breathing_sound_id TEXT NOT NULL DEFAULT 'cello'`,
     );
   }
   if (!colNames.includes('breathing_sound_uri')) {
@@ -402,6 +402,14 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       DEFAULT_SYSTEM_PROMPT,
     ]);
   }
+
+  // v1.24.1: o som de respiração "Tom original" (id 'tone') saiu da biblioteca.
+  // Migra quem estava nele (inclusive o antigo default) para 'cello'. Roda
+  // depois do seed acima, então a linha id=1 já existe. Não toca em quem
+  // escolheu piano/órgão/custom.
+  await database.runAsync(
+    `UPDATE user_config SET breathing_sound_id = 'cello' WHERE breathing_sound_id = 'tone'`,
+  );
 }
 
 interface UserConfigRow {
@@ -464,7 +472,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
-  breathingSoundId: r.breathing_sound_id ?? 'tone',
+  breathingSoundId: r.breathing_sound_id ?? 'cello',
   breathingSoundUri: r.breathing_sound_uri ?? null,
 });
 

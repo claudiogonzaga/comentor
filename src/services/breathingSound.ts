@@ -2,7 +2,7 @@
 //
 // Mesma ideia do owlSound.ts, mas aqui as trilhas são longas (~3 min) e tocam
 // em loop enquanto o guia 2-2-4 roda. A fonte pode ser um asset embutido
-// (trilhas 'tone'/'piano'/'cello'/'organ') ou um arquivo que o usuário subiu
+// (trilhas 'cello'/'piano'/'organ') ou um arquivo que o usuário subiu
 // (id 'custom', cujo file:// vem da config). Falhas são engolidas — nunca
 // derrubam o app.
 

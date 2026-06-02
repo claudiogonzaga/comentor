@@ -5,7 +5,7 @@
 // Além das opções embutidas, o usuário pode subir o próprio arquivo de áudio
 // (id 'custom'); nesse caso o som vem de `config.breathingSoundUri`, não daqui.
 
-export type BreathingSoundId = 'tone' | 'piano' | 'cello' | 'organ' | 'custom';
+export type BreathingSoundId = 'piano' | 'cello' | 'organ' | 'custom';
 
 export interface BreathingSound {
   id: BreathingSoundId;
@@ -21,26 +21,20 @@ export interface BreathingSound {
 }
 
 /** Som usado quando o usuário ainda não escolheu nenhum. */
-export const DEFAULT_BREATHING_SOUND: BreathingSoundId = 'tone';
+export const DEFAULT_BREATHING_SOUND: BreathingSoundId = 'cello';
 
 export const BREATHING_SOUNDS: BreathingSound[] = [
   {
-    id: 'tone',
-    name: 'Tom original',
-    description: 'Drone calmo e contínuo — sem melodia, só uma base para respirar',
-    asset: require('../../assets/sounds/breath_tone.mp3'),
+    id: 'cello',
+    name: 'Violoncelo',
+    description: 'Cordas graves e quentes, uma oitava abaixo — sustentadas e calmas',
+    asset: require('../../assets/sounds/breath_cello.mp3'),
   },
   {
     id: 'piano',
     name: 'Piano',
-    description: 'Notas suaves de piano, lentas e espaçadas',
+    description: 'Piano Yamaha — notas suaves, lentas e espaçadas',
     asset: require('../../assets/sounds/breath_piano.mp3'),
-  },
-  {
-    id: 'cello',
-    name: 'Violoncelo',
-    description: 'Cordas graves e quentes, sustentadas',
-    asset: require('../../assets/sounds/breath_cello.mp3'),
   },
   {
     id: 'organ',
