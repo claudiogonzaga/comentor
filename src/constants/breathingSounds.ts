@@ -5,7 +5,15 @@
 // Além das opções embutidas, o usuário pode subir o próprio arquivo de áudio
 // (id 'custom'); nesse caso o som vem de `config.breathingSoundUri`, não daqui.
 
-export type BreathingSoundId = 'piano' | 'cello' | 'organ' | 'custom';
+export type BreathingSoundId =
+  | 'cello'
+  | 'bowl'
+  | 'handpan'
+  | 'bells'
+  | 'crystal'
+  | 'piano'
+  | 'organ'
+  | 'custom';
 
 export interface BreathingSound {
   id: BreathingSoundId;
@@ -29,6 +37,30 @@ export const BREATHING_SOUNDS: BreathingSound[] = [
     name: 'Violoncelo',
     description: 'Cordas graves e quentes, uma oitava abaixo — sustentadas e calmas',
     asset: require('../../assets/sounds/breath_cello.mp3'),
+  },
+  {
+    id: 'bowl',
+    name: 'Tigela tibetana',
+    description: 'Tigela cantante — ressonância profunda e meditativa',
+    asset: require('../../assets/sounds/breath_bowl.mp3'),
+  },
+  {
+    id: 'handpan',
+    name: 'Handpan',
+    description: 'Handpan (hang) — notas suaves e harmônicas',
+    asset: require('../../assets/sounds/breath_handpan.mp3'),
+  },
+  {
+    id: 'bells',
+    name: 'Sinos tubulares',
+    description: 'Sinos tubulares — timbres longos e cristalinos',
+    asset: require('../../assets/sounds/breath_bells.mp3'),
+  },
+  {
+    id: 'crystal',
+    name: 'Cristal',
+    description: 'Taças de cristal — brilho etéreo e sustentado',
+    asset: require('../../assets/sounds/breath_crystal.mp3'),
   },
   {
     id: 'piano',
