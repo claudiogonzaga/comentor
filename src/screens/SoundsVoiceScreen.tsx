@@ -3,6 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { OwlSoundPicker } from '../components/OwlSoundPicker';
 import { BreathingSoundPicker } from '../components/BreathingSoundPicker';
+import { BreathingDurationPicker } from '../components/BreathingDurationPicker';
 import { VoiceProviderCard } from '../components/VoiceProviderCard';
 import { VoicePicker } from '../components/VoicePicker';
 import type { EnrichedVoice } from '../services/voice';
@@ -52,6 +53,13 @@ export function SoundsVoiceScreen() {
           }}
           onUploadCustom={async (uri: string) => {
             await setConfig({ breathingSoundId: 'custom', breathingSoundUri: uri });
+          }}
+        />
+
+        <BreathingDurationPicker
+          value={config?.breathingDurationMinutes ?? 2}
+          onChange={async (minutes: number) => {
+            await setConfig({ breathingDurationMinutes: minutes });
           }}
         />
 

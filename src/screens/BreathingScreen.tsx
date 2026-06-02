@@ -24,7 +24,15 @@ const CYCLE: Cue[] = [
   { phase: 'rest', label: 'pausa', duration: 600, toScale: 0.7 },
 ];
 
-const TARGET_CYCLES = 5;
+/** Duração de um ciclo completo (ms) — usada para converter minutos em ciclos. */
+const CYCLE_MS = CYCLE.reduce((sum, c) => sum + c.duration, 0);
+
+const DEFAULT_BREATHING_MINUTES = 2;
+
+/** Quantos ciclos cabem na duração escolhida (mínimo 1). */
+function cyclesForMinutes(minutes: number): number {
+  return Math.max(1, Math.round((minutes * 60000) / CYCLE_MS));
+}
 
 export function BreathingScreen() {
   const navigation = useNavigation<any>();
@@ -38,10 +46,17 @@ export function BreathingScreen() {
   const stoppedRef = useRef(false);
   const autoStartedRef = useRef(false);
 
+  const durationMin = config?.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES;
+  const targetCycles = cyclesForMinutes(durationMin);
+  const targetCyclesRef = useRef(targetCycles);
+
   const start = async () => {
     stoppedRef.current = false;
     cueIdxRef.current = 0;
     cycleIdxRef.current = 0;
+    targetCyclesRef.current = cyclesForMinutes(
+      config?.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES,
+    );
     setCycleIdx(0);
     setCueIdx(0);
     setRunning(true);
@@ -58,7 +73,7 @@ export function BreathingScreen() {
 
   const runNext = () => {
     if (stoppedRef.current) return;
-    if (cycleIdxRef.current >= TARGET_CYCLES) {
+    if (cycleIdxRef.current >= targetCyclesRef.current) {
       finish();
       return;
     }
@@ -144,7 +159,8 @@ export function BreathingScreen() {
 
       <View style={styles.content}>
         <Text style={[typography.body, styles.intro]}>
-          Duas inspiradas rápidas pelo nariz, uma expirada longa pela boca. Repete 5 ciclos.
+          Duas inspiradas rápidas pelo nariz, uma expirada longa pela boca.
+          Cerca de {durationMin} min ({targetCycles} ciclos).
         </Text>
 
         <View style={styles.circleWrap}>
@@ -155,7 +171,7 @@ export function BreathingScreen() {
         </View>
 
         <Text style={[typography.body, styles.counter]}>
-          {running ? `Ciclo ${Math.min(cycleIdx + 1, TARGET_CYCLES)} de ${TARGET_CYCLES}` : ' '}
+          {running ? `Ciclo ${Math.min(cycleIdx + 1, targetCycles)} de ${targetCycles}` : ' '}
         </Text>
 
         <View style={styles.actions}>

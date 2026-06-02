@@ -309,6 +309,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN breathing_sound_uri TEXT`,
     );
   }
+  // v1.25: duração configurável do exercício de respiração (em minutos).
+  if (!colNames.includes('breathing_duration_minutes')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN breathing_duration_minutes INTEGER NOT NULL DEFAULT 2`,
+    );
+  }
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
   // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
@@ -442,6 +448,7 @@ interface UserConfigRow {
   inspiration_mode_enabled: number | null;
   breathing_sound_id: string | null;
   breathing_sound_uri: string | null;
+  breathing_duration_minutes: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -474,6 +481,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
   breathingSoundId: r.breathing_sound_id ?? 'cello',
   breathingSoundUri: r.breathing_sound_uri ?? null,
+  breathingDurationMinutes: r.breathing_duration_minutes ?? 2,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -518,6 +526,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     inspirationModeEnabled: 'inspiration_mode_enabled',
     breathingSoundId: 'breathing_sound_id',
     breathingSoundUri: 'breathing_sound_uri',
+    breathingDurationMinutes: 'breathing_duration_minutes',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
