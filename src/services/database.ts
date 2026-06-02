@@ -297,6 +297,18 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  // v1.24: som de fundo do exercício de respiração (trilha embutida ou áudio
+  // próprio do usuário).
+  if (!colNames.includes('breathing_sound_id')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN breathing_sound_id TEXT NOT NULL DEFAULT 'tone'`,
+    );
+  }
+  if (!colNames.includes('breathing_sound_uri')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN breathing_sound_uri TEXT`,
+    );
+  }
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
   // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
@@ -420,6 +432,8 @@ interface UserConfigRow {
   dnd_bypass_enabled: number | null;
   voice_nudges_enabled: number | null;
   inspiration_mode_enabled: number | null;
+  breathing_sound_id: string | null;
+  breathing_sound_uri: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -450,6 +464,8 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
+  breathingSoundId: r.breathing_sound_id ?? 'tone',
+  breathingSoundUri: r.breathing_sound_uri ?? null,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -492,6 +508,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     dndBypassEnabled: 'dnd_bypass_enabled',
     voiceNudgesEnabled: 'voice_nudges_enabled',
     inspirationModeEnabled: 'inspiration_mode_enabled',
+    breathingSoundId: 'breathing_sound_id',
+    breathingSoundUri: 'breathing_sound_uri',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

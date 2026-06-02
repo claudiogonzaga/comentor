@@ -95,6 +95,14 @@ export interface UserConfig {
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */
   inspirationModeEnabled: boolean;
+  /**
+   * Som de fundo do exercício de respiração: id de uma trilha embutida
+   * ('tone' | 'piano' | 'cello' | 'organ') ou 'custom' para um áudio que o
+   * usuário subiu (cujo caminho fica em `breathingSoundUri`).
+   */
+  breathingSoundId: string;
+  /** file:// do áudio próprio do usuário, quando `breathingSoundId === 'custom'`. */
+  breathingSoundUri: string | null;
 }
 
 export interface InterviewSummary {

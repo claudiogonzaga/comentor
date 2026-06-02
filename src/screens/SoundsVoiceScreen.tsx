@@ -2,6 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { OwlSoundPicker } from '../components/OwlSoundPicker';
+import { BreathingSoundPicker } from '../components/BreathingSoundPicker';
 import { VoiceProviderCard } from '../components/VoiceProviderCard';
 import { VoicePicker } from '../components/VoicePicker';
 import type { EnrichedVoice } from '../services/voice';
@@ -40,6 +41,17 @@ export function SoundsVoiceScreen() {
           onChange={async (species: OwlSpeciesId) => {
             await setConfig({ owlSpecies: species });
             await rescheduleAllNotifications();
+          }}
+        />
+
+        <BreathingSoundPicker
+          value={config?.breathingSoundId ?? 'tone'}
+          customUri={config?.breathingSoundUri ?? null}
+          onSelect={async (id: string) => {
+            await setConfig({ breathingSoundId: id });
+          }}
+          onUploadCustom={async (uri: string) => {
+            await setConfig({ breathingSoundId: 'custom', breathingSoundUri: uri });
           }}
         />
 

@@ -5,6 +5,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
 import { colors, spacing, typography } from '../theme';
 import { speak, stopSpeaking } from '../services/voice';
+import { playBreathingSound, stopBreathingSound } from '../services/breathingSound';
 import { useAppStore } from '../store/useAppStore';
 
 type Phase = 'inhale1' | 'inhale2' | 'exhale' | 'rest';
@@ -35,6 +36,7 @@ export function BreathingScreen() {
   const cueIdxRef = useRef(0);
   const cycleIdxRef = useRef(0);
   const stoppedRef = useRef(false);
+  const autoStartedRef = useRef(false);
 
   const start = async () => {
     stoppedRef.current = false;
@@ -43,6 +45,11 @@ export function BreathingScreen() {
     setCycleIdx(0);
     setCueIdx(0);
     setRunning(true);
+    // Trilha de fundo escolhida nas configurações (em loop durante o exercício).
+    playBreathingSound({
+      id: config?.breathingSoundId ?? 'tone',
+      customUri: config?.breathingSoundUri ?? null,
+    });
     if (config?.voiceModeEnabled) {
       speak('Vamos respirar. Duas inspiradas curtas e uma expirada longa.');
     }
@@ -85,6 +92,7 @@ export function BreathingScreen() {
       duration: 400,
       useNativeDriver: true,
     }).stop();
+    stopBreathingSound();
     if (config?.voiceModeEnabled) {
       await speak('Bom trabalho. Agora bora pra cama.');
     }
@@ -94,13 +102,26 @@ export function BreathingScreen() {
     stoppedRef.current = true;
     setRunning(false);
     stopSpeaking();
+    stopBreathingSound();
     scale.stopAnimation();
   };
+
+  // Começa sozinho ao abrir (a partir do botão da Home ou do lembrete): o som
+  // e o guia já tocam — sem precisar de um segundo toque. Espera a config
+  // carregar para usar a trilha escolhida pelo usuário, e só dispara uma vez.
+  useEffect(() => {
+    if (autoStartedRef.current || !config) return;
+    autoStartedRef.current = true;
+    const t = setTimeout(() => start(), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
 
   useEffect(() => {
     return () => {
       stoppedRef.current = true;
       stopSpeaking();
+      stopBreathingSound();
     };
   }, []);
 
