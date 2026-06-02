@@ -368,8 +368,13 @@ export function chunkText(text: string, maxLen = 3500): string[] {
 }
 
 interface SpeakLongOptions {
+  /** 'system' (expo-speech) ou 'gemini' (TTS neural). Padrão: 'system'. */
+  provider?: VoiceProvider;
   voiceId?: string | null;
   language?: string | null;
+  /** Voz Gemini, quando provider === 'gemini'. */
+  geminiVoiceName?: string;
+  /** Velocidade (só sistema). 1.0 = normal. */
   rate?: number;
   onDone?: () => void;
   onError?: (e: unknown) => void;
@@ -378,20 +383,28 @@ interface SpeakLongOptions {
 }
 
 /**
- * Lê um texto longo em voz alta usando uma voz DO SISTEMA (expo-speech),
- * quebrando em pedaços e encadeando um após o outro. Usado pela tela
- * "Leia para mim" (visualização, auto-hipnose, oração). Respeita o token de
- * geração, então `stopSpeaking()` interrompe na hora e não encadeia o próximo.
+ * Lê um texto longo em voz alta, quebrando em pedaços e encadeando um após o
+ * outro. Usado pela tela "Leia para mim" (visualização, auto-hipnose, oração).
+ * Com provider 'system' usa expo-speech (com velocidade ajustável); com
+ * 'gemini' sintetiza cada pedaço pela API neural e toca em sequência (voz
+ * profissional, leitura pausada). Respeita o token de geração: `stopSpeaking()`
+ * interrompe na hora e não encadeia o próximo.
  */
 export async function speakLongText(
   text: string,
   opts: SpeakLongOptions = {},
 ): Promise<void> {
-  const chunks = chunkText(text);
+  const provider = opts.provider ?? 'system';
+  const chunks = chunkText(text, provider === 'gemini' ? 1500 : 3500);
   if (chunks.length === 0) return;
   const myToken = ++speakToken;
   await stopPlayback();
   if (myToken !== speakToken) return;
+
+  if (provider === 'gemini') {
+    await speakLongTextGemini(chunks, opts, myToken);
+    return;
+  }
 
   const lang = opts.language ?? DEFAULT_LANGUAGE;
   let i = 0;
@@ -422,6 +435,46 @@ export async function speakLongText(
     });
   };
   speakNext();
+}
+
+/** Lê os pedaços em sequência via Gemini TTS, um de cada vez. */
+async function speakLongTextGemini(
+  chunks: string[],
+  opts: SpeakLongOptions,
+  myToken: number,
+): Promise<void> {
+  const voice = opts.geminiVoiceName ?? activeGeminiVoiceName;
+  let i = 0;
+  const playNext = async () => {
+    if (myToken !== speakToken) return;
+    if (i >= chunks.length) {
+      currentlySpeaking = false;
+      opts.onDone?.();
+      return;
+    }
+    const idx = i++;
+    opts.onProgress?.(idx, chunks.length);
+    try {
+      const { uri } = await synthesizeSpeechGemini(chunks[idx], voice);
+      if (myToken !== speakToken) return;
+      const player = createAudioPlayer({ uri });
+      activeGeminiPlayer = player;
+      currentlySpeaking = true;
+      const sub = player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) {
+          sub.remove();
+          releaseGeminiPlayer(player);
+          playNext();
+        }
+      });
+      player.play();
+    } catch (err) {
+      if (myToken !== speakToken) return;
+      currentlySpeaking = false;
+      opts.onError?.(err);
+    }
+  };
+  await playNext();
 }
 
 /** Para a reprodução atual (sistema + player Gemini) SEM invalidar o token. */

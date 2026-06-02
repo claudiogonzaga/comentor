@@ -13,6 +13,7 @@ import type {
   Medication,
   Nudge,
   NudgeType,
+  ReadAloudText,
   SnoozeFeedback,
   Streak,
   Tone,
@@ -353,6 +354,32 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN sedentary_interval_min INTEGER NOT NULL DEFAULT 60`,
     );
   }
+  // v1.28: voz da leitura igual à da Comentora (provider + Gemini) + velocidade.
+  if (!colNames.includes('read_aloud_provider')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN read_aloud_provider TEXT NOT NULL DEFAULT 'system'`,
+    );
+  }
+  if (!colNames.includes('read_aloud_gemini_voice')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN read_aloud_gemini_voice TEXT NOT NULL DEFAULT 'Aoede'`,
+    );
+  }
+  if (!colNames.includes('read_aloud_rate')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN read_aloud_rate REAL NOT NULL DEFAULT 1.0`,
+    );
+  }
+
+  // v1.28: textos salvos da tela "Leia para mim".
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS read_aloud_texts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
   // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
@@ -489,6 +516,9 @@ interface UserConfigRow {
   breathing_duration_minutes: number | null;
   read_aloud_voice_id: string | null;
   read_aloud_voice_language: string | null;
+  read_aloud_provider: string | null;
+  read_aloud_gemini_voice: string | null;
+  read_aloud_rate: number | null;
   sedentary_enabled: number | null;
   sedentary_days: string | null;
   sedentary_start: string | null;
@@ -529,6 +559,9 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   breathingDurationMinutes: r.breathing_duration_minutes ?? 16,
   readAloudVoiceId: r.read_aloud_voice_id ?? null,
   readAloudVoiceLanguage: r.read_aloud_voice_language ?? null,
+  readAloudProvider: (r.read_aloud_provider ?? 'system') as UserConfig['readAloudProvider'],
+  readAloudGeminiVoice: r.read_aloud_gemini_voice ?? 'Aoede',
+  readAloudRate: r.read_aloud_rate ?? 1.0,
   sedentaryEnabled: (r.sedentary_enabled ?? 0) === 1,
   sedentaryDays: parseDaysOfWeek(r.sedentary_days ?? '1,2,3,4,5'),
   sedentaryStart: r.sedentary_start ?? '09:00',
@@ -581,6 +614,9 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     breathingDurationMinutes: 'breathing_duration_minutes',
     readAloudVoiceId: 'read_aloud_voice_id',
     readAloudVoiceLanguage: 'read_aloud_voice_language',
+    readAloudProvider: 'read_aloud_provider',
+    readAloudGeminiVoice: 'read_aloud_gemini_voice',
+    readAloudRate: 'read_aloud_rate',
     sedentaryEnabled: 'sedentary_enabled',
     sedentaryDays: 'sedentary_days',
     sedentaryStart: 'sedentary_start',
@@ -1231,6 +1267,52 @@ export async function deleteMedication(id: number): Promise<void> {
   await d.runAsync('DELETE FROM medications WHERE id = ?', [id]);
   // Limpa os registros de "tomei hoje" deste lembrete.
   await d.runAsync('DELETE FROM nudge_completions WHERE nudge_type = ?', [`med:${id}`]);
+}
+
+// --------- Textos salvos da tela "Leia para mim" ---------
+
+interface ReadAloudTextRow {
+  id: number;
+  title: string;
+  content: string;
+  updated_at: string;
+}
+
+const rowToReadAloudText = (r: ReadAloudTextRow): ReadAloudText => ({
+  id: r.id,
+  title: r.title,
+  content: r.content,
+  updatedAt: r.updated_at,
+});
+
+export async function listReadAloudTexts(): Promise<ReadAloudText[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<ReadAloudTextRow>(
+    'SELECT * FROM read_aloud_texts ORDER BY updated_at DESC, id DESC',
+  );
+  return rows.map(rowToReadAloudText);
+}
+
+export async function createReadAloudText(input: {
+  title: string;
+  content: string;
+}): Promise<ReadAloudText> {
+  const d = await getDb();
+  const res = await d.runAsync(
+    `INSERT INTO read_aloud_texts (title, content) VALUES (?, ?)`,
+    [input.title.trim() || 'Sem título', input.content],
+  );
+  const row = await d.getFirstAsync<ReadAloudTextRow>(
+    'SELECT * FROM read_aloud_texts WHERE id = ?',
+    [res.lastInsertRowId as number],
+  );
+  if (!row) throw new Error('Falha ao salvar o texto.');
+  return rowToReadAloudText(row);
+}
+
+export async function deleteReadAloudText(id: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('DELETE FROM read_aloud_texts WHERE id = ?', [id]);
 }
 
 // --------- App key/value store (estado de UI persistente) ---------

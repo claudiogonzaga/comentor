@@ -111,6 +111,12 @@ export interface UserConfig {
    */
   readAloudVoiceId: string | null;
   readAloudVoiceLanguage: string | null;
+  /** Provedor de voz da leitura (system/gemini) — independente do chat. */
+  readAloudProvider: VoiceProvider;
+  /** Voz Gemini usada na leitura quando o provedor é 'gemini'. */
+  readAloudGeminiVoice: string;
+  /** Velocidade da leitura (voz do sistema). 1.0 = normal. */
+  readAloudRate: number;
   /** Nudge de "trabalho sentado": lembra de levantar e mover durante o expediente. */
   sedentaryEnabled: boolean;
   /** Dias com trabalho sentado (0=domingo … 6=sábado, CSV). */
@@ -121,6 +127,14 @@ export interface UserConfig {
   sedentaryEnd: string;
   /** Intervalo entre os lembretes de levantar, em minutos. */
   sedentaryIntervalMin: number;
+}
+
+/** Texto salvo na tela "Leia para mim" (visualização, oração, hipnose…). */
+export interface ReadAloudText {
+  id: number;
+  title: string;
+  content: string;
+  updatedAt: string;
 }
 
 export interface InterviewSummary {
