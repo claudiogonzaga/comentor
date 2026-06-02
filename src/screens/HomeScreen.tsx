@@ -242,13 +242,23 @@ export function HomeScreen() {
         ) : null}
 
         {/* #5 — Lista de tarefas do dia a partir dos lembretes. Check = riscado. */}
-        {todos.length > 0 && (
-          <Card style={styles.todoCard}>
-            <View style={styles.todoHeader}>
+        <Card style={styles.todoCard}>
+          <Pressable
+            style={styles.todoHeader}
+            onPress={() => navigation.navigate('Reminders')}
+          >
+            <View style={styles.todoHeaderLeft}>
               <GreekIcon name="check" size={18} color={colors.accent.gold} />
-              <Text style={styles.todoTitle}>TAREFAS DE HOJE</Text>
+              <Text style={styles.todoTitle}>HÁBITOS SAUDÁVEIS</Text>
             </View>
-            {todos.map((item) => (
+            <GreekIcon name="chevronRight" size={18} color={colors.text.tertiary} />
+          </Pressable>
+          {todos.length === 0 && (
+            <Text style={styles.todoEmpty}>
+              Nenhum hábito para hoje. Toque para adicionar.
+            </Text>
+          )}
+          {todos.map((item) => (
               <Pressable
                 key={item.key}
                 style={styles.todoRow}
@@ -282,7 +292,6 @@ export function HomeScreen() {
               </Pressable>
             ))}
           </Card>
-        )}
 
         <HealthCard />
 
@@ -385,7 +394,17 @@ const styles = StyleSheet.create({
   todoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: spacing.md,
+  },
+  todoHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  todoEmpty: {
+    ...typography.small,
+    color: colors.text.secondary,
+    paddingBottom: spacing.sm,
   },
   todoTitle: {
     ...typography.label,

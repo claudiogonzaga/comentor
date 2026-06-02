@@ -5,6 +5,7 @@ import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice, setActiveVoiceProvider } from '../services/voice';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleAllMedications } from '../services/medications';
+import { scheduleSedentaryNudges } from '../services/sedentary';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 
@@ -42,6 +43,10 @@ export const useAppStore = create<AppState>((set) => ({
     // Re-arm the user's medication/supplement reminders (verify-until-taken).
     scheduleAllMedications().catch((err) =>
       console.warn('scheduleAllMedications on init failed:', err),
+    );
+    // Re-arm the "sitting at work" move nudges (no-op when disabled).
+    scheduleSedentaryNudges().catch((err) =>
+      console.warn('scheduleSedentaryNudges on init failed:', err),
     );
     // Re-arm the daytime sleep-awareness nudges (random times per day).
     scheduleSleepAwarenessNotifications().catch((err) =>

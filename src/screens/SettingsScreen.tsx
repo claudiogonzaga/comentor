@@ -691,10 +691,10 @@ export function SettingsScreen() {
               <GreekIcon name="bell" size={24} color={colors.accent.gold} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.linkTitle}>Lembretes e hábitos</Text>
+              <Text style={styles.linkTitle}>Hábitos saudáveis</Text>
               <Text style={styles.linkSub}>
-                Nudges diários + remédios, água, comida, jejum… A coruja insiste
-                até você marcar que fez.
+                Sol, luz azul, respiração, cardio, remédios, água… + nudge de
+                trabalho sentado. A coruja insiste até você marcar que fez.
               </Text>
             </View>
             <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />

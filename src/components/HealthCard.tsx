@@ -141,10 +141,10 @@ export function HealthCard() {
           />
           <MetricRow
             icon="footsteps"
-            label="Passos (7 dias)"
+            label="Passos (hoje)"
             value={
-              snapshot && snapshot.steps7d > 0
-                ? snapshot.steps7d.toLocaleString('pt-BR')
+              snapshot && snapshot.stepsToday > 0
+                ? snapshot.stepsToday.toLocaleString('pt-BR')
                 : 'sem registro'
             }
           />

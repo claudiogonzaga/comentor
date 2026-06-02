@@ -75,6 +75,13 @@ export function iconForEmoji(emoji: string | null | undefined, kind: 'nudge' | '
       return 'fasting';
     case '☕':
       return 'coffee';
+    case '🏃':
+    case '🏃‍♂️':
+    case '🚶':
+      return 'footsteps';
+    case '🏋️':
+    case '💪':
+      return 'activity';
     case '☀️':
     case '🌞':
       return 'sun';

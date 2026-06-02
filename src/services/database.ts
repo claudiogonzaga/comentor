@@ -327,6 +327,32 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN read_aloud_voice_language TEXT`,
     );
   }
+  // v1.27: nudge de "trabalho sentado" (levantar e mover no expediente).
+  if (!colNames.includes('sedentary_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN sedentary_enabled INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  if (!colNames.includes('sedentary_days')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN sedentary_days TEXT NOT NULL DEFAULT '1,2,3,4,5'`,
+    );
+  }
+  if (!colNames.includes('sedentary_start')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN sedentary_start TEXT NOT NULL DEFAULT '09:00'`,
+    );
+  }
+  if (!colNames.includes('sedentary_end')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN sedentary_end TEXT NOT NULL DEFAULT '17:00'`,
+    );
+  }
+  if (!colNames.includes('sedentary_interval_min')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN sedentary_interval_min INTEGER NOT NULL DEFAULT 60`,
+    );
+  }
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
   // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
@@ -463,6 +489,11 @@ interface UserConfigRow {
   breathing_duration_minutes: number | null;
   read_aloud_voice_id: string | null;
   read_aloud_voice_language: string | null;
+  sedentary_enabled: number | null;
+  sedentary_days: string | null;
+  sedentary_start: string | null;
+  sedentary_end: string | null;
+  sedentary_interval_min: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -498,6 +529,11 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   breathingDurationMinutes: r.breathing_duration_minutes ?? 16,
   readAloudVoiceId: r.read_aloud_voice_id ?? null,
   readAloudVoiceLanguage: r.read_aloud_voice_language ?? null,
+  sedentaryEnabled: (r.sedentary_enabled ?? 0) === 1,
+  sedentaryDays: parseDaysOfWeek(r.sedentary_days ?? '1,2,3,4,5'),
+  sedentaryStart: r.sedentary_start ?? '09:00',
+  sedentaryEnd: r.sedentary_end ?? '17:00',
+  sedentaryIntervalMin: r.sedentary_interval_min ?? 60,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -545,6 +581,11 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     breathingDurationMinutes: 'breathing_duration_minutes',
     readAloudVoiceId: 'read_aloud_voice_id',
     readAloudVoiceLanguage: 'read_aloud_voice_language',
+    sedentaryEnabled: 'sedentary_enabled',
+    sedentaryDays: 'sedentary_days',
+    sedentaryStart: 'sedentary_start',
+    sedentaryEnd: 'sedentary_end',
+    sedentaryIntervalMin: 'sedentary_interval_min',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
@@ -552,7 +593,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     const col = map[k as keyof UserConfig];
     if (!col) return;
     fields.push(`${col} = ?`);
-    if (typeof v === 'boolean') values.push(v ? 1 : 0);
+    if (k === 'sedentaryDays') values.push(serializeDaysOfWeek(v as number[]));
+    else if (typeof v === 'boolean') values.push(v ? 1 : 0);
     else values.push((v as string | number | null) ?? null);
   });
 

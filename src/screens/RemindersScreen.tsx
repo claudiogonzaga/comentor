@@ -18,6 +18,7 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { GreekIcon, type GreekIconName } from '../components/GreekIcon';
 import { NudgesCard } from '../components/NudgesCard';
+import { SedentaryCard } from '../components/SedentaryCard';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TimePickerInput } from '../components/TimePickerInput';
 import { colors, radius, spacing, typography } from '../theme';
@@ -58,8 +59,28 @@ const ICON_CHOICES: IconChoice[] = [
   { icon: 'fasting', emoji: '⏳', label: 'Jejum' },
   { icon: 'coffee', emoji: '☕', label: 'Café' },
   { icon: 'sun', emoji: '☀️', label: 'Manhã' },
+  { icon: 'sunset', emoji: '🕶️', label: 'Luz azul' },
+  { icon: 'wind', emoji: '🌬️', label: 'Respiração' },
+  { icon: 'footsteps', emoji: '🏃', label: 'Exercício' },
   { icon: 'moon', emoji: '🌙', label: 'Noite' },
   { icon: 'bell', emoji: '🔔', label: 'Lembrete' },
+];
+
+interface HabitTemplate {
+  name: string;
+  dosage: string;
+  emoji: string;
+  time: string;
+  daysOfWeek?: number[];
+}
+
+/** Hábitos saudáveis prontos — preenchem o editor com um toque. */
+const HABIT_TEMPLATES: HabitTemplate[] = [
+  { name: 'Sol matutino', dosage: '10–15 min de luz natural', emoji: '☀️', time: '07:00' },
+  { name: 'Bloqueador de luz azul', dosage: 'Óculos / modo noturno', emoji: '🕶️', time: '18:00' },
+  { name: 'Exercício de respiração', dosage: '', emoji: '🌬️', time: '21:00' },
+  { name: 'Cardio zona 2', dosage: '20 min', emoji: '🏃', time: '18:00', daysOfWeek: [1, 3, 5] },
+  { name: 'Beber água', dosage: '1 copo', emoji: '💧', time: '10:00' },
 ];
 
 /** Rótulos curtos por índice (0=domingo … 6=sábado, igual a Date.getDay()). */
@@ -119,6 +140,17 @@ export function RemindersScreen() {
 
   const openNew = () => {
     setEditor({ ...EMPTY_EDITOR, visible: true });
+  };
+
+  const applyTemplate = (t: HabitTemplate) => {
+    setEditor((s) => ({
+      ...s,
+      name: t.name,
+      dosage: t.dosage,
+      time: t.time,
+      emoji: t.emoji,
+      daysOfWeek: t.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6],
+    }));
   };
 
   const openEdit = (med: Medication) => {
@@ -199,8 +231,8 @@ export function RemindersScreen() {
 
   const handleDelete = (med: Medication) => {
     Alert.alert(
-      'Excluir lembrete',
-      `Remover "${med.name}"? Você não receberá mais esse lembrete.`,
+      'Excluir hábito',
+      `Remover "${med.name}"? Você não receberá mais esse hábito.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -227,7 +259,7 @@ export function RemindersScreen() {
         <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.back}>‹ Voltar</Text>
         </Pressable>
-        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Lembretes e hábitos</Text>
+        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Hábitos saudáveis</Text>
         <View style={{ width: 60 }} />
       </View>
 
@@ -235,11 +267,11 @@ export function RemindersScreen() {
         {/* Nudges diários da Comentora (respiração, pôr do sol…). */}
         <NudgesCard />
 
-        <Text style={styles.sectionTitle}>Meus lembretes</Text>
+        <Text style={styles.sectionTitle}>Meus hábitos</Text>
         <Text style={styles.intro}>
-          Crie lembretes de saúde: remédios, suplementos, beber água, comer
-          algo, jejum, café… No horário, a coruja insiste (e canta) até você
-          marcar que fez. Adicione quantos quiser.
+          Crie hábitos saudáveis: sol matutino, luz azul, respiração, cardio,
+          remédios, água, comida, jejum… No horário, a coruja insiste (e canta)
+          até você marcar que fez. Use os hábitos prontos ou crie os seus.
         </Text>
 
         {meds === null && (
@@ -252,7 +284,7 @@ export function RemindersScreen() {
           <Card style={styles.emptyCard}>
             <GreekIcon name="leaf" size={40} color={colors.text.tertiary} />
             <Text style={styles.emptyText}>
-              Nenhum lembrete ainda. Toque em “Adicionar lembrete” para criar o
+              Nenhum hábito ainda. Toque em “Adicionar hábito” para criar o
               primeiro.
             </Text>
           </Card>
@@ -298,8 +330,11 @@ export function RemindersScreen() {
         ))}
 
         <View style={styles.addWrap}>
-          <Button label="Adicionar lembrete +" onPress={openNew} />
+          <Button label="Adicionar hábito +" onPress={openNew} />
         </View>
+
+        <View style={{ height: spacing.lg }} />
+        <SedentaryCard />
       </ScrollView>
 
       <Modal
@@ -315,8 +350,30 @@ export function RemindersScreen() {
           <Pressable style={styles.modalBackdrop} onPress={closeEditor} />
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>
-              {editor.id == null ? 'Novo lembrete' : 'Editar lembrete'}
+              {editor.id == null ? 'Novo hábito' : 'Editar hábito'}
             </Text>
+
+            {editor.id == null && (
+              <>
+                <Text style={styles.fieldLabel}>Hábitos prontos</Text>
+                <View style={styles.templateRow}>
+                  {HABIT_TEMPLATES.map((t) => (
+                    <Pressable
+                      key={t.name}
+                      style={styles.templateChip}
+                      onPress={() => applyTemplate(t)}
+                    >
+                      <GreekIcon
+                        name={iconForEmoji(t.emoji, 'nudge')}
+                        size={15}
+                        color={colors.accent.gold}
+                      />
+                      <Text style={styles.templateChipText}>{t.name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            )}
 
             <Text style={styles.fieldLabel}>Ícone</Text>
             <View style={styles.iconRow}>
@@ -554,6 +611,27 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+  },
+  templateRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  templateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg.surface,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  templateChipText: {
+    ...typography.small,
+    color: colors.text.primary,
   },
   iconRow: {
     flexDirection: 'row',

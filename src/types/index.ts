@@ -111,6 +111,16 @@ export interface UserConfig {
    */
   readAloudVoiceId: string | null;
   readAloudVoiceLanguage: string | null;
+  /** Nudge de "trabalho sentado": lembra de levantar e mover durante o expediente. */
+  sedentaryEnabled: boolean;
+  /** Dias com trabalho sentado (0=domingo … 6=sábado, CSV). */
+  sedentaryDays: number[];
+  /** Início da janela de trabalho sentado (HH:MM). */
+  sedentaryStart: string;
+  /** Fim da janela de trabalho sentado (HH:MM). */
+  sedentaryEnd: string;
+  /** Intervalo entre os lembretes de levantar, em minutos. */
+  sedentaryIntervalMin: number;
 }
 
 export interface InterviewSummary {

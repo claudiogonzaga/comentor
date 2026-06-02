@@ -128,6 +128,8 @@ export interface HealthSnapshot {
   exerciseMinutes7d: number;
   /** Passos somados nos últimos 7 dias. */
   steps7d: number;
+  /** Passos de hoje (desde a meia-noite local). */
+  stepsToday: number;
 }
 
 function durationMinutes(startTime: string, endTime: string): number {
@@ -169,11 +171,25 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
     let stepsTotal = 0;
     for (const r of steps.records) stepsTotal += r.count ?? 0;
 
+    // Passos de hoje: da meia-noite local até agora.
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const stepsTodayRec = await m.readRecords('Steps', {
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: todayStart.toISOString(),
+        endTime: nowISO,
+      },
+    });
+    let stepsToday = 0;
+    for (const r of stepsTodayRec.records) stepsToday += r.count ?? 0;
+
     return {
       sleepMinutesLastNight,
       exerciseSessions7d: exercise.records.length,
       exerciseMinutes7d: Math.round(exMin),
       steps7d: stepsTotal,
+      stepsToday,
     };
   } catch {
     return null;
