@@ -4,7 +4,7 @@ import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 
 /** Opções de duração do exercício de respiração, em minutos. */
-const DURATION_OPTIONS = [1, 2, 3, 5, 10];
+const DURATION_OPTIONS = [3, 5, 10, 16, 20, 30];
 
 interface Props {
   /** Duração atual (minutos). */

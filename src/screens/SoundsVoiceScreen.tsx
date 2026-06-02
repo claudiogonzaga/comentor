@@ -57,7 +57,7 @@ export function SoundsVoiceScreen() {
         />
 
         <BreathingDurationPicker
-          value={config?.breathingDurationMinutes ?? 2}
+          value={config?.breathingDurationMinutes ?? 16}
           onChange={async (minutes: number) => {
             await setConfig({ breathingDurationMinutes: minutes });
           }}

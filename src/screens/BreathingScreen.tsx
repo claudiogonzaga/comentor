@@ -27,11 +27,19 @@ const CYCLE: Cue[] = [
 /** Duração de um ciclo completo (ms) — usada para converter minutos em ciclos. */
 const CYCLE_MS = CYCLE.reduce((sum, c) => sum + c.duration, 0);
 
-const DEFAULT_BREATHING_MINUTES = 2;
+const DEFAULT_BREATHING_MINUTES = 16;
 
 /** Quantos ciclos cabem na duração escolhida (mínimo 1). */
 function cyclesForMinutes(minutes: number): number {
   return Math.max(1, Math.round((minutes * 60000) / CYCLE_MS));
+}
+
+/** Formata milissegundos como m:ss para o cronômetro regressivo. */
+function formatMMSS(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 export function BreathingScreen() {
@@ -49,6 +57,15 @@ export function BreathingScreen() {
   const durationMin = config?.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES;
   const targetCycles = cyclesForMinutes(durationMin);
   const targetCyclesRef = useRef(targetCycles);
+  const [remainingMs, setRemainingMs] = useState(durationMin * 60000);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTick = () => {
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+  };
 
   const start = async () => {
     stoppedRef.current = false;
@@ -60,6 +77,16 @@ export function BreathingScreen() {
     setCycleIdx(0);
     setCueIdx(0);
     setRunning(true);
+    // Cronômetro regressivo (display): tempo total = ciclos × duração do ciclo.
+    const totalMs = targetCyclesRef.current * CYCLE_MS;
+    const startedAt = Date.now();
+    setRemainingMs(totalMs);
+    clearTick();
+    tickRef.current = setInterval(() => {
+      const left = Math.max(0, totalMs - (Date.now() - startedAt));
+      setRemainingMs(left);
+      if (left <= 0) clearTick();
+    }, 500);
     // Trilha de fundo escolhida nas configurações (em loop durante o exercício).
     playBreathingSound({
       id: config?.breathingSoundId ?? 'cello',
@@ -102,6 +129,8 @@ export function BreathingScreen() {
   const finish = async () => {
     setRunning(false);
     stoppedRef.current = true;
+    clearTick();
+    setRemainingMs(0);
     Animated.timing(scale, {
       toValue: 1,
       duration: 400,
@@ -118,6 +147,7 @@ export function BreathingScreen() {
     setRunning(false);
     stopSpeaking();
     stopBreathingSound();
+    clearTick();
     scale.stopAnimation();
   };
 
@@ -137,6 +167,7 @@ export function BreathingScreen() {
       stoppedRef.current = true;
       stopSpeaking();
       stopBreathingSound();
+      clearTick();
     };
   }, []);
 
@@ -160,7 +191,7 @@ export function BreathingScreen() {
       <View style={styles.content}>
         <Text style={[typography.body, styles.intro]}>
           Duas inspiradas rápidas pelo nariz, uma expirada longa pela boca.
-          Cerca de {durationMin} min ({targetCycles} ciclos).
+          Sessão de {durationMin} min.
         </Text>
 
         <View style={styles.circleWrap}>
@@ -171,7 +202,9 @@ export function BreathingScreen() {
         </View>
 
         <Text style={[typography.body, styles.counter]}>
-          {running ? `Ciclo ${Math.min(cycleIdx + 1, targetCycles)} de ${targetCycles}` : ' '}
+          {running
+            ? `Tempo restante ${formatMMSS(remainingMs)} · ciclo ${Math.min(cycleIdx + 1, targetCycles)}`
+            : ' '}
         </Text>
 
         <View style={styles.actions}>

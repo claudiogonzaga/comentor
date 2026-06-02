@@ -310,9 +310,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     );
   }
   // v1.25: duração configurável do exercício de respiração (em minutos).
+  // Default = 16 min (sessão de breath work).
   if (!colNames.includes('breathing_duration_minutes')) {
     await database.execAsync(
-      `ALTER TABLE user_config ADD COLUMN breathing_duration_minutes INTEGER NOT NULL DEFAULT 2`,
+      `ALTER TABLE user_config ADD COLUMN breathing_duration_minutes INTEGER NOT NULL DEFAULT 16`,
     );
   }
 
@@ -481,7 +482,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
   breathingSoundId: r.breathing_sound_id ?? 'cello',
   breathingSoundUri: r.breathing_sound_uri ?? null,
-  breathingDurationMinutes: r.breathing_duration_minutes ?? 2,
+  breathingDurationMinutes: r.breathing_duration_minutes ?? 16,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
