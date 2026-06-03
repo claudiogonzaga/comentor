@@ -8,6 +8,7 @@ import {
 import {
   DEFAULT_GEMINI_VOICE,
   GeminiTTSError,
+  synthesizeFullSpeechGemini,
   synthesizeSpeechGemini,
 } from './geminiTTS';
 import type { VoiceProvider } from '../types';
@@ -380,6 +381,8 @@ interface SpeakLongOptions {
   onError?: (e: unknown) => void;
   /** Progresso: pedaço atual (0-based) e total de pedaços. */
   onProgress?: (index: number, total: number) => void;
+  /** Progresso da GERAÇÃO do áudio Gemini (só na 1ª vez): feitos / total. */
+  onSynthProgress?: (done: number, total: number) => void;
 }
 
 /**
@@ -410,6 +413,24 @@ export async function speakLongText(
     return;
   }
   readSystemChunks(chunks, 0, opts, myToken);
+}
+
+/**
+ * Pré-gera e salva o áudio Gemini do texto (sem tocar). Usado pelo botão
+ * "Salvar áudio": depois disso, a leitura toca sem pausas e o arquivo fica
+ * guardado. Lança GeminiTTSError em falha.
+ */
+export async function prepareReadAloudAudio(
+  text: string,
+  opts: { geminiVoiceName?: string; onProgress?: (done: number, total: number) => void } = {},
+): Promise<void> {
+  const chunks = chunkText(text, GEMINI_CHUNK_MAX);
+  if (chunks.length === 0) return;
+  await synthesizeFullSpeechGemini(
+    chunks,
+    opts.geminiVoiceName ?? activeGeminiVoiceName,
+    opts.onProgress,
+  );
 }
 
 /** Lê os pedaços `chunks` a partir de `startIdx` com a voz do sistema. */
@@ -451,9 +472,10 @@ function readSystemChunks(
 }
 
 /**
- * Lê os pedaços em sequência via Gemini TTS, um de cada vez. Se a síntese de
- * um pedaço falhar (cota/limite/rede), NÃO trava: cai para a voz do sistema a
- * partir daquele pedaço, de modo que a leitura sempre termina.
+ * Gera o áudio Gemini do texto INTEIRO de uma vez (concatenado num único
+ * arquivo, salvo em disco) e toca SEM as pausas de rede entre os trechos. Na
+ * 1ª vez gera (reporta `onSynthProgress`); depois o arquivo já está salvo e
+ * toca na hora. Se a geração falhar (cota/rede), cai para a voz do sistema.
  */
 async function speakLongTextGemini(
   chunks: string[],
@@ -461,39 +483,32 @@ async function speakLongTextGemini(
   myToken: number,
 ): Promise<void> {
   const voice = opts.geminiVoiceName ?? activeGeminiVoiceName;
-  let i = 0;
-  const playNext = async () => {
+  currentlySpeaking = true;
+  try {
+    const { uri } = await synthesizeFullSpeechGemini(chunks, voice, (done, total) => {
+      if (myToken === speakToken) opts.onSynthProgress?.(done, total);
+    });
     if (myToken !== speakToken) return;
-    if (i >= chunks.length) {
-      currentlySpeaking = false;
-      opts.onDone?.();
-      return;
-    }
-    const idx = i++;
-    opts.onProgress?.(idx, chunks.length);
-    try {
-      const { uri } = await synthesizeSpeechGemini(chunks[idx], voice);
-      if (myToken !== speakToken) return;
-      const player = createAudioPlayer({ uri });
-      activeGeminiPlayer = player;
-      currentlySpeaking = true;
-      const sub = player.addListener('playbackStatusUpdate', (status) => {
-        if (status.didJustFinish) {
-          sub.remove();
-          releaseGeminiPlayer(player);
-          playNext();
+    const player = createAudioPlayer({ uri });
+    activeGeminiPlayer = player;
+    opts.onProgress?.(0, 1); // saiu da geração, começou a tocar (contínuo)
+    const sub = player.addListener('playbackStatusUpdate', (status) => {
+      if (status.didJustFinish) {
+        sub.remove();
+        releaseGeminiPlayer(player);
+        if (myToken === speakToken) {
+          currentlySpeaking = false;
+          opts.onDone?.();
         }
-      });
-      player.play();
-    } catch (err) {
-      if (myToken !== speakToken) return;
-      // Gemini falhou neste pedaço — segue o resto pela voz do sistema em vez
-      // de dar erro e parar.
-      console.warn('Gemini TTS leitura falhou; seguindo pela voz do sistema:', err);
-      readSystemChunks(chunks, idx, opts, myToken);
-    }
-  };
-  await playNext();
+      }
+    });
+    player.play();
+  } catch (err) {
+    if (myToken !== speakToken) return;
+    // Gemini falhou — segue pela voz do sistema para não travar.
+    console.warn('Gemini TTS (áudio completo) falhou; seguindo pela voz do sistema:', err);
+    readSystemChunks(chunks, 0, opts, myToken);
+  }
 }
 
 /** Para a reprodução atual (sistema + player Gemini) SEM invalidar o token. */

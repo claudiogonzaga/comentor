@@ -95,6 +95,8 @@ export interface UserConfig {
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */
   inspirationModeEnabled: boolean;
+  /** Quantas mensagens de inspiração por dia (espalhadas na janela diurna). */
+  inspirationPerDay: number;
   /**
    * Som de fundo do exercício de respiração: id de uma trilha embutida
    * ('cello' | 'piano' | 'organ') ou 'custom' para um áudio que o usuário

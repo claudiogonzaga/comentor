@@ -96,6 +96,7 @@ export function SettingsScreen() {
   const [inspirationMode, setInspirationMode] = useState(
     config?.inspirationModeEnabled ?? false,
   );
+  const [inspPerDay, setInspPerDay] = useState(config?.inspirationPerDay ?? 6);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingNotif, setTestingNotif] = useState(false);
@@ -121,6 +122,7 @@ export function SettingsScreen() {
       setDndBypass(config.dndBypassEnabled ?? false);
       setVoiceNudges(config.voiceNudgesEnabled ?? false);
       setInspirationMode(config.inspirationModeEnabled ?? false);
+      setInspPerDay(config.inspirationPerDay ?? 6);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -582,9 +584,9 @@ export function SettingsScreen() {
                 Modo inspiração
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
-                A cada hora (das 8h às 21h) a Comentora te manda uma mensagem
-                curta de otimismo, persistência e inspiração. Ligue nos dias em
-                que precisar de um empurrãozinho de ânimo ao longo do dia.
+                Ao longo do dia (8h–21h) a Comentora te manda mensagens curtas de
+                otimismo, persistência e inspiração. Escolha quantas você quer
+                receber logo abaixo.
               </Text>
             </View>
             <Switch
@@ -602,6 +604,77 @@ export function SettingsScreen() {
               thumbColor={inspirationMode ? colors.text.onGold : colors.text.tertiary}
             />
           </View>
+
+          {inspirationMode && (
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                  Quantas por dia
+                </Text>
+                <Text style={[typography.small, { color: colors.text.secondary }]}>
+                  Mensagens de inspiração espalhadas ao longo do dia (8h–21h).
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                <Pressable
+                  onPress={async () => {
+                    const next = Math.max(1, inspPerDay - 1);
+                    setInspPerDay(next);
+                    try {
+                      await setConfig({ inspirationPerDay: next });
+                      await scheduleInspirationNotifications();
+                    } catch (err) {
+                      console.warn('set inspiration per day failed:', err);
+                    }
+                  }}
+                  hitSlop={8}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: colors.accent.gold,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>−</Text>
+                </Pressable>
+                <Text
+                  style={[
+                    typography.subtitle,
+                    { color: colors.text.primary, minWidth: 26, textAlign: 'center' },
+                  ]}
+                >
+                  {inspPerDay}
+                </Text>
+                <Pressable
+                  onPress={async () => {
+                    const next = Math.min(14, inspPerDay + 1);
+                    setInspPerDay(next);
+                    try {
+                      await setConfig({ inspirationPerDay: next });
+                      await scheduleInspirationNotifications();
+                    } catch (err) {
+                      console.warn('set inspiration per day failed:', err);
+                    }
+                  }}
+                  hitSlop={8}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: colors.accent.gold,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>+</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
 
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             O lembrete de respiração antes de dormir agora vive em &quot;Lembretes e

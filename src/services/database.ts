@@ -298,6 +298,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  // v1.30: quantas mensagens de inspiração por dia (antes: uma por hora fixa).
+  if (!colNames.includes('inspiration_per_day')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN inspiration_per_day INTEGER NOT NULL DEFAULT 6`,
+    );
+  }
   // v1.24: som de fundo do exercício de respiração (trilha embutida ou áudio
   // próprio do usuário).
   if (!colNames.includes('breathing_sound_id')) {
@@ -511,6 +517,7 @@ interface UserConfigRow {
   dnd_bypass_enabled: number | null;
   voice_nudges_enabled: number | null;
   inspiration_mode_enabled: number | null;
+  inspiration_per_day: number | null;
   breathing_sound_id: string | null;
   breathing_sound_uri: string | null;
   breathing_duration_minutes: number | null;
@@ -554,6 +561,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
+  inspirationPerDay: r.inspiration_per_day ?? 6,
   breathingSoundId: r.breathing_sound_id ?? 'cello',
   breathingSoundUri: r.breathing_sound_uri ?? null,
   breathingDurationMinutes: r.breathing_duration_minutes ?? 16,
@@ -609,6 +617,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     dndBypassEnabled: 'dnd_bypass_enabled',
     voiceNudgesEnabled: 'voice_nudges_enabled',
     inspirationModeEnabled: 'inspiration_mode_enabled',
+    inspirationPerDay: 'inspiration_per_day',
     breathingSoundId: 'breathing_sound_id',
     breathingSoundUri: 'breathing_sound_uri',
     breathingDurationMinutes: 'breathing_duration_minutes',

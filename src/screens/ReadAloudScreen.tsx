@@ -20,7 +20,12 @@ import { VoiceProviderCard } from '../components/VoiceProviderCard';
 import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
-import { speakLongText, stopSpeaking, type EnrichedVoice } from '../services/voice';
+import {
+  prepareReadAloudAudio,
+  speakLongText,
+  stopSpeaking,
+  type EnrichedVoice,
+} from '../services/voice';
 import {
   createReadAloudText,
   deleteReadAloudText,
@@ -60,6 +65,9 @@ export function ReadAloudScreen() {
   const [saved, setSaved] = useState<ReadAloudText[]>([]);
   // "Em seguida, fazer o exercício de respiração" — encadeia as atividades.
   const [thenBreathing, setThenBreathing] = useState(false);
+  // Progresso da geração do áudio Gemini (só na 1ª vez).
+  const [synth, setSynth] = useState<{ done: number; total: number } | null>(null);
+  const [savingAudio, setSavingAudio] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const textRef = useRef('');
   const autostartedRef = useRef(false);
@@ -161,16 +169,22 @@ export function ReadAloudScreen() {
     setKV('read_aloud_draft', text).catch(() => {});
     setReading(true);
     setProgress(null);
+    setSynth(null);
     speakLongText(t, {
       provider,
       voiceId: config?.readAloudVoiceId ?? null,
       language: config?.readAloudVoiceLanguage ?? null,
       geminiVoiceName: config?.readAloudGeminiVoice ?? 'Aoede',
       rate,
-      onProgress: (i, total) => setProgress({ i: i + 1, total }),
+      onSynthProgress: (done, total) => setSynth({ done, total }),
+      onProgress: (i, total) => {
+        setSynth(null);
+        setProgress({ i: i + 1, total });
+      },
       onDone: () => {
         setReading(false);
         setProgress(null);
+        setSynth(null);
         // Encadeamento: ao terminar a leitura, vai para a respiração (que já
         // começa sozinha). Pequeno atraso para o áudio liberar.
         if (thenBreathing) {
@@ -180,6 +194,7 @@ export function ReadAloudScreen() {
       onError: () => {
         setReading(false);
         setProgress(null);
+        setSynth(null);
         Alert.alert(
           'Não consegui ler',
           provider === 'gemini'
@@ -194,6 +209,32 @@ export function ReadAloudScreen() {
     await stopSpeaking();
     setReading(false);
     setProgress(null);
+    setSynth(null);
+  };
+
+  // Pré-gera e salva o áudio Gemini (sem tocar): a próxima leitura toca fluida.
+  const handleSaveAudio = async () => {
+    const t = text.trim();
+    if (!t) return;
+    Keyboard.dismiss();
+    setKV('read_aloud_draft', text).catch(() => {});
+    setSavingAudio(true);
+    setSynth({ done: 0, total: 1 });
+    try {
+      await prepareReadAloudAudio(t, {
+        geminiVoiceName: config?.readAloudGeminiVoice ?? 'Aoede',
+        onProgress: (done, total) => setSynth({ done, total }),
+      });
+      Alert.alert('Áudio salvo', 'A leitura foi gerada e salva. Agora ela toca sem pausas.');
+    } catch {
+      Alert.alert(
+        'Não consegui gerar o áudio',
+        'Verifique a chave da API e a cota do Gemini.',
+      );
+    } finally {
+      setSavingAudio(false);
+      setSynth(null);
+    }
   };
 
   // Início automático quando a tela é aberta encadeada (respiração → leitura).
@@ -264,6 +305,11 @@ export function ReadAloudScreen() {
             style={{ flex: 1 }}
           />
         </View>
+        <Text style={styles.uploadHint}>
+          No seletor do Android você pode escolher um arquivo do aparelho ou do
+          Google Drive (toque no menu ☰ → Drive). Por enquanto, arquivos de
+          texto (.txt).
+        </Text>
 
         {saved.length > 0 && (
           <View style={styles.savedWrap}>
@@ -329,10 +375,20 @@ export function ReadAloudScreen() {
             </View>
           </>
         ) : (
-          <Text style={styles.geminiNote}>
-            A voz do Gemini lê em ritmo profissional e pausado. (O controle de
-            velocidade vale para a voz do sistema.)
-          </Text>
+          <>
+            <Text style={styles.geminiNote}>
+              A voz do Gemini lê em ritmo profissional e pausado. Na 1ª vez o
+              áudio é gerado e salvo; depois a leitura toca sem pausas.
+            </Text>
+            <Button
+              label={savingAudio ? 'Gerando áudio…' : 'Salvar áudio (sem pausas)'}
+              variant="secondary"
+              onPress={handleSaveAudio}
+              loading={savingAudio}
+              disabled={!text.trim() || savingAudio}
+            />
+            <View style={{ height: spacing.md }} />
+          </>
         )}
 
         <View style={styles.chainRow}>
@@ -354,15 +410,23 @@ export function ReadAloudScreen() {
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        {progress && (
+        {synth ? (
+          <Text style={styles.progress}>
+            Gerando áudio… {synth.done}/{synth.total} (salvo após a 1ª vez)
+          </Text>
+        ) : progress ? (
           <Text style={styles.progress}>
             Lendo… parte {progress.i} de {progress.total}
           </Text>
-        )}
+        ) : null}
         {reading ? (
           <Button label="Parar" variant="secondary" onPress={handleStop} />
         ) : (
-          <Button label="▶  Leia para mim" onPress={handlePlay} disabled={!text.trim()} />
+          <Button
+            label="▶  Leia para mim"
+            onPress={handlePlay}
+            disabled={!text.trim() || savingAudio}
+          />
         )}
       </View>
     </ScreenContainer>
@@ -421,6 +485,12 @@ const styles = StyleSheet.create({
   },
   btnRow: {
     flexDirection: 'row',
+  },
+  uploadHint: {
+    ...typography.small,
+    color: colors.text.tertiary,
+    lineHeight: 16,
+    marginTop: spacing.sm,
   },
   savedWrap: {
     marginTop: spacing.lg,

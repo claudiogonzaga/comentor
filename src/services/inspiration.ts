@@ -88,10 +88,12 @@ export async function scheduleInspirationNotifications(): Promise<void> {
 
   let enabled = false;
   let sound: string = 'default';
+  let perDay = 6;
   try {
     const config = await getUserConfig();
     enabled = !!config.inspirationModeEnabled;
     sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
+    perDay = config.inspirationPerDay ?? 6;
   } catch {
     /* sem config legível → trata como desligado */
   }
@@ -100,10 +102,19 @@ export async function scheduleInspirationNotifications(): Promise<void> {
   const channelId = await ensureChannel();
   const messages = shuffled(INSPIRATION_MESSAGES);
 
-  let idx = 0;
-  for (let hour = INSPIRATION_START_HOUR; hour <= INSPIRATION_END_HOUR; hour++) {
-    const msg = messages[idx % messages.length];
-    idx++;
+  // Espalha `perDay` mensagens na janela diurna [START, END]. Antes era uma
+  // por hora fixa; agora o usuário escolhe quantas quer.
+  const n = Math.max(1, Math.min(14, Math.round(perDay)));
+  const startMin = INSPIRATION_START_HOUR * 60;
+  const endMin = INSPIRATION_END_HOUR * 60;
+  const span = endMin - startMin;
+
+  for (let i = 0; i < n; i++) {
+    const t =
+      n === 1 ? Math.round(startMin + span / 2) : Math.round(startMin + (span * i) / (n - 1));
+    const hour = Math.floor(t / 60);
+    const minute = t % 60;
+    const msg = messages[i % messages.length];
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -115,12 +126,12 @@ export async function scheduleInspirationNotifications(): Promise<void> {
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour,
-          minute: 0,
+          minute,
           channelId,
         },
       });
     } catch (err) {
-      console.warn(`failed to schedule inspiration alert @${hour}h:`, err);
+      console.warn(`failed to schedule inspiration alert @${hour}:${minute}:`, err);
     }
   }
 }

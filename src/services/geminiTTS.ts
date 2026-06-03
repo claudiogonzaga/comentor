@@ -116,6 +116,54 @@ export class GeminiTTSError extends Error {
  * cota esgotada, erro de rede). O caller decide o fallback (ex: cair para
  * expo-speech).
  */
+/** Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. */
+async function fetchPcm(text: string, voiceName: string, apiKey: string): Promise<Uint8Array> {
+  const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
+  const body = {
+    contents: [{ parts: [{ text }] }],
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+    },
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : 'erro de rede';
+    throw new GeminiTTSError(`Gemini TTS: ${msg}`);
+  }
+  clearTimeout(timer);
+
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    const msg = j.error?.message ?? `HTTP ${res.status}`;
+    throw new GeminiTTSError(`Gemini TTS: ${msg}`, {
+      httpStatus: res.status,
+      quotaExceeded: res.status === 429,
+    });
+  }
+  const json = (await res.json()) as {
+    candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
+  };
+  const audioBase64 = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!audioBase64) throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
+  return base64ToBytes(audioBase64);
+}
+
+/**
+ * Gera o áudio TTS para o texto. Lança `GeminiTTSError` em falha (sem chave,
+ * cota esgotada, erro de rede). O caller decide o fallback (ex: cair para
+ * expo-speech).
+ */
 export async function synthesizeSpeechGemini(
   text: string,
   voiceName: string = DEFAULT_GEMINI_VOICE,
@@ -133,56 +181,79 @@ export async function synthesizeSpeechGemini(
     return { uri: file.uri, cached: true };
   }
 
-  const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
-  const body = {
-    contents: [{ parts: [{ text: trimmed }] }],
-    generationConfig: {
-      responseModalities: ['AUDIO'],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName },
-        },
-      },
-    },
-  };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25000);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    const msg = err instanceof Error ? err.message : 'erro de rede';
-    throw new GeminiTTSError(`Gemini TTS: ${msg}`);
-  }
-  clearTimeout(timer);
-
-  if (!res.ok) {
-    const j = (await res.json().catch(() => ({}))) as {
-      error?: { message?: string };
-    };
-    const msg = j.error?.message ?? `HTTP ${res.status}`;
-    throw new GeminiTTSError(`Gemini TTS: ${msg}`, {
-      httpStatus: res.status,
-      quotaExceeded: res.status === 429,
-    });
-  }
-  const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
-  };
-  const audioBase64 = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!audioBase64) {
-    throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
-  }
-
-  const pcm = base64ToBytes(audioBase64);
+  const pcm = await fetchPcm(trimmed, voiceName, apiKey);
   const wav = pcmToWav(pcm);
+  file.create({ overwrite: true });
+  file.write(wav);
+  return { uri: file.uri, cached: false };
+}
+
+/** Mantém no máximo `keep` áudios de leitura salvos (limpa os mais antigos). */
+function cleanupReadAloudCache(keep = 6): void {
+  try {
+    const entries = Paths.document.list();
+    const files = entries.filter(
+      (e): e is File => e instanceof File && e.name.startsWith('readaloud_') && e.name.endsWith('.wav'),
+    );
+    if (files.length <= keep) return;
+    files
+      .sort((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0))
+      .slice(0, files.length - keep)
+      .forEach((f) => {
+        try {
+          f.delete();
+        } catch {
+          /* ignore */
+        }
+      });
+  } catch {
+    /* limpeza é best-effort */
+  }
+}
+
+/**
+ * Sintetiza o texto INTEIRO (recebido já fatiado em `chunks`) e concatena o
+ * PCM de todos os trechos num ÚNICO arquivo WAV salvo em disco (persistente).
+ * Resultado: a leitura toca sem as pausas de rede entre os trechos, e fica
+ * "baixada" — na 2ª vez retorna o arquivo do cache na hora. `onProgress`
+ * reporta o andamento da geração (só na 1ª vez).
+ */
+export async function synthesizeFullSpeechGemini(
+  chunks: string[],
+  voiceName: string = DEFAULT_GEMINI_VOICE,
+  onProgress?: (done: number, total: number) => void,
+): Promise<GeminiTTSResult> {
+  const clean = chunks.map((c) => c.trim()).filter(Boolean);
+  if (clean.length === 0) throw new GeminiTTSError('texto vazio');
+  const apiKey = await getApiKey();
+  if (!apiKey) {
+    throw new GeminiTTSError('Sem chave do Gemini — configure em "Como você quer usar?"');
+  }
+
+  const cacheKey = shortHash(`${voiceName}:full:${clean.join('')}`);
+  const file = new File(Paths.document, `readaloud_${cacheKey}.wav`);
+  if (file.exists) {
+    return { uri: file.uri, cached: true };
+  }
+
+  const pcms: Uint8Array[] = [];
+  let totalLen = 0;
+  for (let i = 0; i < clean.length; i++) {
+    onProgress?.(i, clean.length);
+    const pcm = await fetchPcm(clean[i], voiceName, apiKey);
+    pcms.push(pcm);
+    totalLen += pcm.length;
+  }
+  onProgress?.(clean.length, clean.length);
+
+  const allPcm = new Uint8Array(totalLen);
+  let off = 0;
+  for (const p of pcms) {
+    allPcm.set(p, off);
+    off += p.length;
+  }
+  const wav = pcmToWav(allPcm);
+  cleanupReadAloudCache();
   file.create({ overwrite: true });
   file.write(wav);
   return { uri: file.uri, cached: false };
