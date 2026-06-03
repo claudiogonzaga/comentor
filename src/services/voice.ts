@@ -393,8 +393,10 @@ interface SpeakLongOptions {
  * profissional, leitura pausada). Respeita o token de geração: `stopSpeaking()`
  * interrompe na hora e não encadeia o próximo.
  */
-/** Limite de caracteres por pedaço, por provider (Gemini é mais conservador). */
-const GEMINI_CHUNK_MAX = 800;
+/** Limite de caracteres por pedaço, por provider. ~1500 no Gemini equilibra:
+ *  poucas requisições/dia (RPD) e trechos seguros por chamada (a geração é
+ *  ritmada por RPM/TPM no geminiTTS). */
+const GEMINI_CHUNK_MAX = 1500;
 const SYSTEM_CHUNK_MAX = 3500;
 
 export async function speakLongText(

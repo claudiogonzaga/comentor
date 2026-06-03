@@ -116,8 +116,22 @@ export class GeminiTTSError extends Error {
  * cota esgotada, erro de rede). O caller decide o fallback (ex: cair para
  * expo-speech).
  */
-/** Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. */
-async function fetchPcm(text: string, voiceName: string, apiKey: string): Promise<Uint8Array> {
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Quantas vezes re-tentar quando vier 429 (limite por minuto). */
+const MAX_429_RETRIES = 4;
+
+/**
+ * Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. Em 429
+ * (limite por minuto — RPM/TPM), espera (Retry-After ou backoff exponencial)
+ * e tenta de novo, em vez de falhar de cara.
+ */
+async function fetchPcm(
+  text: string,
+  voiceName: string,
+  apiKey: string,
+  attempt = 0,
+): Promise<Uint8Array> {
   const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text }] }],
@@ -142,6 +156,16 @@ async function fetchPcm(text: string, voiceName: string, apiKey: string): Promis
     throw new GeminiTTSError(`Gemini TTS: ${msg}`);
   }
   clearTimeout(timer);
+
+  if (res.status === 429 && attempt < MAX_429_RETRIES) {
+    const ra = parseFloat(res.headers.get('retry-after') ?? '');
+    const backoff =
+      Number.isFinite(ra) && ra > 0
+        ? Math.min(65000, ra * 1000)
+        : Math.min(60000, 12000 * Math.pow(2, attempt));
+    await sleep(backoff);
+    return fetchPcm(text, voiceName, apiKey, attempt + 1);
+  }
 
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
@@ -236,10 +260,36 @@ export async function synthesizeFullSpeechGemini(
     return { uri: file.uri, cached: true };
   }
 
+  // Ritmo (Tier 1 do TTS: 10 req/min e 10.000 tokens/min). Mantemos uma janela
+  // deslizante de 60s e só disparamos o próximo trecho quando ele couber nos
+  // dois limites — assim textos longos não tomam 429 por rajada.
+  const TTS_RPM = 10;
+  const TTS_TPM = 10000;
+  const estTokens = (chars: number) => Math.ceil(chars * 1.9) + 50;
+  const sentAt: number[] = [];
+  const sentTok: number[] = [];
+  const waitForCapacity = async (need: number) => {
+    for (;;) {
+      const now = Date.now();
+      while (sentAt.length && now - sentAt[0] > 60000) {
+        sentAt.shift();
+        sentTok.shift();
+      }
+      const toks = sentTok.reduce((a, b) => a + b, 0);
+      if (sentAt.length < TTS_RPM - 1 && toks + need <= TTS_TPM - 500) break;
+      const wait = sentAt.length ? 60000 - (now - sentAt[0]) + 300 : 1000;
+      await sleep(Math.max(300, wait));
+    }
+  };
+
   const pcms: Uint8Array[] = [];
   let totalLen = 0;
   for (let i = 0; i < clean.length; i++) {
     onProgress?.(i, clean.length);
+    const need = estTokens(clean[i].length);
+    await waitForCapacity(need);
+    sentAt.push(Date.now());
+    sentTok.push(need);
     const pcm = await fetchPcm(clean[i], voiceName, apiKey);
     pcms.push(pcm);
     totalLen += pcm.length;
