@@ -131,17 +131,43 @@ export function ReadAloudScreen() {
     }
   };
 
+  // Salva o texto na lista E (na voz Gemini) já gera e guarda o áudio, para a
+  // leitura depois tocar sem pausas. Na voz do sistema não há áudio a gerar.
   const handleSave = async () => {
     const t = text.trim();
     if (!t) return;
+    Keyboard.dismiss();
+    setKV('read_aloud_draft', text).catch(() => {});
     const title = (t.split('\n')[0] || t).slice(0, 48).trim() || 'Sem título';
+    setSavingAudio(true);
     try {
       await createReadAloudText({ title, content: text });
       await reloadSaved();
-      Alert.alert('Salvo', 'O texto foi salvo na sua lista.');
     } catch {
+      setSavingAudio(false);
       Alert.alert('Não consegui salvar', 'Tente novamente.');
+      return;
     }
+    if (provider === 'gemini') {
+      setSynth({ done: 0, total: 1 });
+      try {
+        await prepareReadAloudAudio(t, {
+          geminiVoiceName: config?.readAloudGeminiVoice ?? 'Aoede',
+          onProgress: (done, total) => setSynth({ done, total }),
+        });
+        Alert.alert('Salvo', 'Texto salvo na lista e áudio gerado — a leitura toca sem pausas.');
+      } catch {
+        Alert.alert(
+          'Texto salvo',
+          'Salvei o texto, mas não consegui gerar o áudio Gemini agora (verifique a chave e a cota). O áudio é gerado na 1ª leitura.',
+        );
+      } finally {
+        setSynth(null);
+      }
+    } else {
+      Alert.alert('Salvo', 'Texto salvo na sua lista.');
+    }
+    setSavingAudio(false);
   };
 
   const handleLoad = (item: ReadAloudText) => {
@@ -212,31 +238,6 @@ export function ReadAloudScreen() {
     setSynth(null);
   };
 
-  // Pré-gera e salva o áudio Gemini (sem tocar): a próxima leitura toca fluida.
-  const handleSaveAudio = async () => {
-    const t = text.trim();
-    if (!t) return;
-    Keyboard.dismiss();
-    setKV('read_aloud_draft', text).catch(() => {});
-    setSavingAudio(true);
-    setSynth({ done: 0, total: 1 });
-    try {
-      await prepareReadAloudAudio(t, {
-        geminiVoiceName: config?.readAloudGeminiVoice ?? 'Aoede',
-        onProgress: (done, total) => setSynth({ done, total }),
-      });
-      Alert.alert('Áudio salvo', 'A leitura foi gerada e salva. Agora ela toca sem pausas.');
-    } catch {
-      Alert.alert(
-        'Não consegui gerar o áudio',
-        'Verifique a chave da API e a cota do Gemini.',
-      );
-    } finally {
-      setSavingAudio(false);
-      setSynth(null);
-    }
-  };
-
   // Início automático quando a tela é aberta encadeada (respiração → leitura).
   useEffect(() => {
     if (!autostart || autostartedRef.current || !draftLoaded || !text.trim()) return;
@@ -287,24 +288,19 @@ export function ReadAloudScreen() {
           )}
         </View>
 
-        <View style={styles.btnRow}>
-          <Button
-            label="Enviar arquivo"
-            variant="secondary"
-            onPress={handleUpload}
-            fullWidth={false}
-            style={{ flex: 1 }}
-          />
-          <View style={{ width: spacing.sm }} />
-          <Button
-            label="Salvar"
-            variant="secondary"
-            onPress={handleSave}
-            disabled={!text.trim()}
-            fullWidth={false}
-            style={{ flex: 1 }}
-          />
-        </View>
+        <Button
+          label="Enviar arquivo"
+          variant="secondary"
+          onPress={handleUpload}
+        />
+        <View style={{ height: spacing.sm }} />
+        <Button
+          label={savingAudio ? 'Salvando…' : 'Salvar e gerar áudio'}
+          variant="secondary"
+          onPress={handleSave}
+          loading={savingAudio}
+          disabled={!text.trim() || savingAudio}
+        />
         <Text style={styles.uploadHint}>
           No seletor do Android você pode escolher um arquivo do aparelho ou do
           Google Drive (toque no menu ☰ → Drive). Por enquanto, arquivos de
@@ -375,20 +371,11 @@ export function ReadAloudScreen() {
             </View>
           </>
         ) : (
-          <>
-            <Text style={styles.geminiNote}>
-              A voz do Gemini lê em ritmo profissional e pausado. Na 1ª vez o
-              áudio é gerado e salvo; depois a leitura toca sem pausas.
-            </Text>
-            <Button
-              label={savingAudio ? 'Gerando áudio…' : 'Salvar áudio (sem pausas)'}
-              variant="secondary"
-              onPress={handleSaveAudio}
-              loading={savingAudio}
-              disabled={!text.trim() || savingAudio}
-            />
-            <View style={{ height: spacing.md }} />
-          </>
+          <Text style={styles.geminiNote}>
+            A voz do Gemini lê em ritmo profissional e pausado. Ao salvar, o
+            áudio já é gerado e guardado junto do texto — a leitura toca sem
+            pausas.
+          </Text>
         )}
 
         <View style={styles.chainRow}>
@@ -482,9 +469,6 @@ const styles = StyleSheet.create({
   clear: {
     ...typography.small,
     color: colors.accent.gold,
-  },
-  btnRow: {
-    flexDirection: 'row',
   },
   uploadHint: {
     ...typography.small,
