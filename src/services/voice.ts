@@ -390,12 +390,16 @@ interface SpeakLongOptions {
  * profissional, leitura pausada). Respeita o token de geração: `stopSpeaking()`
  * interrompe na hora e não encadeia o próximo.
  */
+/** Limite de caracteres por pedaço, por provider (Gemini é mais conservador). */
+const GEMINI_CHUNK_MAX = 800;
+const SYSTEM_CHUNK_MAX = 3500;
+
 export async function speakLongText(
   text: string,
   opts: SpeakLongOptions = {},
 ): Promise<void> {
   const provider = opts.provider ?? 'system';
-  const chunks = chunkText(text, provider === 'gemini' ? 1500 : 3500);
+  const chunks = chunkText(text, provider === 'gemini' ? GEMINI_CHUNK_MAX : SYSTEM_CHUNK_MAX);
   if (chunks.length === 0) return;
   const myToken = ++speakToken;
   await stopPlayback();
@@ -405,9 +409,18 @@ export async function speakLongText(
     await speakLongTextGemini(chunks, opts, myToken);
     return;
   }
+  readSystemChunks(chunks, 0, opts, myToken);
+}
 
+/** Lê os pedaços `chunks` a partir de `startIdx` com a voz do sistema. */
+function readSystemChunks(
+  chunks: string[],
+  startIdx: number,
+  opts: SpeakLongOptions,
+  myToken: number,
+): void {
   const lang = opts.language ?? DEFAULT_LANGUAGE;
-  let i = 0;
+  let i = startIdx;
   const speakNext = () => {
     if (myToken !== speakToken) return; // parado ou superado
     if (i >= chunks.length) {
@@ -437,7 +450,11 @@ export async function speakLongText(
   speakNext();
 }
 
-/** Lê os pedaços em sequência via Gemini TTS, um de cada vez. */
+/**
+ * Lê os pedaços em sequência via Gemini TTS, um de cada vez. Se a síntese de
+ * um pedaço falhar (cota/limite/rede), NÃO trava: cai para a voz do sistema a
+ * partir daquele pedaço, de modo que a leitura sempre termina.
+ */
 async function speakLongTextGemini(
   chunks: string[],
   opts: SpeakLongOptions,
@@ -470,8 +487,10 @@ async function speakLongTextGemini(
       player.play();
     } catch (err) {
       if (myToken !== speakToken) return;
-      currentlySpeaking = false;
-      opts.onError?.(err);
+      // Gemini falhou neste pedaço — segue o resto pela voz do sistema em vez
+      // de dar erro e parar.
+      console.warn('Gemini TTS leitura falhou; seguindo pela voz do sistema:', err);
+      readSystemChunks(chunks, idx, opts, myToken);
     }
   };
   await playNext();

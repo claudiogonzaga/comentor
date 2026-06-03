@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -23,7 +24,9 @@ import { speakLongText, stopSpeaking, type EnrichedVoice } from '../services/voi
 import {
   createReadAloudText,
   deleteReadAloudText,
+  getKV,
   listReadAloudTexts,
+  setKV,
 } from '../services/database';
 import type { ReadAloudText } from '../types';
 
@@ -48,14 +51,25 @@ function looksBinary(s: string): boolean {
  */
 export function ReadAloudScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const autostart = !!route.params?.autostart;
   const { config, setConfig } = useAppStore();
   const [text, setText] = useState('');
   const [reading, setReading] = useState(false);
   const [progress, setProgress] = useState<{ i: number; total: number } | null>(null);
   const [saved, setSaved] = useState<ReadAloudText[]>([]);
+  // "Em seguida, fazer o exercício de respiração" — encadeia as atividades.
+  const [thenBreathing, setThenBreathing] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const textRef = useRef('');
+  const autostartedRef = useRef(false);
 
   const provider = config?.readAloudProvider ?? 'system';
   const rate = config?.readAloudRate ?? 1.0;
+
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
 
   const reloadSaved = useCallback(async () => {
     try {
@@ -65,10 +79,23 @@ export function ReadAloudScreen() {
     }
   }, []);
 
+  // Carrega o rascunho salvo (para a sequência "respiração → leitura" funcionar
+  // sem digitar de novo) e persiste ao sair.
   useEffect(() => {
     reloadSaved();
+    (async () => {
+      try {
+        const draft = await getKV('read_aloud_draft');
+        if (draft) setText(draft);
+      } catch {
+        /* rascunho opcional */
+      } finally {
+        setDraftLoaded(true);
+      }
+    })();
     return () => {
       stopSpeaking();
+      setKV('read_aloud_draft', textRef.current).catch(() => {});
     };
   }, [reloadSaved]);
 
@@ -131,6 +158,7 @@ export function ReadAloudScreen() {
     const t = text.trim();
     if (!t) return;
     Keyboard.dismiss();
+    setKV('read_aloud_draft', text).catch(() => {});
     setReading(true);
     setProgress(null);
     speakLongText(t, {
@@ -143,6 +171,11 @@ export function ReadAloudScreen() {
       onDone: () => {
         setReading(false);
         setProgress(null);
+        // Encadeamento: ao terminar a leitura, vai para a respiração (que já
+        // começa sozinha). Pequeno atraso para o áudio liberar.
+        if (thenBreathing) {
+          setTimeout(() => navigation.navigate('Breathing'), 400);
+        }
       },
       onError: () => {
         setReading(false);
@@ -162,6 +195,15 @@ export function ReadAloudScreen() {
     setReading(false);
     setProgress(null);
   };
+
+  // Início automático quando a tela é aberta encadeada (respiração → leitura).
+  useEffect(() => {
+    if (!autostart || autostartedRef.current || !draftLoaded || !text.trim()) return;
+    autostartedRef.current = true;
+    const t = setTimeout(() => handlePlay(), 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autostart, draftLoaded, text]);
 
   return (
     <ScreenContainer>
@@ -292,6 +334,21 @@ export function ReadAloudScreen() {
             velocidade vale para a voz do sistema.)
           </Text>
         )}
+
+        <View style={styles.chainRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.chainTitle}>Em seguida, respiração</Text>
+            <Text style={styles.chainSub}>
+              Ao terminar a leitura, vai direto para o exercício de respiração.
+            </Text>
+          </View>
+          <Switch
+            value={thenBreathing}
+            onValueChange={setThenBreathing}
+            trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+            thumbColor={thenBreathing ? colors.text.onGold : colors.text.tertiary}
+          />
+        </View>
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
@@ -436,6 +493,24 @@ const styles = StyleSheet.create({
     color: colors.text.tertiary,
     lineHeight: 17,
     marginBottom: spacing.lg,
+  },
+  chainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  chainTitle: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+  },
+  chainSub: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 2,
+    lineHeight: 17,
   },
   bottomBar: {
     paddingHorizontal: spacing.xl,

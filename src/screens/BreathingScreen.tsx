@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
@@ -48,6 +48,8 @@ export function BreathingScreen() {
   const [running, setRunning] = useState(false);
   const [cycleIdx, setCycleIdx] = useState(0);
   const [cueIdx, setCueIdx] = useState(0);
+  // "Em seguida, ler o texto" — encadeia respiração → leitura.
+  const [thenRead, setThenRead] = useState(false);
   const scale = useRef(new Animated.Value(1)).current;
   const cueIdxRef = useRef(0);
   const cycleIdxRef = useRef(0);
@@ -137,7 +139,10 @@ export function BreathingScreen() {
       useNativeDriver: true,
     }).stop();
     stopBreathingSound();
-    if (config?.voiceModeEnabled) {
+    if (thenRead) {
+      // Encadeamento: ao terminar a respiração, abre a leitura e já toca.
+      setTimeout(() => navigation.navigate('ReadAloud', { autostart: true }), 600);
+    } else if (config?.voiceModeEnabled) {
       await speak('Bom trabalho. Agora bora pra cama.');
     }
   };
@@ -220,6 +225,16 @@ export function BreathingScreen() {
             onPress={() => navigation.navigate('Chat')}
           />
         </View>
+
+        <View style={styles.chainRow}>
+          <Text style={styles.chainLabel}>Em seguida, ler um texto</Text>
+          <Switch
+            value={thenRead}
+            onValueChange={setThenRead}
+            trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+            thumbColor={thenRead ? colors.text.onGold : colors.text.tertiary}
+          />
+        </View>
       </View>
     </ScreenContainer>
   );
@@ -274,5 +289,19 @@ const styles = StyleSheet.create({
   actions: {
     width: '100%',
     marginTop: spacing.xxl,
+  },
+  chainRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  chainLabel: {
+    ...typography.bodyMedium,
+    color: colors.text.secondary,
   },
 });

@@ -46,7 +46,7 @@ export type RootStackParamList = {
   Settings: undefined;
   History: undefined;
   Breathing: undefined;
-  ReadAloud: undefined;
+  ReadAloud: { autostart?: boolean } | undefined;
   Reminders: undefined;
   SonsVozes: undefined;
 };
