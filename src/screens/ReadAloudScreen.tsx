@@ -37,6 +37,20 @@ import type { ReadAloudText } from '../types';
 
 const RATE_OPTIONS = [0.75, 0.9, 1.0, 1.15, 1.3];
 
+/** Extrai uma mensagem legível de um erro (para mostrar o motivo real). */
+function errMsg(e: unknown): string {
+  const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  if (!raw) return 'erro desconhecido';
+  const low = raw.toLowerCase();
+  if (low.includes('429') || low.includes('quota') || low.includes('rate')) {
+    return 'limite da API atingido — aguarde um pouco e tente de novo.';
+  }
+  if (low.includes('api key') || low.includes('chave') || low.includes('api_key')) {
+    return 'problema com a chave da API.';
+  }
+  return raw;
+}
+
 /** Heurística: o conteúdo parece binário (PDF/Word/zip) e não texto puro? */
 function looksBinary(s: string): boolean {
   const sample = s.slice(0, 2000);
@@ -156,10 +170,10 @@ export function ReadAloudScreen() {
           onProgress: (done, total) => setSynth({ done, total }),
         });
         Alert.alert('Salvo', 'Texto salvo na lista e áudio gerado — a leitura toca sem pausas.');
-      } catch {
+      } catch (e) {
         Alert.alert(
-          'Texto salvo',
-          'Salvei o texto, mas não consegui gerar o áudio Gemini agora (verifique a chave e a cota). O áudio é gerado na 1ª leitura.',
+          'Texto salvo (áudio falhou)',
+          `Salvei o texto, mas não consegui gerar o áudio Gemini: ${errMsg(e)}\n\nO áudio é gerado de novo na 1ª leitura.`,
         );
       } finally {
         setSynth(null);
@@ -206,6 +220,14 @@ export function ReadAloudScreen() {
       onProgress: (i, total) => {
         setSynth(null);
         setProgress({ i: i + 1, total });
+      },
+      onFallback: (e) => {
+        // O Gemini falhou e a leitura caiu para a voz do sistema — avisa o motivo.
+        setSynth(null);
+        Alert.alert(
+          'Voz Gemini indisponível',
+          `Lendo com a voz do sistema porque a voz Gemini falhou: ${errMsg(e)}`,
+        );
       },
       onDone: () => {
         setReading(false);

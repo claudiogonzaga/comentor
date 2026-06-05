@@ -38,11 +38,44 @@ export const GEMINI_VOICES: GeminiVoice[] = [
 
 export const DEFAULT_GEMINI_VOICE = 'Aoede';
 
+// Tabela de decodificação base64. Aceita o alfabeto padrão (+/) E o URL-safe
+// (-_); os demais bytes (incl. '=', espaços, quebras de linha) ficam -1.
+const B64_LUT: Int8Array = (() => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const t = new Int8Array(256).fill(-1);
+  for (let i = 0; i < chars.length; i++) t[chars.charCodeAt(i)] = i;
+  t[45] = 62; // '-' (URL-safe)
+  t[95] = 63; // '_' (URL-safe)
+  return t;
+})();
+
+/**
+ * Decodifica base64 em bytes SEM depender do `atob` global. O `atob` do Hermes
+ * é estrito (quebra com padding ausente / alfabeto URL-safe), e a saída do
+ * Gemini TTS às vezes não passa nessa validação — fazia a síntese falhar
+ * silenciosamente (e cair na voz do sistema). Este decodificador é tolerante:
+ * ignora qualquer caractere fora do alfabeto e não exige padding.
+ */
 function base64ToBytes(b64: string): Uint8Array {
-  // atob está disponível em RN 0.74+ (Hermes runtime). O app está em RN 0.81.
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  const lut = B64_LUT;
+  let validLen = 0;
+  for (let i = 0; i < b64.length; i++) {
+    if (lut[b64.charCodeAt(i) & 0xff] >= 0) validLen++;
+  }
+  const out = new Uint8Array(Math.floor((validLen * 3) / 4));
+  let acc = 0;
+  let bits = 0;
+  let o = 0;
+  for (let i = 0; i < b64.length; i++) {
+    const v = lut[b64.charCodeAt(i) & 0xff];
+    if (v < 0) continue; // ignora '=', espaços, quebras, etc.
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[o++] = (acc >> bits) & 0xff;
+    }
+  }
   return out;
 }
 

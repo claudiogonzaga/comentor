@@ -383,6 +383,8 @@ interface SpeakLongOptions {
   onProgress?: (index: number, total: number) => void;
   /** Progresso da GERAÇÃO do áudio Gemini (só na 1ª vez): feitos / total. */
   onSynthProgress?: (done: number, total: number) => void;
+  /** Chamado quando o Gemini falha e a leitura cai para a voz do sistema. */
+  onFallback?: (e: unknown) => void;
 }
 
 /**
@@ -507,8 +509,10 @@ async function speakLongTextGemini(
     player.play();
   } catch (err) {
     if (myToken !== speakToken) return;
-    // Gemini falhou — segue pela voz do sistema para não travar.
+    // Gemini falhou — avisa (para a UI mostrar o motivo) e segue pela voz do
+    // sistema para não travar.
     console.warn('Gemini TTS (áudio completo) falhou; seguindo pela voz do sistema:', err);
+    opts.onFallback?.(err);
     readSystemChunks(chunks, 0, opts, myToken);
   }
 }
