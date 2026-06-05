@@ -79,6 +79,8 @@ async function ensureBackgroundAudio(): Promise<void> {
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export function setActiveVoice(voiceId: string | null, language: string | null) {
   activeVoiceId = voiceId;
   activeLanguage = language;
@@ -579,43 +581,73 @@ async function speakLongTextGemini(
     return;
   }
 
-  // 2) Progressivo. Prefetch embrulhado p/ nunca virar "unhandled rejection".
-  type ChunkRes = { uri: string; pcm: Uint8Array };
-  type Settled = { ok: true; val: ChunkRes } | { ok: false; err: unknown };
-  const prefetch = (p: Promise<ChunkRes>): Promise<Settled> =>
-    p.then((val) => ({ ok: true as const, val })).catch((err) => ({ ok: false as const, err }));
+  // 2) Progressivo com BUFFER de look-ahead. Um PRODUTOR gera os trechos em
+  // ordem, até LOOKAHEAD à frente do que está tocando; um CONSUMIDOR toca em
+  // ordem, esperando só se o buffer esvaziar. Como gerar (~20s) é ~3x mais
+  // rápido que tocar (~60s), o buffer enche e absorve a lentidão pontual de um
+  // trecho (ex.: um retry de 5xx) SEM a leitura "parar" no meio — que era o bug
+  // do prefetch-de-1-só.
+  const LOOKAHEAD = 4;
+  const uris: (string | null)[] = new Array(chunks.length).fill(null);
+  const pcms: (Uint8Array | null)[] = new Array(chunks.length).fill(null);
+  type GenErr = { index: number; err: unknown };
+  let genErr: GenErr | null = null;
+  let playIndex = 0;
 
-  const pcms: Uint8Array[] = [];
-  opts.onSynthProgress?.(0, chunks.length); // gerando a 1ª parte
-  let next: Promise<Settled> = prefetch(synthesizeChunkGemini(chunks[0], voice));
+  opts.onSynthProgress?.(0, chunks.length); // preparando a 1ª parte
 
+  // PRODUTOR (fire-and-forget): gera em ordem, no máximo LOOKAHEAD à frente.
+  void (async () => {
+    for (let j = 0; j < chunks.length; j++) {
+      while (j > playIndex + LOOKAHEAD && myToken === speakToken) {
+        await sleep(250);
+      }
+      if (myToken !== speakToken) return;
+      try {
+        const { uri, pcm } = await synthesizeChunkGemini(chunks[j], voice);
+        uris[j] = uri;
+        pcms[j] = pcm;
+      } catch (err) {
+        genErr = { index: j, err };
+        return;
+      }
+    }
+  })().catch(() => {
+    /* erros já viram genErr; o catch é só guarda contra unhandled rejection */
+  });
+
+  // CONSUMIDOR: toca em ordem, esperando cada trecho ficar pronto. (Lê genErr
+  // num const ANOTADO porque a atribuição acontece no closure produtor, que o
+  // controle de fluxo do TS não enxerga — sem a anotação ele estreita p/ never.)
   for (let i = 0; i < chunks.length; i++) {
+    playIndex = i;
     if (myToken !== speakToken) return;
-    const r = await next;
-    if (myToken !== speakToken) return;
-    if (!r.ok) {
-      // Falhou (após os retries internos). 1º trecho → sistema desde o início.
-      // Trecho do meio → lê o RESTO pela voz do sistema (sem cachear o parcial).
-      console.warn('Gemini TTS (trecho) falhou; voz do sistema:', r.err);
-      opts.onFallback?.(r.err);
+    for (;;) {
+      const ge = genErr as GenErr | null;
+      if (uris[i] !== null || (ge && ge.index <= i)) break;
+      if (myToken !== speakToken) return;
+      opts.onSynthProgress?.(i, chunks.length); // "preparando parte i+1…"
+      await sleep(250);
+    }
+    const ge = genErr as GenErr | null;
+    if (ge && ge.index <= i) {
+      // O trecho i (após os retries internos) falhou → lê o RESTO pela voz do
+      // sistema (sem cachear o parcial).
+      console.warn('Gemini TTS (trecho) falhou; voz do sistema:', ge.err);
+      opts.onFallback?.(ge.err);
       readSystemChunks(chunks.slice(i), 0, opts, myToken);
       return;
     }
-    pcms.push(r.val.pcm);
-    // Começa a gerar o próximo trecho enquanto este toca.
-    next =
-      i + 1 < chunks.length
-        ? prefetch(synthesizeChunkGemini(chunks[i + 1], voice))
-        : Promise.resolve({ ok: false as const, err: 'fim' });
     if (myToken !== speakToken) return;
     opts.onProgress?.(i, chunks.length); // tocando a parte i+1
-    await playAndWait(r.val.uri, myToken);
+    await playAndWait(uris[i] as string, myToken);
   }
 
   if (myToken !== speakToken) return;
   // 3) Tudo tocou → concatena e cacheia o WAV completo (próxima = instantâneo).
   try {
-    await saveFullReadAloud(chunks, voice, pcms);
+    const all = pcms.filter((p): p is Uint8Array => !!p);
+    if (all.length === chunks.length) await saveFullReadAloud(chunks, voice, all);
   } catch {
     /* cache é best-effort */
   }

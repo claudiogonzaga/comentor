@@ -499,7 +499,7 @@ export function ReadAloudScreen() {
       <View style={styles.bottomBar}>
         {synth ? (
           <Text style={styles.progress}>
-            Gerando a 1ª parte… {synth.done}/{synth.total} · já começa a tocar e o
+            Preparando o áudio… {synth.done}/{synth.total} · começa a tocar já já e o
             resto é gerado enquanto lê (depois fica salvo e toca na hora)
           </Text>
         ) : progress ? (
