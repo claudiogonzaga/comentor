@@ -17,12 +17,12 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
 import { VoicePicker } from '../components/VoicePicker';
 import { VoiceProviderCard } from '../components/VoiceProviderCard';
-import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import {
   prepareReadAloudAudio,
   speakLongText,
+  playSavedAudio,
   stopSpeaking,
   type EnrichedVoice,
 } from '../services/voice';
@@ -147,7 +147,8 @@ export function ReadAloudScreen() {
   };
 
   // Salva o texto na lista E (na voz Gemini) já gera e guarda o áudio, para a
-  // leitura depois tocar sem pausas. Na voz do sistema não há áudio a gerar.
+  // leitura depois tocar sem pausas. DEDUP: se o MESMO texto já está salvo (e,
+  // na voz Gemini, já tem áudio na mesma voz), não cria duplicata nem regera.
   const handleSave = async () => {
     const t = text.trim();
     if (!t) return;
@@ -155,47 +156,74 @@ export function ReadAloudScreen() {
     setKV('read_aloud_draft', text).catch(() => {});
     const title = (t.split('\n')[0] || t).slice(0, 48).trim() || 'Sem título';
     const voice = config?.readAloudGeminiVoice ?? 'Aoede';
+    const existing = saved.find((s) => s.content.trim() === t);
+
+    // Voz do sistema: não há áudio a gerar.
+    if (provider !== 'gemini') {
+      if (existing) {
+        Alert.alert('Já está salvo', 'Esse texto já está na sua lista.');
+        return;
+      }
+      setSavingAudio(true);
+      try {
+        await createReadAloudText({ title, content: text });
+        await reloadSaved();
+        Alert.alert('Salvo', 'Texto salvo na sua lista.');
+      } catch {
+        Alert.alert('Não consegui salvar', 'Tente novamente.');
+      } finally {
+        setSavingAudio(false);
+      }
+      return;
+    }
+
+    // Voz Gemini, e já existe com áudio NA MESMA VOZ → nada a (re)gerar.
+    if (existing?.audioUri && existing.audioVoice === voice) {
+      Alert.alert(
+        'Já está salvo',
+        'Esse texto já está salvo com áudio nessa voz — não precisa gerar de novo.',
+      );
+      return;
+    }
+
+    // Reaproveita o registro existente (sem duplicar) ou cria um novo.
     setSavingAudio(true);
-    let created;
+    let targetId: number;
     try {
-      created = await createReadAloudText({ title, content: text });
-      await reloadSaved();
+      if (existing) {
+        targetId = existing.id;
+      } else {
+        const created = await createReadAloudText({ title, content: text });
+        targetId = created.id;
+        await reloadSaved();
+      }
     } catch {
       setSavingAudio(false);
       Alert.alert('Não consegui salvar', 'Tente novamente.');
       return;
     }
-    if (provider === 'gemini') {
-      setSynth({ done: 0, total: 1 });
-      try {
-        const uri = await prepareReadAloudAudio(t, {
-          geminiVoiceName: voice,
-          onProgress: (done, total) => setSynth({ done, total }),
-        });
-        // Amarra o áudio a este texto salvo — fica guardado para sempre e nunca
-        // regera (token gasto só desta vez).
-        if (uri) await updateReadAloudTextAudio(created.id, uri, voice);
-        await reloadSaved();
-        Alert.alert(
-          'Salvo',
-          'Texto e áudio guardados. Quando você abrir este texto de novo, ele toca na hora — sem gerar de novo nem gastar tokens.',
-        );
-      } catch (e) {
-        Alert.alert(
-          'Texto salvo (áudio falhou)',
-          `Salvei o texto, mas não consegui gerar o áudio Gemini: ${errMsg(e)}\n\nO áudio é gerado de novo na 1ª leitura.`,
-        );
-      } finally {
-        setSynth(null);
-      }
-    } else {
-      Alert.alert('Salvo', 'Texto salvo na sua lista.');
-    }
-    setSavingAudio(false);
-  };
 
-  const handleLoad = (item: ReadAloudText) => {
-    setText(item.content);
+    setSynth({ done: 0, total: 1 });
+    try {
+      const uri = await prepareReadAloudAudio(t, {
+        geminiVoiceName: voice,
+        onProgress: (done, total) => setSynth({ done, total }),
+      });
+      if (uri) await updateReadAloudTextAudio(targetId, uri, voice);
+      await reloadSaved();
+      Alert.alert(
+        'Salvo',
+        'Texto e áudio guardados. Ao abrir de novo, toca na hora — sem gerar de novo nem gastar tokens.',
+      );
+    } catch (e) {
+      Alert.alert(
+        'Texto salvo (áudio falhou)',
+        `Salvei o texto, mas não consegui gerar o áudio Gemini: ${errMsg(e)}\n\nO áudio é gerado na 1ª leitura.`,
+      );
+    } finally {
+      setSynth(null);
+      setSavingAudio(false);
+    }
   };
 
   const handleDeleteSaved = (item: ReadAloudText) => {
@@ -212,11 +240,11 @@ export function ReadAloudScreen() {
     ]);
   };
 
-  const handlePlay = () => {
-    const t = text.trim();
+  // Lê um texto (gerando progressivamente na voz Gemini, ou direto no sistema).
+  const playContent = (raw: string) => {
+    const t = raw.trim();
     if (!t) return;
     Keyboard.dismiss();
-    setKV('read_aloud_draft', text).catch(() => {});
     setReading(true);
     setProgress(null);
     setSynth(null);
@@ -261,6 +289,35 @@ export function ReadAloudScreen() {
         );
       },
     });
+  };
+
+  const handlePlay = () => {
+    setKV('read_aloud_draft', text).catch(() => {});
+    playContent(text);
+  };
+
+  // Toca um texto SALVO: se já tem áudio guardado, toca direto (instantâneo, sem
+  // gerar nem gastar token); senão, carrega no editor e gera/toca progressivamente.
+  const handlePlaySaved = async (item: ReadAloudText) => {
+    setText(item.content);
+    if (item.audioUri) {
+      Keyboard.dismiss();
+      setReading(true);
+      setProgress(null);
+      setSynth(null);
+      await playSavedAudio(item.audioUri, {
+        onDone: () => {
+          setReading(false);
+          if (thenBreathing) setTimeout(() => navigation.navigate('Breathing'), 400);
+        },
+        onError: () => {
+          // Áudio sumiu/ilegível → gera de novo a partir do conteúdo.
+          playContent(item.content);
+        },
+      });
+    } else {
+      playContent(item.content);
+    }
   };
 
   const handleStop = async () => {
@@ -344,10 +401,21 @@ export function ReadAloudScreen() {
             <Text style={styles.savedTitle}>SALVOS</Text>
             {saved.map((item) => (
               <View key={item.id} style={styles.savedRow}>
-                <Pressable style={styles.savedMain} onPress={() => handleLoad(item)}>
-                  <GreekIcon name="bell" size={16} color={colors.accent.gold} />
+                <Pressable
+                  style={styles.savedPlay}
+                  onPress={() => handlePlaySaved(item)}
+                  hitSlop={6}
+                >
+                  <Text style={styles.savedPlayIcon}>▶</Text>
+                </Pressable>
+                <Pressable style={styles.savedMain} onPress={() => handlePlaySaved(item)}>
                   <Text style={styles.savedName} numberOfLines={1}>
                     {item.title}
+                  </Text>
+                  <Text style={styles.savedSub} numberOfLines={1}>
+                    {item.audioUri
+                      ? 'áudio salvo · toque para ouvir'
+                      : 'toque para ouvir (gera na 1ª vez)'}
                   </Text>
                 </Pressable>
                 <Pressable onPress={() => handleDeleteSaved(item)} hitSlop={8}>
@@ -431,8 +499,8 @@ export function ReadAloudScreen() {
       <View style={styles.bottomBar}>
         {synth ? (
           <Text style={styles.progress}>
-            Gerando áudio… {synth.done}/{synth.total} · textos longos podem levar
-            vários minutos na 1ª vez (depois fica salvo e toca na hora)
+            Gerando a 1ª parte… {synth.done}/{synth.total} · já começa a tocar e o
+            resto é gerado enquanto lê (depois fica salvo e toca na hora)
           </Text>
         ) : progress ? (
           <Text style={styles.progress}>
@@ -526,17 +594,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  savedPlay: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  savedPlayIcon: {
+    color: colors.accent.gold,
+    fontSize: 14,
+  },
   savedMain: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
     paddingRight: spacing.sm,
   },
   savedName: {
     ...typography.body,
     color: colors.text.primary,
-    flex: 1,
+  },
+  savedSub: {
+    ...typography.small,
+    color: colors.text.tertiary,
+    marginTop: 2,
   },
   savedDelete: {
     ...typography.small,

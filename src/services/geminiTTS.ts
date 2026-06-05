@@ -396,3 +396,87 @@ export async function synthesizeFullSpeechGemini(
   file.write(wav);
   return { uri: file.uri, cached: false };
 }
+
+// ---------- Leitura PROGRESSIVA (toca cada trecho assim que fica pronto) ----------
+
+/** Mesmo arquivo/chave do WAV completo usado por synthesizeFullSpeechGemini. */
+function fullReadAloudFile(chunks: string[], voiceName: string): File {
+  const clean = chunks.map((c) => c.trim()).filter(Boolean);
+  const cacheKey = shortHash(`${voiceName}:full:${clean.join('')}`);
+  return new File(Paths.document, `readaloud_${cacheKey}.wav`);
+}
+
+/**
+ * Se o áudio COMPLETO desta leitura (mesmos trechos + voz) já está em disco,
+ * devolve o uri — aí a leitura toca na hora, sem gerar nem gastar token.
+ */
+export function getCachedReadAloudUri(
+  chunks: string[],
+  voiceName: string = DEFAULT_GEMINI_VOICE,
+): string | null {
+  try {
+    const f = fullReadAloudFile(chunks, voiceName);
+    return f.exists ? f.uri : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gera UM trecho: devolve o PCM (para concatenar no fim) e o uri de um WAV em
+ * cache (para tocar já). Cacheia por trecho em Paths.cache, então re-gerar o
+ * mesmo trecho é grátis (útil quando uma leitura é interrompida no meio).
+ */
+export async function synthesizeChunkGemini(
+  text: string,
+  voiceName: string = DEFAULT_GEMINI_VOICE,
+): Promise<{ uri: string; pcm: Uint8Array }> {
+  const trimmed = text.trim();
+  if (!trimmed) throw new GeminiTTSError('texto vazio');
+  const apiKey = await getApiKey();
+  if (!apiKey) {
+    throw new GeminiTTSError('Sem chave do Gemini — configure em "Como você quer usar?"');
+  }
+  const cacheKey = shortHash(`${voiceName}:${trimmed}`);
+  const file = new File(Paths.cache, `gemini_tts_${cacheKey}.wav`);
+  if (file.exists) {
+    try {
+      const bytes = await file.bytes();
+      // tira o cabeçalho WAV (44 bytes) para recuperar o PCM puro
+      const pcm = bytes.length > 44 ? bytes.slice(44) : new Uint8Array(0);
+      if (pcm.length > 0) return { uri: file.uri, pcm };
+    } catch {
+      /* cache ilegível → regenera abaixo */
+    }
+  }
+  const pcm = await fetchPcm(trimmed, voiceName, apiKey);
+  const wav = pcmToWav(pcm);
+  file.create({ overwrite: true });
+  file.write(wav);
+  return { uri: file.uri, pcm };
+}
+
+/**
+ * Concatena os PCMs já gerados (na ordem) num único WAV completo e cacheia em
+ * disco (Paths.document), para a PRÓXIMA leitura tocar na hora. Devolve o uri.
+ */
+export async function saveFullReadAloud(
+  chunks: string[],
+  voiceName: string,
+  pcms: Uint8Array[],
+): Promise<string> {
+  let totalLen = 0;
+  for (const p of pcms) totalLen += p.length;
+  const allPcm = new Uint8Array(totalLen);
+  let off = 0;
+  for (const p of pcms) {
+    allPcm.set(p, off);
+    off += p.length;
+  }
+  const wav = pcmToWav(allPcm);
+  await cleanupReadAloudCache();
+  const file = fullReadAloudFile(chunks, voiceName);
+  file.create({ overwrite: true });
+  file.write(wav);
+  return file.uri;
+}

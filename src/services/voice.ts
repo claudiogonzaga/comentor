@@ -10,6 +10,9 @@ import {
   GeminiTTSError,
   synthesizeFullSpeechGemini,
   synthesizeSpeechGemini,
+  synthesizeChunkGemini,
+  getCachedReadAloudUri,
+  saveFullReadAloud,
 } from './geminiTTS';
 import type { VoiceProvider } from '../types';
 
@@ -53,6 +56,9 @@ let activeProvider: VoiceProvider = 'system';
 let activeGeminiVoiceName: string = DEFAULT_GEMINI_VOICE;
 // Player do expo-audio em uso quando provider === 'gemini'.
 let activeGeminiPlayer: AudioPlayer | null = null;
+// Resolve a reprodução de um trecho em andamento (para `stopPlayback` destravar
+// o `await playAndWait` da leitura progressiva).
+let activePlaybackFinish: (() => void) | null = null;
 
 export function setActiveVoice(voiceId: string | null, language: string | null) {
   activeVoiceId = voiceId;
@@ -477,10 +483,61 @@ function readSystemChunks(
 }
 
 /**
- * Gera o áudio Gemini do texto INTEIRO de uma vez (concatenado num único
- * arquivo, salvo em disco) e toca SEM as pausas de rede entre os trechos. Na
- * 1ª vez gera (reporta `onSynthProgress`); depois o arquivo já está salvo e
- * toca na hora. Se a geração falhar (cota/rede), cai para a voz do sistema.
+ * Toca um WAV (`uri`) e resolve quando termina OU quando a leitura é parada
+ * (token mudou / `stopPlayback`). É a unidade da leitura progressiva: um trecho
+ * por vez.
+ */
+function playAndWait(uri: string, myToken: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (myToken !== speakToken) {
+      resolve();
+      return;
+    }
+    let player: AudioPlayer;
+    try {
+      player = createAudioPlayer({ uri });
+    } catch {
+      resolve();
+      return;
+    }
+    activeGeminiPlayer = player;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (activePlaybackFinish === finish) activePlaybackFinish = null;
+      try {
+        sub.remove();
+      } catch {
+        /* noop */
+      }
+      releaseGeminiPlayer(player);
+      resolve();
+    };
+    // Permite que stopPlayback() destrave este await imediatamente.
+    activePlaybackFinish = finish;
+    const sub = player.addListener('playbackStatusUpdate', (status) => {
+      if (myToken !== speakToken) {
+        finish();
+        return;
+      }
+      if (status.didJustFinish) finish();
+    });
+    try {
+      player.play();
+    } catch {
+      finish();
+    }
+  });
+}
+
+/**
+ * Leitura PROGRESSIVA com a voz Gemini: gera o 1º trecho e JÁ começa a tocar;
+ * enquanto um trecho toca, gera o próximo. Como tocar (~60s/trecho) é mais lento
+ * que gerar (~20s/trecho), o próximo quase sempre já está pronto — e isso mantém
+ * o ritmo bem abaixo do limite da API sem precisar de throttle. Ao final,
+ * concatena tudo num WAV e cacheia, para a PRÓXIMA leitura tocar na hora. Se o
+ * áudio completo já existir, toca direto. Se a geração falhar, cai para o sistema.
  */
 async function speakLongTextGemini(
   chunks: string[],
@@ -489,32 +546,86 @@ async function speakLongTextGemini(
 ): Promise<void> {
   const voice = opts.geminiVoiceName ?? activeGeminiVoiceName;
   currentlySpeaking = true;
+
+  // 1) Áudio completo já em cache? Toca na hora (texto já lido/salvo antes).
+  const cachedUri = getCachedReadAloudUri(chunks, voice);
+  if (cachedUri) {
+    opts.onProgress?.(0, 1);
+    await playAndWait(cachedUri, myToken);
+    if (myToken === speakToken) {
+      currentlySpeaking = false;
+      opts.onDone?.();
+    }
+    return;
+  }
+
+  // 2) Progressivo. Prefetch embrulhado p/ nunca virar "unhandled rejection".
+  type ChunkRes = { uri: string; pcm: Uint8Array };
+  type Settled = { ok: true; val: ChunkRes } | { ok: false; err: unknown };
+  const prefetch = (p: Promise<ChunkRes>): Promise<Settled> =>
+    p.then((val) => ({ ok: true as const, val })).catch((err) => ({ ok: false as const, err }));
+
+  const pcms: Uint8Array[] = [];
+  opts.onSynthProgress?.(0, chunks.length); // gerando a 1ª parte
+  let next: Promise<Settled> = prefetch(synthesizeChunkGemini(chunks[0], voice));
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (myToken !== speakToken) return;
+    const r = await next;
+    if (myToken !== speakToken) return;
+    if (!r.ok) {
+      // Falhou (após os retries internos). 1º trecho → sistema desde o início.
+      // Trecho do meio → lê o RESTO pela voz do sistema (sem cachear o parcial).
+      console.warn('Gemini TTS (trecho) falhou; voz do sistema:', r.err);
+      opts.onFallback?.(r.err);
+      readSystemChunks(chunks.slice(i), 0, opts, myToken);
+      return;
+    }
+    pcms.push(r.val.pcm);
+    // Começa a gerar o próximo trecho enquanto este toca.
+    next =
+      i + 1 < chunks.length
+        ? prefetch(synthesizeChunkGemini(chunks[i + 1], voice))
+        : Promise.resolve({ ok: false as const, err: 'fim' });
+    if (myToken !== speakToken) return;
+    opts.onProgress?.(i, chunks.length); // tocando a parte i+1
+    await playAndWait(r.val.uri, myToken);
+  }
+
+  if (myToken !== speakToken) return;
+  // 3) Tudo tocou → concatena e cacheia o WAV completo (próxima = instantâneo).
   try {
-    const { uri } = await synthesizeFullSpeechGemini(chunks, voice, (done, total) => {
-      if (myToken === speakToken) opts.onSynthProgress?.(done, total);
-    });
-    if (myToken !== speakToken) return;
-    const player = createAudioPlayer({ uri });
-    activeGeminiPlayer = player;
-    opts.onProgress?.(0, 1); // saiu da geração, começou a tocar (contínuo)
-    const sub = player.addListener('playbackStatusUpdate', (status) => {
-      if (status.didJustFinish) {
-        sub.remove();
-        releaseGeminiPlayer(player);
-        if (myToken === speakToken) {
-          currentlySpeaking = false;
-          opts.onDone?.();
-        }
-      }
-    });
-    player.play();
-  } catch (err) {
-    if (myToken !== speakToken) return;
-    // Gemini falhou — avisa (para a UI mostrar o motivo) e segue pela voz do
-    // sistema para não travar.
-    console.warn('Gemini TTS (áudio completo) falhou; seguindo pela voz do sistema:', err);
-    opts.onFallback?.(err);
-    readSystemChunks(chunks, 0, opts, myToken);
+    await saveFullReadAloud(chunks, voice, pcms);
+  } catch {
+    /* cache é best-effort */
+  }
+  currentlySpeaking = false;
+  opts.onDone?.();
+}
+
+/**
+ * Toca um áudio JÁ SALVO (`uri`) direto, sem gerar nada. Usado quando o usuário
+ * toca num texto salvo que já tem áudio guardado.
+ */
+export async function playSavedAudio(
+  uri: string,
+  opts: { onDone?: () => void; onError?: (e: unknown) => void } = {},
+): Promise<void> {
+  const myToken = ++speakToken;
+  await stopPlayback();
+  if (myToken !== speakToken) return;
+  currentlySpeaking = true;
+  try {
+    await playAndWait(uri, myToken);
+    if (myToken === speakToken) {
+      currentlySpeaking = false;
+      opts.onDone?.();
+    }
+  } catch (e) {
+    if (myToken === speakToken) {
+      currentlySpeaking = false;
+      opts.onError?.(e);
+    }
   }
 }
 
@@ -532,6 +643,13 @@ async function stopPlayback() {
       /* noop */
     }
     releaseGeminiPlayer(activeGeminiPlayer);
+  }
+  // Destrava um `playAndWait` em espera (leitura progressiva), para o laço
+  // perceber a parada e não ficar pendurado.
+  if (activePlaybackFinish) {
+    const f = activePlaybackFinish;
+    activePlaybackFinish = null;
+    f();
   }
   currentlySpeaking = false;
 }
