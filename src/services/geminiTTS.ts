@@ -137,11 +137,17 @@ export interface GeminiTTSResult {
 export class GeminiTTSError extends Error {
   readonly httpStatus?: number;
   readonly quotaExceeded: boolean;
-  constructor(message: string, opts: { httpStatus?: number; quotaExceeded?: boolean } = {}) {
+  /** true quando o 429 é o limite DIÁRIO (RPD) — não adianta re-tentar hoje. */
+  readonly dailyQuota: boolean;
+  constructor(
+    message: string,
+    opts: { httpStatus?: number; quotaExceeded?: boolean; dailyQuota?: boolean } = {},
+  ) {
     super(message);
     this.name = 'GeminiTTSError';
     this.httpStatus = opts.httpStatus;
     this.quotaExceeded = !!opts.quotaExceeded;
+    this.dailyQuota = !!opts.dailyQuota;
   }
 }
 
@@ -168,13 +174,73 @@ const TTS_TIMEOUT_MS = 90000;
  */
 const MAX_RETRIES = 6;
 
-/** Status HTTP transitórios que vale a pena re-tentar (limite + erro do servidor). */
-function isRetryableStatus(s: number): boolean {
-  return s === 429 || (s >= 500 && s < 600);
-}
 /** Backoff exponencial com teto: 2s, 4s, 8s, 16s, 30s, 30s. */
 function retryDelayMs(attempt: number): number {
   return Math.min(30000, 2000 * Math.pow(2, attempt));
+}
+
+/**
+ * Limitador de REQUISIÇÕES POR MINUTO. O gargalo real do TTS é RPM, não TPM (a
+ * doc conta TPM só por ENTRADA, e o áudio de saída não entra). Tier 1 = 10 RPM;
+ * usamos margem de 9 numa janela deslizante de 60s. GLOBAL: vale para TODAS as
+ * chamadas (leitura progressiva, salvar, trecho único) — evita o 429 por rajada
+ * (ex.: o buffer de look-ahead disparando vários trechos juntos no início).
+ */
+const RPM_LIMIT = 9;
+const rpmWindow: number[] = [];
+async function acquireRpmSlot(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    // Descarta entradas velhas (>60s) E do FUTURO (relógio recuou via NTP/ajuste
+    // manual) — sem o segundo caso, um recuo congelaria o trecho por todo o recuo.
+    while (rpmWindow.length && (now - rpmWindow[0] > 60000 || rpmWindow[0] > now)) {
+      rpmWindow.shift();
+    }
+    if (rpmWindow.length < RPM_LIMIT) {
+      rpmWindow.push(now);
+      return;
+    }
+    // Espera limitada à janela (teto de ~60s) por segurança.
+    const wait = Math.min(60250, Math.max(250, 60000 - (now - rpmWindow[0]) + 250));
+    await sleep(wait);
+  }
+}
+
+/**
+ * Quando o limite DIÁRIO (RPD) estoura, não adianta re-tentar hoje — só reseta à
+ * meia-noite no Pacífico. Guardamos até quando bloquear o Gemini (e cair para a
+ * voz do sistema) sem nem bater na API. Sem depender de Intl/timezone no Hermes,
+ * usamos a próxima 07:00 UTC (= meia-noite PDT). No PST destrava ~1h antes do
+ * reset real, e se ainda estiver esgotado a própria API re-bloqueia com 1 chamada
+ * — assim NUNCA sobre-bloqueia além do reset.
+ */
+let dailyBlockUntil = 0;
+function nextPacificMidnight(): number {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(7, 0, 0, 0);
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+  return next.getTime();
+}
+
+/** Distingue um 429 DIÁRIO (RPD) de um POR-MINUTO (RPM/TPM) pelos detalhes do erro. */
+function classify429(body: unknown): { daily: boolean; retryMs: number } {
+  let s = '';
+  try {
+    s = JSON.stringify((body as { error?: { details?: unknown } })?.error?.details ?? []);
+  } catch {
+    s = '';
+  }
+  const perDay = /PerDay|per day|RequestsPerDay/i.test(s);
+  const perMinute = /PerMinute|per minute/i.test(s);
+  const m = s.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  const retryMs = m ? Math.min(65000, Math.ceil(parseFloat(m[1]) * 1000) + 500) : 0;
+  // Bloqueia o DIA só com EVIDÊNCIA POSITIVA de RPD (a violação cita "PerDay").
+  // Se vierem PerDay e PerMinute juntos, o diário manda (não adianta re-tentar
+  // hoje). Um 429 sem details/ilegível (infra/borda, body não-JSON) → daily=false
+  // → cai no retry LIMITADO, em vez de bloquear o Gemini o dia inteiro por engano.
+  const daily = perDay;
+  return { daily, retryMs };
 }
 
 /**
@@ -189,6 +255,17 @@ async function fetchPcm(
   apiKey: string,
   attempt = 0,
 ): Promise<Uint8Array> {
+  // Bloqueio diário (RPD) ativo? Nem chama a API — cai direto para o fallback.
+  if (dailyBlockUntil && Date.now() < dailyBlockUntil) {
+    throw new GeminiTTSError('Gemini TTS: cota diária da API esgotada', {
+      httpStatus: 429,
+      quotaExceeded: true,
+      dailyQuota: true,
+    });
+  }
+  // Ritma para não estourar os 10 RPM (gargalo real do TTS). Adquire um slot em
+  // TODA requisição — inclusive cada retry, que é uma nova requisição.
+  await acquireRpmSlot();
   const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text }] }],
@@ -220,23 +297,37 @@ async function fetchPcm(
   }
   clearTimeout(timer);
 
-  // 429 (limite) ou 5xx ("An internal error has occurred. Please retry") são
-  // transitórios do servidor → espera e re-tenta, em vez de derrubar a leitura.
-  if (isRetryableStatus(res.status) && attempt < MAX_RETRIES) {
-    let delay = retryDelayMs(attempt);
-    if (res.status === 429) {
-      const ra = parseFloat(res.headers.get('retry-after') ?? '');
-      delay =
-        Number.isFinite(ra) && ra > 0
-          ? Math.min(65000, ra * 1000)
-          : Math.min(60000, 12000 * Math.pow(2, attempt));
-    }
-    await sleep(delay);
+  // 5xx ("An internal error has occurred. Please retry") é transitório → re-tenta.
+  if (res.status >= 500 && res.status < 600 && attempt < MAX_RETRIES) {
+    await sleep(retryDelayMs(attempt));
     return fetchPcm(text, voiceName, apiKey, attempt + 1);
   }
 
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    // 429: distinguir DIÁRIO (RPD — não re-tentar hoje; bloqueia e cai para o
+    // sistema) de POR-MINUTO (RPM/TPM — transitório, re-tenta com o delay certo).
+    if (res.status === 429) {
+      const { daily, retryMs } = classify429(j);
+      if (daily) {
+        dailyBlockUntil = nextPacificMidnight();
+        throw new GeminiTTSError(
+          'Gemini TTS: cota diária da API esgotada — reseta à meia-noite no Pacífico',
+          { httpStatus: 429, quotaExceeded: true, dailyQuota: true },
+        );
+      }
+      if (attempt < MAX_RETRIES) {
+        const ra = parseFloat(res.headers.get('retry-after') ?? '');
+        const delay =
+          retryMs > 0
+            ? retryMs
+            : Number.isFinite(ra) && ra > 0
+              ? Math.min(65000, ra * 1000)
+              : Math.min(60000, 12000 * Math.pow(2, attempt));
+        await sleep(delay);
+        return fetchPcm(text, voiceName, apiKey, attempt + 1);
+      }
+    }
     const msg = j.error?.message ?? `HTTP ${res.status}`;
     throw new GeminiTTSError(`Gemini TTS: ${msg}`, {
       httpStatus: res.status,
@@ -348,36 +439,12 @@ export async function synthesizeFullSpeechGemini(
     return { uri: file.uri, cached: true };
   }
 
-  // Ritmo (Tier 1 do TTS: 10 req/min e 10.000 tokens/min). Mantemos uma janela
-  // deslizante de 60s e só disparamos o próximo trecho quando ele couber nos
-  // dois limites — assim textos longos não tomam 429 por rajada.
-  const TTS_RPM = 10;
-  const TTS_TPM = 10000;
-  const estTokens = (chars: number) => Math.ceil(chars * 1.9) + 50;
-  const sentAt: number[] = [];
-  const sentTok: number[] = [];
-  const waitForCapacity = async (need: number) => {
-    for (;;) {
-      const now = Date.now();
-      while (sentAt.length && now - sentAt[0] > 60000) {
-        sentAt.shift();
-        sentTok.shift();
-      }
-      const toks = sentTok.reduce((a, b) => a + b, 0);
-      if (sentAt.length < TTS_RPM - 1 && toks + need <= TTS_TPM - 500) break;
-      const wait = sentAt.length ? 60000 - (now - sentAt[0]) + 300 : 1000;
-      await sleep(Math.max(300, wait));
-    }
-  };
-
+  // O ritmo (RPM) agora é GLOBAL, dentro de fetchPcm (acquireRpmSlot), e vale
+  // para todos os caminhos. Aqui é só gerar em série e concatenar.
   const pcms: Uint8Array[] = [];
   let totalLen = 0;
   for (let i = 0; i < clean.length; i++) {
     onProgress?.(i, clean.length);
-    const need = estTokens(clean[i].length);
-    await waitForCapacity(need);
-    sentAt.push(Date.now());
-    sentTok.push(need);
     const pcm = await fetchPcm(clean[i], voiceName, apiKey);
     pcms.push(pcm);
     totalLen += pcm.length;

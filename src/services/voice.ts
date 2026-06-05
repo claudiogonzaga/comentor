@@ -422,10 +422,13 @@ interface SpeakLongOptions {
  * profissional, leitura pausada). Respeita o token de geração: `stopSpeaking()`
  * interrompe na hora e não encadeia o próximo.
  */
-/** Limite de caracteres por pedaço, por provider. ~800 no Gemini: cada chamada
- *  gera menos áudio e responde bem dentro do timeout (1500 fazia o 1º pedaço
- *  estourar 30s e abortar). A geração é ritmada por RPM/TPM no geminiTTS. */
-const GEMINI_CHUNK_MAX = 800;
+/** Limite de caracteres por pedaço (Gemini). 2000 é o ponto ótimo: minimiza o
+ *  nº de REQUISIÇÕES (gargalo real é RPM 10/min e RPD 100/dia no Tier 1 — um
+ *  texto de 26k chars cai de ~38 para ~15 requisições), mantém o trecho < 4000
+ *  bytes (limite, mesmo com acentos PT-BR), ~2 min de fala (longe do corte de
+ *  ~5 min) e ~45s de geração (dentro do timeout de 90s). O ritmo (RPM) é global
+ *  no geminiTTS (acquireRpmSlot). */
+const GEMINI_CHUNK_MAX = 2000;
 const SYSTEM_CHUNK_MAX = 3500;
 
 export async function speakLongText(
@@ -587,7 +590,7 @@ async function speakLongTextGemini(
   // rápido que tocar (~60s), o buffer enche e absorve a lentidão pontual de um
   // trecho (ex.: um retry de 5xx) SEM a leitura "parar" no meio — que era o bug
   // do prefetch-de-1-só.
-  const LOOKAHEAD = 4;
+  const LOOKAHEAD = 2;
   const uris: (string | null)[] = new Array(chunks.length).fill(null);
   const pcms: (Uint8Array | null)[] = new Array(chunks.length).fill(null);
   type GenErr = { index: number; err: unknown };

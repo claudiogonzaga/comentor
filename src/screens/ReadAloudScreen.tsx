@@ -40,11 +40,16 @@ const RATE_OPTIONS = [0.75, 0.9, 1.0, 1.15, 1.3];
 
 /** Extrai uma mensagem legível de um erro (para mostrar o motivo real). */
 function errMsg(e: unknown): string {
+  const daily = !!(e as { dailyQuota?: boolean })?.dailyQuota;
   const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  // Cota DIÁRIA (RPD) esgotada: esperar minutos NÃO resolve — só o reset diário.
+  if (daily || /cota di[áa]ria|daily/i.test(raw)) {
+    return 'cota DIÁRIA da API esgotada (Nível 1 ≈ 100 leituras/dia no projeto). Reseta à meia-noite no horário do Pacífico (~4-5h da manhã no Brasil). Por enquanto, leio com a voz do sistema.';
+  }
   if (!raw) return 'erro desconhecido';
   const low = raw.toLowerCase();
   if (low.includes('429') || low.includes('quota') || low.includes('rate')) {
-    return 'limite da API atingido — aguarde um pouco e tente de novo.';
+    return 'limite POR MINUTO da API atingido — aguarde um pouquinho e tente de novo.';
   }
   if (low.includes('api key') || low.includes('chave') || low.includes('api_key')) {
     return 'problema com a chave da API.';
