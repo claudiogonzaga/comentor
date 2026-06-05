@@ -152,18 +152,36 @@ export class GeminiTTSError extends Error {
  */
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Quantas vezes re-tentar quando vier 429 (limite por minuto). */
-const MAX_429_RETRIES = 4;
 /** Timeout por chamada de TTS. Gerar áudio longo leva tempo — 30s era curto e
  *  abortava ("Gemini TTS: Aborted"). */
 const TTS_TIMEOUT_MS = 90000;
-/** Quantas vezes re-tentar em timeout/erro de rede (transiente). */
-const MAX_NET_RETRIES = 2;
+/**
+ * Re-tentativas para erros TRANSITÓRIOS: 429 (limite), 5xx (ex.: "An internal
+ * error has occurred. Please retry" — erro interno do servidor do Gemini),
+ * timeout/rede, e resposta 200 sem áudio.
+ *
+ * Por que isso importa: o 500 do Gemini TTS é INTERMITENTE. Numa leitura de ~24
+ * trechos, basta UM trecho pegar um 500 transitório para a leitura inteira
+ * falhar. Se cada trecho tem ~10% de chance de 500, a chance de ao menos um
+ * falhar em 24 é ~92%. Re-tentando com backoff, a chance de falha por trecho
+ * cai para ~0,0001% — e a leitura completa passa a (quase) sempre concluir.
+ */
+const MAX_RETRIES = 6;
+
+/** Status HTTP transitórios que vale a pena re-tentar (limite + erro do servidor). */
+function isRetryableStatus(s: number): boolean {
+  return s === 429 || (s >= 500 && s < 600);
+}
+/** Backoff exponencial com teto: 2s, 4s, 8s, 16s, 30s, 30s. */
+function retryDelayMs(attempt: number): number {
+  return Math.min(30000, 2000 * Math.pow(2, attempt));
+}
 
 /**
- * Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. Em 429
- * (limite por minuto — RPM/TPM), espera (Retry-After ou backoff exponencial)
- * e tenta de novo, em vez de falhar de cara.
+ * Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. Re-tenta
+ * (com backoff) em TODOS os erros transitórios — 429 (limite), 5xx (erro
+ * interno do servidor), timeout/rede e resposta 200 sem áudio — em vez de
+ * desistir de cara. Só erros 4xx "de verdade" (chave inválida etc.) são fatais.
  */
 async function fetchPcm(
   text: string,
@@ -191,10 +209,10 @@ async function fetchPcm(
     });
   } catch (err) {
     clearTimeout(timer);
-    // Timeout (abort) ou rede instável — costuma ser transiente. Tenta de novo
+    // Timeout (abort) ou rede instável — transiente. Tenta de novo com backoff
     // antes de desistir (em vez de cair na voz do sistema na primeira falha).
-    if (attempt < MAX_NET_RETRIES) {
-      await sleep(1500 * (attempt + 1));
+    if (attempt < MAX_RETRIES) {
+      await sleep(retryDelayMs(attempt));
       return fetchPcm(text, voiceName, apiKey, attempt + 1);
     }
     const msg = err instanceof Error ? err.message : 'erro de rede';
@@ -202,13 +220,18 @@ async function fetchPcm(
   }
   clearTimeout(timer);
 
-  if (res.status === 429 && attempt < MAX_429_RETRIES) {
-    const ra = parseFloat(res.headers.get('retry-after') ?? '');
-    const backoff =
-      Number.isFinite(ra) && ra > 0
-        ? Math.min(65000, ra * 1000)
-        : Math.min(60000, 12000 * Math.pow(2, attempt));
-    await sleep(backoff);
+  // 429 (limite) ou 5xx ("An internal error has occurred. Please retry") são
+  // transitórios do servidor → espera e re-tenta, em vez de derrubar a leitura.
+  if (isRetryableStatus(res.status) && attempt < MAX_RETRIES) {
+    let delay = retryDelayMs(attempt);
+    if (res.status === 429) {
+      const ra = parseFloat(res.headers.get('retry-after') ?? '');
+      delay =
+        Number.isFinite(ra) && ra > 0
+          ? Math.min(65000, ra * 1000)
+          : Math.min(60000, 12000 * Math.pow(2, attempt));
+    }
+    await sleep(delay);
     return fetchPcm(text, voiceName, apiKey, attempt + 1);
   }
 
@@ -224,7 +247,14 @@ async function fetchPcm(
     candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
   };
   const audioBase64 = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!audioBase64) throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
+  if (!audioBase64) {
+    // 200 mas sem áudio — também é uma falha transitória; re-tenta antes de desistir.
+    if (attempt < MAX_RETRIES) {
+      await sleep(retryDelayMs(attempt));
+      return fetchPcm(text, voiceName, apiKey, attempt + 1);
+    }
+    throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
+  }
   return base64ToBytes(audioBase64);
 }
 
