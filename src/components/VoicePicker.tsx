@@ -52,6 +52,11 @@ export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Pro
 
   const hasBrazilian = !!voices?.some((v) => v.isBrazilian);
   const hasAnyPortuguese = !!voices?.length;
+  // Tem alguma voz pt-* de alta qualidade (neural)? Sem isso, a leitura soa
+  // robótica e vale instalar as vozes "aprimoradas" do Google.
+  const hasEnhanced = !!voices?.some(
+    (v) => v.quality === Speech.VoiceQuality.Enhanced,
+  );
 
   const handlePreview = async (v: EnrichedVoice) => {
     if (previewingId === v.identifier) {
@@ -138,6 +143,26 @@ export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Pro
         </View>
       )}
 
+      {!loading && hasBrazilian && !hasEnhanced && (
+        <View style={styles.warningBox}>
+          <Text style={styles.warningTitle}>Instale vozes de alta qualidade</Text>
+          <Text style={styles.warningBody}>
+            Suas vozes em português são de qualidade padrão — por isso soam
+            robóticas. Baixe as vozes <Text style={styles.warningBold}>neurais
+            (alta qualidade)</Text> do Google para uma leitura bem melhor:
+            {' '}
+            <Text style={styles.warningBold}>
+              motor do Google → Instalar dados de voz → Português (Brasil) →
+              marcar todas
+            </Text>. Depois toque em ↻ para recarregar e escolha uma marcada
+            como “alta qualidade”.
+          </Text>
+          <Pressable style={styles.installBtn} onPress={handleOpenSettings}>
+            <Text style={styles.installBtnText}>Abrir Configurações de TTS</Text>
+          </Pressable>
+        </View>
+      )}
+
       {!loading && (
         <View>
           <Pressable
@@ -159,10 +184,16 @@ export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Pro
             return (
               <View key={v.identifier} style={[styles.row, selected && styles.rowSelected]}>
                 <Pressable style={styles.rowMain} onPress={() => onChange(v)}>
-                  <Text style={styles.rowTitle}>{v.displayName}</Text>
+                  <View style={styles.titleRow}>
+                    <Text style={styles.rowTitle}>{v.displayName}</Text>
+                    {v.quality === Speech.VoiceQuality.Enhanced && (
+                      <View style={styles.hqBadge}>
+                        <Text style={styles.hqBadgeText}>alta qualidade</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.rowSub} numberOfLines={1}>
                     {v.language}
-                    {v.quality === Speech.VoiceQuality.Enhanced ? ' · alta qualidade' : ''}
                     {v.gender === 'unknown' ? ' · gênero não identificado' : ''}
                   </Text>
                 </Pressable>
@@ -276,9 +307,27 @@ const styles = StyleSheet.create({
     borderColor: colors.accent.gold,
     backgroundColor: 'rgba(244,197,83,0.08)',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
   rowTitle: {
     ...typography.bodyMedium,
     color: colors.text.primary,
+  },
+  hqBadge: {
+    backgroundColor: colors.accent.gold,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+  },
+  hqBadgeText: {
+    ...typography.small,
+    fontSize: 10,
+    color: colors.text.onGold,
+    fontWeight: '700',
   },
   rowSub: {
     ...typography.small,
