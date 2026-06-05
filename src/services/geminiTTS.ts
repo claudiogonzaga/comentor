@@ -154,6 +154,11 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** Quantas vezes re-tentar quando vier 429 (limite por minuto). */
 const MAX_429_RETRIES = 4;
+/** Timeout por chamada de TTS. Gerar áudio longo leva tempo — 30s era curto e
+ *  abortava ("Gemini TTS: Aborted"). */
+const TTS_TIMEOUT_MS = 90000;
+/** Quantas vezes re-tentar em timeout/erro de rede (transiente). */
+const MAX_NET_RETRIES = 2;
 
 /**
  * Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. Em 429
@@ -175,7 +180,7 @@ async function fetchPcm(
     },
   };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -186,6 +191,12 @@ async function fetchPcm(
     });
   } catch (err) {
     clearTimeout(timer);
+    // Timeout (abort) ou rede instável — costuma ser transiente. Tenta de novo
+    // antes de desistir (em vez de cair na voz do sistema na primeira falha).
+    if (attempt < MAX_NET_RETRIES) {
+      await sleep(1500 * (attempt + 1));
+      return fetchPcm(text, voiceName, apiKey, attempt + 1);
+    }
     const msg = err instanceof Error ? err.message : 'erro de rede';
     throw new GeminiTTSError(`Gemini TTS: ${msg}`);
   }

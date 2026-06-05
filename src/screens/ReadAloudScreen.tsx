@@ -431,8 +431,8 @@ export function ReadAloudScreen() {
       <View style={styles.bottomBar}>
         {synth ? (
           <Text style={styles.progress}>
-            Gerando áudio… {synth.done}/{synth.total} · textos longos levam alguns
-            minutos (salvo após a 1ª vez)
+            Gerando áudio… {synth.done}/{synth.total} · textos longos podem levar
+            vários minutos na 1ª vez (depois fica salvo e toca na hora)
           </Text>
         ) : progress ? (
           <Text style={styles.progress}>
