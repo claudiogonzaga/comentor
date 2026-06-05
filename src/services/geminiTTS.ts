@@ -10,6 +10,7 @@
 
 import { File, Paths } from 'expo-file-system';
 import { getApiKey } from './secureStore';
+import { getSavedAudioUris } from './database';
 
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 const TTS_URL = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent`;
@@ -245,17 +246,30 @@ export async function synthesizeSpeechGemini(
   return { uri: file.uri, cached: false };
 }
 
-/** Mantém no máximo `keep` áudios de leitura salvos (limpa os mais antigos). */
-function cleanupReadAloudCache(keep = 6): void {
+/**
+ * Limpa áudios de leitura AD-HOC (não salvos), mantendo no máximo `keep` mais
+ * recentes. NUNCA apaga áudios amarrados a textos salvos (esses são guardados
+ * para sempre e só somem quando o texto é excluído). Best-effort.
+ */
+async function cleanupReadAloudCache(keep = 6): Promise<void> {
+  let protectedSet: Set<string>;
+  try {
+    protectedSet = new Set(await getSavedAudioUris());
+  } catch {
+    // Sem saber o que proteger, não apaga nada (evita perder áudio salvo).
+    return;
+  }
   try {
     const entries = Paths.document.list();
     const files = entries.filter(
-      (e): e is File => e instanceof File && e.name.startsWith('readaloud_') && e.name.endsWith('.wav'),
+      (e): e is File =>
+        e instanceof File && e.name.startsWith('readaloud_') && e.name.endsWith('.wav'),
     );
-    if (files.length <= keep) return;
-    files
+    const unprotected = files.filter((f) => !protectedSet.has(f.uri));
+    if (unprotected.length <= keep) return;
+    unprotected
       .sort((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0))
-      .slice(0, files.length - keep)
+      .slice(0, unprotected.length - keep)
       .forEach((f) => {
         try {
           f.delete();
@@ -336,7 +350,7 @@ export async function synthesizeFullSpeechGemini(
     off += p.length;
   }
   const wav = pcmToWav(allPcm);
-  cleanupReadAloudCache();
+  await cleanupReadAloudCache();
   file.create({ overwrite: true });
   file.write(wav);
   return { uri: file.uri, cached: false };

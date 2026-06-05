@@ -136,6 +136,10 @@ export interface ReadAloudText {
   id: number;
   title: string;
   content: string;
+  /** file:// do áudio Gemini guardado para este texto (null = ainda não gerado). */
+  audioUri: string | null;
+  /** Voz Gemini usada no áudio guardado. */
+  audioVoice: string | null;
   updatedAt: string;
 }
 

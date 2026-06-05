@@ -32,6 +32,7 @@ import {
   getKV,
   listReadAloudTexts,
   setKV,
+  updateReadAloudTextAudio,
 } from '../services/database';
 import type { ReadAloudText } from '../types';
 
@@ -153,9 +154,11 @@ export function ReadAloudScreen() {
     Keyboard.dismiss();
     setKV('read_aloud_draft', text).catch(() => {});
     const title = (t.split('\n')[0] || t).slice(0, 48).trim() || 'Sem título';
+    const voice = config?.readAloudGeminiVoice ?? 'Aoede';
     setSavingAudio(true);
+    let created;
     try {
-      await createReadAloudText({ title, content: text });
+      created = await createReadAloudText({ title, content: text });
       await reloadSaved();
     } catch {
       setSavingAudio(false);
@@ -165,11 +168,18 @@ export function ReadAloudScreen() {
     if (provider === 'gemini') {
       setSynth({ done: 0, total: 1 });
       try {
-        await prepareReadAloudAudio(t, {
-          geminiVoiceName: config?.readAloudGeminiVoice ?? 'Aoede',
+        const uri = await prepareReadAloudAudio(t, {
+          geminiVoiceName: voice,
           onProgress: (done, total) => setSynth({ done, total }),
         });
-        Alert.alert('Salvo', 'Texto salvo na lista e áudio gerado — a leitura toca sem pausas.');
+        // Amarra o áudio a este texto salvo — fica guardado para sempre e nunca
+        // regera (token gasto só desta vez).
+        if (uri) await updateReadAloudTextAudio(created.id, uri, voice);
+        await reloadSaved();
+        Alert.alert(
+          'Salvo',
+          'Texto e áudio guardados. Quando você abrir este texto de novo, ele toca na hora — sem gerar de novo nem gastar tokens.',
+        );
       } catch (e) {
         Alert.alert(
           'Texto salvo (áudio falhou)',

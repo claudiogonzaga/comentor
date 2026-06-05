@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { File } from 'expo-file-system';
 import type {
   AIBackend,
   ChatMessage,
@@ -383,9 +384,22 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       content TEXT NOT NULL,
+      audio_uri TEXT,
+      audio_voice TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  // v1.34: cada texto salvo guarda o seu próprio áudio (não regera nem gasta
+  // token). Migração defensiva para instalações que já tinham a tabela.
+  const raCols = await database.getAllAsync<{ name: string }>(
+    "PRAGMA table_info('read_aloud_texts')",
+  );
+  if (!raCols.some((c) => c.name === 'audio_uri')) {
+    await database.execAsync(`ALTER TABLE read_aloud_texts ADD COLUMN audio_uri TEXT`);
+  }
+  if (!raCols.some((c) => c.name === 'audio_voice')) {
+    await database.execAsync(`ALTER TABLE read_aloud_texts ADD COLUMN audio_voice TEXT`);
+  }
 
   // v1.23: dias da semana por lembrete (medications). Permite lembretes
   // semanais em dias específicos (ex.: VO2máx só Ter/Qui). Default = todos os
@@ -1284,6 +1298,8 @@ interface ReadAloudTextRow {
   id: number;
   title: string;
   content: string;
+  audio_uri: string | null;
+  audio_voice: string | null;
   updated_at: string;
 }
 
@@ -1291,8 +1307,50 @@ const rowToReadAloudText = (r: ReadAloudTextRow): ReadAloudText => ({
   id: r.id,
   title: r.title,
   content: r.content,
+  audioUri: r.audio_uri ?? null,
+  audioVoice: r.audio_voice ?? null,
   updatedAt: r.updated_at,
 });
+
+/** URIs dos áudios guardados pelos textos salvos — protegidos da limpeza. */
+export async function getSavedAudioUris(): Promise<string[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ audio_uri: string }>(
+    'SELECT audio_uri FROM read_aloud_texts WHERE audio_uri IS NOT NULL',
+  );
+  return rows.map((r) => r.audio_uri);
+}
+
+/** Amarra um arquivo de áudio a um texto salvo; apaga o áudio anterior se sobrar. */
+export async function updateReadAloudTextAudio(
+  id: number,
+  audioUri: string,
+  audioVoice: string,
+): Promise<void> {
+  const d = await getDb();
+  const prev = await d.getFirstAsync<{ audio_uri: string | null }>(
+    'SELECT audio_uri FROM read_aloud_texts WHERE id = ?',
+    [id],
+  );
+  await d.runAsync(
+    "UPDATE read_aloud_texts SET audio_uri = ?, audio_voice = ?, updated_at = datetime('now') WHERE id = ?",
+    [audioUri, audioVoice, id],
+  );
+  const old = prev?.audio_uri;
+  if (old && old !== audioUri) {
+    const others = await d.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM read_aloud_texts WHERE audio_uri = ?',
+      [old],
+    );
+    if ((others?.n ?? 0) === 0) {
+      try {
+        new File(old).delete();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
 
 export async function listReadAloudTexts(): Promise<ReadAloudText[]> {
   const d = await getDb();
@@ -1321,7 +1379,26 @@ export async function createReadAloudText(input: {
 
 export async function deleteReadAloudText(id: number): Promise<void> {
   const d = await getDb();
+  const row = await d.getFirstAsync<{ audio_uri: string | null }>(
+    'SELECT audio_uri FROM read_aloud_texts WHERE id = ?',
+    [id],
+  );
   await d.runAsync('DELETE FROM read_aloud_texts WHERE id = ?', [id]);
+  const uri = row?.audio_uri;
+  if (uri) {
+    // só apaga o arquivo se nenhum outro texto salvo apontar para ele.
+    const others = await d.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM read_aloud_texts WHERE audio_uri = ?',
+      [uri],
+    );
+    if ((others?.n ?? 0) === 0) {
+      try {
+        new File(uri).delete();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 }
 
 // --------- App key/value store (estado de UI persistente) ---------

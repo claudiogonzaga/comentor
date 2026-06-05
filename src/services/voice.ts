@@ -427,14 +427,15 @@ export async function speakLongText(
 export async function prepareReadAloudAudio(
   text: string,
   opts: { geminiVoiceName?: string; onProgress?: (done: number, total: number) => void } = {},
-): Promise<void> {
+): Promise<string | null> {
   const chunks = chunkText(text, GEMINI_CHUNK_MAX);
-  if (chunks.length === 0) return;
-  await synthesizeFullSpeechGemini(
+  if (chunks.length === 0) return null;
+  const { uri } = await synthesizeFullSpeechGemini(
     chunks,
     opts.geminiVoiceName ?? activeGeminiVoiceName,
     opts.onProgress,
   );
+  return uri;
 }
 
 /** Lê os pedaços `chunks` a partir de `startIdx` com a voz do sistema. */
