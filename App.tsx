@@ -24,6 +24,7 @@ import {
 import { scheduleAllNudges } from './src/services/nudges';
 import { scheduleSleepAwarenessNotifications } from './src/services/sleepAwareness';
 import { scheduleInspirationNotifications } from './src/services/inspiration';
+import { rearmSpoken } from './src/services/spokenNudges';
 import { colors } from './src/theme';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
@@ -55,6 +56,9 @@ export default function App() {
         await scheduleAllNudges().catch(() => {});
         await scheduleSleepAwarenessNotifications().catch(() => {});
         await scheduleInspirationNotifications().catch(() => {});
+        // Re-arma os alarmes falados persistidos (sobrevive a reboot via boot
+        // receiver nativo; aqui é o belt-and-suspenders no launch do app).
+        await rearmSpoken().catch(() => {});
       }
     })();
   }, []);

@@ -91,6 +91,12 @@ export interface UserConfig {
    */
   voiceNudgesEnabled: boolean;
   /**
+   * Quando true, os nudges/avisos/inspirações são FALADOS em voz alta (voz
+   * Gemini pré-renderizada) mesmo com a tela apagada / app fechado, via um
+   * alarme exato + foreground service nativo. Requer chave Gemini configurada.
+   */
+  spokenNudgesEnabled: boolean;
+  /**
    * Modo "inspiração": quando true, a Comentora envia alertas de hora em hora
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */

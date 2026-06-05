@@ -1,0 +1,7 @@
+{
+  "name": "spoken-nudges",
+  "version": "0.1.0",
+  "description": "Fala nudges/lembretes em voz alta via alarme exato + foreground service (Android), mesmo com app fechado.",
+  "main": "index.ts",
+  "private": true
+}

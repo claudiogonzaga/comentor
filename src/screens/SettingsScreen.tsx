@@ -31,6 +31,15 @@ import {
 } from '../services/notifications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
+import {
+  spokenNudgesAvailable,
+  isExactAlarmAllowed,
+  openExactAlarmSettings,
+  isIgnoringBatteryOptimizations,
+  requestIgnoreBatteryOptimizations,
+  scheduleSpokenTest,
+  cancelAllSpoken,
+} from '../services/spokenNudges';
 import { testApiKey } from '../services/gemini';
 import {
   deleteAllDownloadedModels,
@@ -97,6 +106,8 @@ export function SettingsScreen() {
     config?.inspirationModeEnabled ?? false,
   );
   const [inspPerDay, setInspPerDay] = useState(config?.inspirationPerDay ?? 6);
+  const [spokenNudges, setSpokenNudges] = useState(config?.spokenNudgesEnabled ?? false);
+  const [testingSpoken, setTestingSpoken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingNotif, setTestingNotif] = useState(false);
@@ -123,6 +134,7 @@ export function SettingsScreen() {
       setVoiceNudges(config.voiceNudgesEnabled ?? false);
       setInspirationMode(config.inspirationModeEnabled ?? false);
       setInspPerDay(config.inspirationPerDay ?? 6);
+      setSpokenNudges(config.spokenNudgesEnabled ?? false);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -674,6 +686,106 @@ export function SettingsScreen() {
                 </Pressable>
               </View>
             </View>
+          )}
+
+          {spokenNudgesAvailable() && (
+            <>
+              <View style={styles.toggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                    Falar em voz alta
+                  </Text>
+                  <Text style={[typography.small, { color: colors.text.secondary }]}>
+                    A Comentora FALA os avisos inspiradores em voz alta (voz do Gemini),
+                    mesmo com a tela apagada ou o app fechado. Requer chave do Gemini.
+                  </Text>
+                </View>
+                <Switch
+                  value={spokenNudges}
+                  onValueChange={async (next) => {
+                    if (next && !config?.hasApiKey) {
+                      Alert.alert(
+                        'Configure o Gemini',
+                        'A fala em voz alta usa a voz do Gemini. Configure sua chave do Gemini primeiro, em "Como você quer usar?".',
+                      );
+                      return;
+                    }
+                    setSpokenNudges(next);
+                    try {
+                      await setConfig({ spokenNudgesEnabled: next });
+                      if (next) {
+                        await scheduleInspirationNotifications();
+                        if (!isExactAlarmAllowed()) {
+                          Alert.alert(
+                            'Permita alarmes exatos',
+                            'Para falar na hora certa mesmo com o app fechado, o Android precisa da permissão de "alarmes e lembretes".',
+                            [
+                              { text: 'Agora não', style: 'cancel' },
+                              { text: 'Abrir ajustes', onPress: () => openExactAlarmSettings() },
+                            ],
+                          );
+                        }
+                        if (!isIgnoringBatteryOptimizations()) {
+                          Alert.alert(
+                            'Desative a economia de bateria',
+                            'Em alguns celulares (Xiaomi, Samsung…) a economia de bateria pode impedir a Comentora de falar. Recomendo liberar a execução sem restrição.',
+                            [
+                              { text: 'Agora não', style: 'cancel' },
+                              {
+                                text: 'Abrir ajustes',
+                                onPress: () => requestIgnoreBatteryOptimizations(),
+                              },
+                            ],
+                          );
+                        }
+                      } else {
+                        await cancelAllSpoken();
+                      }
+                    } catch (err) {
+                      console.warn('toggle spoken nudges failed:', err);
+                    }
+                  }}
+                  trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+                  thumbColor={spokenNudges ? colors.text.onGold : colors.text.tertiary}
+                />
+              </View>
+
+              {spokenNudges && (
+                <Pressable
+                  onPress={async () => {
+                    setTestingSpoken(true);
+                    try {
+                      const r = await scheduleSpokenTest(60);
+                      if (r.ok) {
+                        Alert.alert(
+                          'Teste agendado ✓',
+                          'Em 1 minuto a Comentora vai falar. Pode trancar a tela ou até fechar o app — você deve ouvir a voz mesmo assim.',
+                        );
+                      } else {
+                        Alert.alert('Não consegui agendar o teste', r.reason ?? 'erro desconhecido');
+                      }
+                    } finally {
+                      setTestingSpoken(false);
+                    }
+                  }}
+                  disabled={testingSpoken}
+                  style={{
+                    marginTop: spacing.sm,
+                    alignSelf: 'flex-start',
+                    paddingVertical: spacing.sm,
+                    paddingHorizontal: spacing.md,
+                    borderRadius: radius.md,
+                    borderWidth: 1.5,
+                    borderColor: colors.accent.gold,
+                    opacity: testingSpoken ? 0.6 : 1,
+                  }}
+                >
+                  <Text style={[typography.small, { color: colors.accent.gold }]}>
+                    {testingSpoken ? 'Gerando áudio…' : '▶ Testar agora (fala em 1 min)'}
+                  </Text>
+                </Pressable>
+              )}
+            </>
           )}
 
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>

@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { getUserConfig } from './database';
 import { ensureChannel } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
+import { syncSpokenInspirations } from './spokenNudges';
 
 /**
  * Modo "inspiração": quando ligado, a Comentora dispara um alerta a cada hora
@@ -97,10 +98,16 @@ export async function scheduleInspirationNotifications(): Promise<void> {
   } catch {
     /* sem config legível → trata como desligado */
   }
-  if (!enabled) return;
+  if (!enabled) {
+    // limpa também os alarmes FALADOS de inspiração (se houver)
+    void syncSpokenInspirations([]).catch(() => {});
+    return;
+  }
 
   const channelId = await ensureChannel();
   const messages = shuffled(INSPIRATION_MESSAGES);
+  // coletados para, ao final, agendar as versões FALADAS (se o recurso estiver on)
+  const spokenItems: { text: string; hour: number; minute: number }[] = [];
 
   // Espalha `perDay` mensagens na janela diurna [START, END]. Antes era uma
   // por hora fixa; agora o usuário escolhe quantas quer.
@@ -115,6 +122,8 @@ export async function scheduleInspirationNotifications(): Promise<void> {
     const hour = Math.floor(t / 60);
     const minute = t % 60;
     const msg = messages[i % messages.length];
+    // a versão falada lê só o corpo (o título tem emoji decorativo)
+    spokenItems.push({ text: msg.body, hour, minute });
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -134,4 +143,8 @@ export async function scheduleInspirationNotifications(): Promise<void> {
       console.warn(`failed to schedule inspiration alert @${hour}:${minute}:`, err);
     }
   }
+
+  // Agenda as versões FALADAS em background (pré-renderiza a voz Gemini e arma
+  // os alarmes nativos). Best-effort e fora do caminho crítico do agendamento.
+  void syncSpokenInspirations(spokenItems).catch(() => {});
 }
