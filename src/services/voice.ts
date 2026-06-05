@@ -1,6 +1,6 @@
 import { Linking, Platform } from 'react-native';
 import * as Speech from 'expo-speech';
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import {
   ExpoSpeechRecognitionModule,
   type ExpoSpeechRecognitionOptions,
@@ -59,6 +59,25 @@ let activeGeminiPlayer: AudioPlayer | null = null;
 // Resolve a reprodução de um trecho em andamento (para `stopPlayback` destravar
 // o `await playAndWait` da leitura progressiva).
 let activePlaybackFinish: (() => void) | null = null;
+
+// Liga a reprodução em SEGUNDO PLANO (continua com a tela apagada / bloqueada).
+// O expo-audio já traz um foreground service de mídia (AudioControlsService);
+// `shouldPlayInBackground: true` faz o player não pausar ao sair do primeiro
+// plano. Idempotente — basta uma vez por sessão do app.
+let backgroundAudioReady = false;
+async function ensureBackgroundAudio(): Promise<void> {
+  if (backgroundAudioReady) return;
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'duckOthers',
+    });
+    backgroundAudioReady = true;
+  } catch {
+    // Se falhar, a leitura ainda toca em primeiro plano — só não persiste no lock.
+  }
+}
 
 export function setActiveVoice(voiceId: string | null, language: string | null) {
   activeVoiceId = voiceId;
@@ -414,6 +433,7 @@ export async function speakLongText(
   const provider = opts.provider ?? 'system';
   const chunks = chunkText(text, provider === 'gemini' ? GEMINI_CHUNK_MAX : SYSTEM_CHUNK_MAX);
   if (chunks.length === 0) return;
+  await ensureBackgroundAudio(); // continua tocando com a tela apagada
   const myToken = ++speakToken;
   await stopPlayback();
   if (myToken !== speakToken) return;
@@ -611,6 +631,7 @@ export async function playSavedAudio(
   uri: string,
   opts: { onDone?: () => void; onError?: (e: unknown) => void } = {},
 ): Promise<void> {
+  await ensureBackgroundAudio(); // continua tocando com a tela apagada
   const myToken = ++speakToken;
   await stopPlayback();
   if (myToken !== speakToken) return;
