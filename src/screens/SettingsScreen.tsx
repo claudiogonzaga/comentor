@@ -696,20 +696,14 @@ export function SettingsScreen() {
                     Falar em voz alta
                   </Text>
                   <Text style={[typography.small, { color: colors.text.secondary }]}>
-                    A Comentora FALA os avisos inspiradores em voz alta (voz do Gemini),
-                    mesmo com a tela apagada ou o app fechado. Requer chave do Gemini.
+                    A Comentora FALA os avisos inspiradores em voz alta (voz do
+                    sistema), mesmo com a tela apagada ou o app fechado. Não gasta
+                    a cota da API.
                   </Text>
                 </View>
                 <Switch
                   value={spokenNudges}
                   onValueChange={async (next) => {
-                    if (next && !config?.hasApiKey) {
-                      Alert.alert(
-                        'Configure o Gemini',
-                        'A fala em voz alta usa a voz do Gemini. Configure sua chave do Gemini primeiro, em "Como você quer usar?".',
-                      );
-                      return;
-                    }
                     setSpokenNudges(next);
                     try {
                       await setConfig({ spokenNudgesEnabled: next });

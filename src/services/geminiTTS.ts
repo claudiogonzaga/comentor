@@ -121,6 +121,44 @@ function pcmToWav(pcm: Uint8Array): Uint8Array {
   return wav;
 }
 
+/**
+ * Normaliza o VOLUME do PCM (16-bit LE) para um nível-alvo constante. Cada trecho
+ * vem de uma chamada independente da API e pode sair mais alto/baixo — isso
+ * deixava o volume "pulando" entre os blocos. Normalizando todos para o mesmo RMS
+ * (com ganho limitado e teto de pico p/ não estourar), o volume fica uniforme.
+ * (O timbre/identidade da voz é do modelo e não dá pra igualar por DSP.)
+ */
+const NORMALIZE_TARGET_RMS = 5000; // ~-16 dBFS — nível de fala confortável
+function normalizePcm(pcm: Uint8Array): Uint8Array {
+  const n = Math.floor(pcm.length / 2);
+  if (n === 0) return pcm;
+  const dv = new DataView(pcm.buffer, pcm.byteOffset, n * 2);
+  let sumSq = 0;
+  let peak = 1;
+  for (let i = 0; i < n; i++) {
+    const s = dv.getInt16(i * 2, true);
+    sumSq += s * s;
+    const a = s < 0 ? -s : s;
+    if (a > peak) peak = a;
+  }
+  const rms = Math.sqrt(sumSq / n);
+  if (rms < 1) return pcm; // silêncio — não mexe
+  let gain = NORMALIZE_TARGET_RMS / rms;
+  gain = Math.max(0.5, Math.min(3.0, gain)); // não exagera trecho quieto/alto
+  if (peak * gain > 30000) gain = 30000 / peak; // evita clip
+  if (Math.abs(gain - 1) < 0.02) return pcm; // já está no alvo
+  const out = new Uint8Array(pcm.length);
+  const odv = new DataView(out.buffer);
+  for (let i = 0; i < n; i++) {
+    let v = Math.round(dv.getInt16(i * 2, true) * gain);
+    if (v > 32767) v = 32767;
+    else if (v < -32768) v = -32768;
+    odv.setInt16(i * 2, v, true);
+  }
+  if (pcm.length % 2 === 1) out[pcm.length - 1] = pcm[pcm.length - 1];
+  return out;
+}
+
 function shortHash(s: string): string {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
@@ -371,7 +409,7 @@ export async function synthesizeSpeechGemini(
     return { uri: file.uri, cached: true };
   }
 
-  const pcm = await fetchPcm(trimmed, voiceName, apiKey);
+  const pcm = normalizePcm(await fetchPcm(trimmed, voiceName, apiKey));
   const wav = pcmToWav(pcm);
   file.create({ overwrite: true });
   file.write(wav);
@@ -445,7 +483,7 @@ export async function synthesizeFullSpeechGemini(
   let totalLen = 0;
   for (let i = 0; i < clean.length; i++) {
     onProgress?.(i, clean.length);
-    const pcm = await fetchPcm(clean[i], voiceName, apiKey);
+    const pcm = normalizePcm(await fetchPcm(clean[i], voiceName, apiKey));
     pcms.push(pcm);
     totalLen += pcm.length;
   }
@@ -516,7 +554,7 @@ export async function synthesizeChunkGemini(
       /* cache ilegível → regenera abaixo */
     }
   }
-  const pcm = await fetchPcm(trimmed, voiceName, apiKey);
+  const pcm = normalizePcm(await fetchPcm(trimmed, voiceName, apiKey));
   const wav = pcmToWav(pcm);
   file.create({ overwrite: true });
   file.write(wav);

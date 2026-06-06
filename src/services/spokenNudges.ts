@@ -9,9 +9,7 @@
 
 import { Platform } from 'react-native';
 import { requireNativeModule } from 'expo-modules-core';
-import { prepareReadAloudAudio } from './voice';
 import { getUserConfig } from './database';
-import { getApiKey } from './secureStore';
 
 interface SpokenNudgesNative {
   isExactAlarmAllowed(): boolean;
@@ -95,15 +93,6 @@ function nextDailyEpoch(hour: number, minute: number): number {
   return d.getTime();
 }
 
-async function configuredVoice(): Promise<string> {
-  try {
-    const c = await getUserConfig();
-    return c.readAloudGeminiVoice || 'Aoede';
-  } catch {
-    return 'Aoede';
-  }
-}
-
 /**
  * Agenda um alarme falado de TESTE daqui a `seconds`. Ótimo para validar o
  * mecanismo: agendar, travar a tela / fechar o app, e ouvir a Comentora falar.
@@ -112,21 +101,13 @@ export async function scheduleSpokenTest(
   seconds = 60,
 ): Promise<{ ok: boolean; reason?: string }> {
   if (!native) return { ok: false, reason: 'recurso indisponível neste aparelho' };
-  const key = await getApiKey();
-  if (!key) return { ok: false, reason: 'configure a chave do Gemini primeiro' };
-  const voice = await configuredVoice();
   const text =
     'Oi! Aqui é a Comentora, falando com você em voz alta — mesmo com a tela apagada. ' +
     'Se você está ouvindo isto, os lembretes falados estão funcionando.';
-  let uri: string | null = null;
+  // Voz do SISTEMA (Android TTS) — o serviço nativo fala o texto; sem gerar
+  // áudio na API (sem gastar cota). audioPath vazio sinaliza "use a voz do sistema".
   try {
-    uri = await prepareReadAloudAudio(text, { geminiVoiceName: voice });
-  } catch (e) {
-    return { ok: false, reason: (e as Error)?.message ?? 'falha ao gerar áudio' };
-  }
-  if (!uri) return { ok: false, reason: 'falha ao gerar áudio' };
-  try {
-    await native.schedule(TEST_ID, Date.now() + seconds * 1000, uri, false, 'Comentora', text);
+    await native.schedule(TEST_ID, Date.now() + seconds * 1000, '', false, 'Comentora', text);
   } catch (e) {
     return { ok: false, reason: (e as Error)?.message ?? 'falha ao agendar' };
   }
@@ -153,28 +134,24 @@ export async function syncSpokenInspirations(
   }
 
   let enabled = false;
-  let voice = 'Aoede';
   try {
     const c = await getUserConfig();
     enabled = !!c.spokenNudgesEnabled && !!c.inspirationModeEnabled;
-    voice = c.readAloudGeminiVoice || 'Aoede';
   } catch {
     return;
   }
   if (!enabled) return;
 
-  const key = await getApiKey();
-  if (!key) return; // sem Gemini não dá pra pré-renderizar uma voz boa
-
+  // Voz do SISTEMA (Android TTS): o serviço nativo fala o texto na hora. Não
+  // pré-renderiza nada na API → não consome cota (eram trechos curtos). audioPath
+  // vazio sinaliza ao serviço "use a voz do sistema".
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     try {
-      const uri = await prepareReadAloudAudio(it.text, { geminiVoiceName: voice });
-      if (!uri) continue;
       await native.schedule(
         `${INSP_PREFIX}${i}`,
         nextDailyEpoch(it.hour, it.minute),
-        uri,
+        '',
         true,
         'Comentora',
         it.text,

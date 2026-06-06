@@ -15,8 +15,6 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
-import { VoicePicker } from '../components/VoicePicker';
-import { VoiceProviderCard } from '../components/VoiceProviderCard';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import {
@@ -24,7 +22,6 @@ import {
   speakLongText,
   playSavedAudio,
   stopSpeaking,
-  type EnrichedVoice,
 } from '../services/voice';
 import {
   createReadAloudText,
@@ -92,8 +89,14 @@ export function ReadAloudScreen() {
   const textRef = useRef('');
   const autostartedRef = useRef(false);
 
-  const provider = config?.readAloudProvider ?? 'system';
+  // Voz GLOBAL do app (a mesma do chat) — o "Leia para mim" não tem mais voz
+  // própria. O usuário troca a voz em "Sons e Vozes" (atalho na tela).
+  const provider = config?.voiceProvider ?? 'system';
+  const geminiVoiceName = config?.geminiVoiceName ?? 'Aoede';
+  const voiceId = config?.voiceId ?? null;
+  const voiceLanguage = config?.voiceLanguage ?? null;
   const rate = config?.readAloudRate ?? 1.0;
+  const paused = config?.readAloudPaused ?? false;
 
   useEffect(() => {
     textRef.current = text;
@@ -160,7 +163,7 @@ export function ReadAloudScreen() {
     Keyboard.dismiss();
     setKV('read_aloud_draft', text).catch(() => {});
     const title = (t.split('\n')[0] || t).slice(0, 48).trim() || 'Sem título';
-    const voice = config?.readAloudGeminiVoice ?? 'Aoede';
+    const voice = geminiVoiceName; // voz global do app
     const existing = saved.find((s) => s.content.trim() === t);
 
     // Voz do sistema: não há áudio a gerar.
@@ -212,6 +215,7 @@ export function ReadAloudScreen() {
     try {
       const uri = await prepareReadAloudAudio(t, {
         geminiVoiceName: voice,
+        paused,
         onProgress: (done, total) => setSynth({ done, total }),
       });
       if (uri) await updateReadAloudTextAudio(targetId, uri, voice);
@@ -255,10 +259,11 @@ export function ReadAloudScreen() {
     setSynth(null);
     speakLongText(t, {
       provider,
-      voiceId: config?.readAloudVoiceId ?? null,
-      language: config?.readAloudVoiceLanguage ?? null,
-      geminiVoiceName: config?.readAloudGeminiVoice ?? 'Aoede',
+      voiceId,
+      language: voiceLanguage,
+      geminiVoiceName,
       rate,
+      paused,
       onSynthProgress: (done, total) => setSynth({ done, total }),
       onProgress: (i, total) => {
         setSynth(null);
@@ -311,6 +316,7 @@ export function ReadAloudScreen() {
       setProgress(null);
       setSynth(null);
       await playSavedAudio(item.audioUri, {
+        rate,
         onDone: () => {
           setReading(false);
           if (thenBreathing) setTimeout(() => navigation.navigate('Breathing'), 400);
@@ -432,56 +438,58 @@ export function ReadAloudScreen() {
         )}
 
         <View style={{ height: spacing.lg }} />
-        <VoiceProviderCard
-          provider={provider}
-          geminiVoiceName={config?.readAloudGeminiVoice ?? 'Aoede'}
-          hasApiKey={!!config?.hasApiKey}
-          onProviderChange={async (p) => {
-            await setConfig({ readAloudProvider: p });
-          }}
-          onGeminiVoiceChange={async (name) => {
-            await setConfig({ readAloudGeminiVoice: name });
-          }}
-        />
 
-        {provider === 'system' ? (
-          <>
-            <VoicePicker
-              title="Voz da leitura"
-              value={config?.readAloudVoiceId ?? null}
-              onChange={async (v: EnrichedVoice | null) => {
-                await setConfig({
-                  readAloudVoiceId: v?.identifier ?? null,
-                  readAloudVoiceLanguage: v?.language ?? null,
-                });
-              }}
-            />
+        {/* Voz: usa a voz GLOBAL do app; atalho para trocar em "Sons e Vozes". */}
+        <Pressable style={styles.voiceShortcut} onPress={() => navigation.navigate('SonsVozes')}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.voiceShortcutLabel}>VOZ DA LEITURA</Text>
+            <Text style={styles.voiceShortcutValue}>
+              {provider === 'gemini'
+                ? `Gemini · ${geminiVoiceName}`
+                : 'Voz do sistema (Android)'}
+            </Text>
+            <Text style={styles.voiceShortcutHint}>
+              É a voz geral do app. Toque para trocar em “Sons e Vozes”.
+            </Text>
+          </View>
+          <Text style={styles.voiceShortcutArrow}>›</Text>
+        </Pressable>
 
-            <Text style={styles.speedLabel}>Velocidade da leitura</Text>
-            <View style={styles.speedRow}>
-              {RATE_OPTIONS.map((r) => {
-                const on = Math.abs(r - rate) < 0.01;
-                return (
-                  <Pressable
-                    key={r}
-                    onPress={() => setConfig({ readAloudRate: r })}
-                    style={[styles.speedChip, on && styles.speedChipOn]}
-                  >
-                    <Text style={[styles.speedText, on && styles.speedTextOn]}>
-                      {`${r}x`.replace('.', ',')}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </>
-        ) : (
-          <Text style={styles.geminiNote}>
-            A voz do Gemini lê em ritmo profissional e pausado. Ao salvar, o
-            áudio já é gerado e guardado junto do texto — a leitura toca sem
-            pausas.
-          </Text>
-        )}
+        {/* Velocidade — sempre (sistema e Gemini) */}
+        <Text style={styles.speedLabel}>Velocidade da leitura</Text>
+        <View style={styles.speedRow}>
+          {RATE_OPTIONS.map((r) => {
+            const on = Math.abs(r - rate) < 0.01;
+            return (
+              <Pressable
+                key={r}
+                onPress={() => setConfig({ readAloudRate: r })}
+                style={[styles.speedChip, on && styles.speedChipOn]}
+              >
+                <Text style={[styles.speedText, on && styles.speedTextOn]}>
+                  {`${r}x`.replace('.', ',')}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Leitura pausada (visualização / auto-hipnose) */}
+        <View style={styles.chainRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.chainTitle}>Leitura pausada</Text>
+            <Text style={styles.chainSub}>
+              Insere uma pausa entre as frases — bom para visualização mental e
+              auto-hipnose.
+            </Text>
+          </View>
+          <Switch
+            value={paused}
+            onValueChange={(v) => setConfig({ readAloudPaused: v })}
+            trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+            thumbColor={paused ? colors.text.onGold : colors.text.tertiary}
+          />
+        </View>
 
         <View style={styles.chainRow}>
           <View style={{ flex: 1 }}>
@@ -629,6 +637,38 @@ const styles = StyleSheet.create({
   savedDelete: {
     ...typography.small,
     color: colors.accent.danger,
+  },
+  voiceShortcut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bg.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  voiceShortcutLabel: {
+    ...typography.label,
+    color: colors.accent.gold,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  voiceShortcutValue: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+  },
+  voiceShortcutHint: {
+    ...typography.small,
+    color: colors.text.tertiary,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  voiceShortcutArrow: {
+    ...typography.subtitle,
+    color: colors.accent.gold,
+    marginLeft: spacing.md,
   },
   speedLabel: {
     ...typography.label,

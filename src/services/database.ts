@@ -378,6 +378,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN read_aloud_rate REAL NOT NULL DEFAULT 1.0`,
     );
   }
+  if (!colNames.includes('read_aloud_paused')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN read_aloud_paused INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
   if (!colNames.includes('spoken_nudges_enabled')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN spoken_nudges_enabled INTEGER NOT NULL DEFAULT 0`,
@@ -547,6 +552,7 @@ interface UserConfigRow {
   read_aloud_provider: string | null;
   read_aloud_gemini_voice: string | null;
   read_aloud_rate: number | null;
+  read_aloud_paused: number | null;
   sedentary_enabled: number | null;
   sedentary_days: string | null;
   sedentary_start: string | null;
@@ -592,6 +598,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   readAloudProvider: (r.read_aloud_provider ?? 'system') as UserConfig['readAloudProvider'],
   readAloudGeminiVoice: r.read_aloud_gemini_voice ?? 'Aoede',
   readAloudRate: r.read_aloud_rate ?? 1.0,
+  readAloudPaused: (r.read_aloud_paused ?? 0) === 1,
   sedentaryEnabled: (r.sedentary_enabled ?? 0) === 1,
   sedentaryDays: parseDaysOfWeek(r.sedentary_days ?? '1,2,3,4,5'),
   sedentaryStart: r.sedentary_start ?? '09:00',
@@ -649,6 +656,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     readAloudProvider: 'read_aloud_provider',
     readAloudGeminiVoice: 'read_aloud_gemini_voice',
     readAloudRate: 'read_aloud_rate',
+    readAloudPaused: 'read_aloud_paused',
     sedentaryEnabled: 'sedentary_enabled',
     sedentaryDays: 'sedentary_days',
     sedentaryStart: 'sedentary_start',

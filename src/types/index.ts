@@ -123,8 +123,13 @@ export interface UserConfig {
   readAloudProvider: VoiceProvider;
   /** Voz Gemini usada na leitura quando o provedor é 'gemini'. */
   readAloudGeminiVoice: string;
-  /** Velocidade da leitura (voz do sistema). 1.0 = normal. */
+  /** Velocidade da leitura (sistema E Gemini). 1.0 = normal. <1 = mais lento. */
   readAloudRate: number;
+  /**
+   * Leitura PAUSADA (visualização / auto-hipnose): insere uma pequena pausa
+   * entre as frases, deixando a leitura mais lenta e meditativa.
+   */
+  readAloudPaused: boolean;
   /** Nudge de "trabalho sentado": lembra de levantar e mover durante o expediente. */
   sedentaryEnabled: boolean;
   /** Dias com trabalho sentado (0=domingo … 6=sábado, CSV). */

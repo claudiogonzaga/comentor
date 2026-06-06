@@ -368,31 +368,86 @@ export async function previewGeminiVoice(voiceName: string): Promise<void> {
  * (~4000 chars), então textos longos (visualização, oração) precisam ser lidos
  * em sequência. Sem lookbehind (Hermes-safe).
  */
+/**
+ * Fatia o texto em pedaços de até `maxLen`, preferindo as fronteiras de
+ * PARÁGRAFO (linha em branco) e, dentro delas, de FRASE — nunca corta no meio de
+ * uma frase. Um parágrafo só é dividido (por frase) se sozinho passar de maxLen;
+ * uma frase só é cortada à força se sozinha passar de maxLen. Hermes-safe.
+ */
 export function chunkText(text: string, maxLen = 3500): string[] {
   const clean = text.replace(/\r\n/g, '\n').trim();
   if (!clean) return [];
-  if (clean.length <= maxLen) return [clean];
-  const sentences = clean.match(/[^.!?…\n]+[.!?…]*\n*|\n+/g) ?? [clean];
+
+  const paragraphs = clean
+    .split(/\n[ \t]*\n+/)
+    .map((p) => p.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
   const chunks: string[] = [];
   let cur = '';
-  for (const s of sentences) {
-    if (s.length > maxLen) {
-      if (cur.trim()) {
-        chunks.push(cur.trim());
-        cur = '';
+  const flush = () => {
+    if (cur.trim()) chunks.push(cur.trim());
+    cur = '';
+  };
+
+  // Quebra um parágrafo grande demais em frases (e a frase gigante, à força).
+  const splitParagraph = (p: string): string[] => {
+    const out: string[] = [];
+    let buf = '';
+    const sentences = p.match(/[^.!?…]+[.!?…]*\s*/g) ?? [p];
+    for (const s of sentences) {
+      if (s.length > maxLen) {
+        if (buf.trim()) {
+          out.push(buf.trim());
+          buf = '';
+        }
+        for (let i = 0; i < s.length; i += maxLen) out.push(s.slice(i, i + maxLen).trim());
+        continue;
       }
-      for (let i = 0; i < s.length; i += maxLen) chunks.push(s.slice(i, i + maxLen).trim());
+      if ((buf + s).length > maxLen) {
+        if (buf.trim()) out.push(buf.trim());
+        buf = s;
+      } else {
+        buf += s;
+      }
+    }
+    if (buf.trim()) out.push(buf.trim());
+    return out.filter(Boolean);
+  };
+
+  for (const p of paragraphs) {
+    if (p.length > maxLen) {
+      flush();
+      for (const piece of splitParagraph(p)) chunks.push(piece);
       continue;
     }
-    if ((cur + s).length > maxLen) {
-      if (cur.trim()) chunks.push(cur.trim());
-      cur = s;
+    const sep = cur ? '\n\n' : '';
+    if ((cur + sep + p).length > maxLen) {
+      flush();
+      cur = p;
     } else {
-      cur += s;
+      cur += sep + p;
     }
   }
-  if (cur.trim()) chunks.push(cur.trim());
+  flush();
   return chunks.filter(Boolean);
+}
+
+/**
+ * "Leitura pausada" (visualização / auto-hipnose): separa cada FRASE por uma
+ * linha em branco, fazendo o TTS pausar mais entre elas. O chunkText depois
+ * reagrupa essas frases-parágrafo nos pedaços, mantendo as pausas.
+ */
+function addSentencePauses(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
+    .split(/\n[ \t]*\n+/)
+    .map((p) => {
+      const sentences = p.replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]*/g);
+      return sentences ? sentences.map((s) => s.trim()).filter(Boolean).join('\n\n') : p.trim();
+    })
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 interface SpeakLongOptions {
@@ -402,8 +457,10 @@ interface SpeakLongOptions {
   language?: string | null;
   /** Voz Gemini, quando provider === 'gemini'. */
   geminiVoiceName?: string;
-  /** Velocidade (só sistema). 1.0 = normal. */
+  /** Velocidade (sistema e Gemini). 1.0 = normal. <1 = mais lento. */
   rate?: number;
+  /** Leitura pausada: insere pausa entre as frases (visualização/auto-hipnose). */
+  paused?: boolean;
   onDone?: () => void;
   onError?: (e: unknown) => void;
   /** Progresso: pedaço atual (0-based) e total de pedaços. */
@@ -436,7 +493,8 @@ export async function speakLongText(
   opts: SpeakLongOptions = {},
 ): Promise<void> {
   const provider = opts.provider ?? 'system';
-  const chunks = chunkText(text, provider === 'gemini' ? GEMINI_CHUNK_MAX : SYSTEM_CHUNK_MAX);
+  const src = opts.paused ? addSentencePauses(text) : text;
+  const chunks = chunkText(src, provider === 'gemini' ? GEMINI_CHUNK_MAX : SYSTEM_CHUNK_MAX);
   if (chunks.length === 0) return;
   await ensureBackgroundAudio(); // continua tocando com a tela apagada
   const myToken = ++speakToken;
@@ -457,9 +515,14 @@ export async function speakLongText(
  */
 export async function prepareReadAloudAudio(
   text: string,
-  opts: { geminiVoiceName?: string; onProgress?: (done: number, total: number) => void } = {},
+  opts: {
+    geminiVoiceName?: string;
+    paused?: boolean;
+    onProgress?: (done: number, total: number) => void;
+  } = {},
 ): Promise<string | null> {
-  const chunks = chunkText(text, GEMINI_CHUNK_MAX);
+  const src = opts.paused ? addSentencePauses(text) : text;
+  const chunks = chunkText(src, GEMINI_CHUNK_MAX);
   if (chunks.length === 0) return null;
   const { uri } = await synthesizeFullSpeechGemini(
     chunks,
@@ -512,7 +575,7 @@ function readSystemChunks(
  * (token mudou / `stopPlayback`). É a unidade da leitura progressiva: um trecho
  * por vez.
  */
-function playAndWait(uri: string, myToken: number): Promise<void> {
+function playAndWait(uri: string, myToken: number, rate = 1): Promise<void> {
   return new Promise<void>((resolve) => {
     if (myToken !== speakToken) {
       resolve();
@@ -526,6 +589,15 @@ function playAndWait(uri: string, myToken: number): Promise<void> {
       return;
     }
     activeGeminiPlayer = player;
+    // Velocidade da leitura (com correção de tom para não engrossar/afinar a voz).
+    if (rate && Math.abs(rate - 1) > 0.001) {
+      try {
+        player.shouldCorrectPitch = true;
+        player.setPlaybackRate(rate, 'high');
+      } catch {
+        /* nem todo device suporta — segue em velocidade normal */
+      }
+    }
     let finished = false;
     const finish = () => {
       if (finished) return;
@@ -576,7 +648,7 @@ async function speakLongTextGemini(
   const cachedUri = getCachedReadAloudUri(chunks, voice);
   if (cachedUri) {
     opts.onProgress?.(0, 1);
-    await playAndWait(cachedUri, myToken);
+    await playAndWait(cachedUri, myToken, opts.rate ?? 1);
     if (myToken === speakToken) {
       currentlySpeaking = false;
       opts.onDone?.();
@@ -643,7 +715,7 @@ async function speakLongTextGemini(
     }
     if (myToken !== speakToken) return;
     opts.onProgress?.(i, chunks.length); // tocando a parte i+1
-    await playAndWait(uris[i] as string, myToken);
+    await playAndWait(uris[i] as string, myToken, opts.rate ?? 1);
   }
 
   if (myToken !== speakToken) return;
@@ -664,7 +736,7 @@ async function speakLongTextGemini(
  */
 export async function playSavedAudio(
   uri: string,
-  opts: { onDone?: () => void; onError?: (e: unknown) => void } = {},
+  opts: { rate?: number; onDone?: () => void; onError?: (e: unknown) => void } = {},
 ): Promise<void> {
   await ensureBackgroundAudio(); // continua tocando com a tela apagada
   const myToken = ++speakToken;
@@ -672,7 +744,7 @@ export async function playSavedAudio(
   if (myToken !== speakToken) return;
   currentlySpeaking = true;
   try {
-    await playAndWait(uri, myToken);
+    await playAndWait(uri, myToken, opts.rate ?? 1);
     if (myToken === speakToken) {
       currentlySpeaking = false;
       opts.onDone?.();
