@@ -416,6 +416,90 @@ export async function synthesizeSpeechGemini(
   return { uri: file.uri, cached: false };
 }
 
+const NUDGE_PREFIX = 'nudge_';
+
+/**
+ * Prepara o áudio de UMA frase curta de "nudge" na voz do Gemini.
+ *
+ *  - `persist: true` (frases FIXAS, ex.: inspirações): grava um WAV PERSISTENTE
+ *    em `Paths.document` com nome estável por (voz+texto). Sobrevive a reboot —
+ *    obrigatório, pois o BootReceiver nativo re-arma o alarme apontando para esse
+ *    caminho. Chamadas repetidas com o MESMO texto+voz batem no cache
+ *    (`cached:true`) sem gastar token → render-1x de verdade.
+ *  - `persist: false` (texto DINÂMICO/JITAI efêmero): delega a
+ *    `synthesizeSpeechGemini` (cache volátil em `Paths.cache`).
+ *
+ * Lança `GeminiTTSError` em falha (sem chave, cota diária, rede). O chamador faz
+ * o fallback (agendar com o texto → voz do sistema).
+ */
+export async function prepareNudgeAudio(
+  text: string,
+  opts: { voiceName?: string; persist?: boolean; namespace?: string } = {},
+): Promise<{ uri: string; cached: boolean; key: string }> {
+  const voiceName = opts.voiceName || DEFAULT_GEMINI_VOICE;
+  const trimmed = text.trim();
+  if (!trimmed) throw new GeminiTTSError('texto vazio');
+  const key = shortHash(`nudge:${voiceName}:${trimmed}`);
+
+  // Texto dinâmico (JITAI): não persiste — usa o cache volátil do motor.
+  if (!opts.persist) {
+    const r = await synthesizeSpeechGemini(trimmed, voiceName);
+    return { uri: r.uri, cached: r.cached, key };
+  }
+
+  // Frase fixa: WAV persistente com nome estável (sobrevive a reboot). O
+  // `namespace` ('insp', 'med', …) separa as fontes — assim a limpeza de uma
+  // fonte nunca apaga o áudio de outra.
+  const ns = opts.namespace || 'gen';
+  const file = new File(Paths.document, `${NUDGE_PREFIX}${ns}_${key}.wav`);
+  if (file.exists) {
+    return { uri: file.uri, cached: true, key };
+  }
+  const apiKey = await getApiKey();
+  if (!apiKey) {
+    throw new GeminiTTSError('Sem chave do Gemini — configure em "Como você quer usar?"');
+  }
+  const pcm = normalizePcm(await fetchPcm(trimmed, voiceName, apiKey));
+  const wav = pcmToWav(pcm);
+  file.create({ overwrite: true });
+  file.write(wav);
+  return { uri: file.uri, cached: false, key };
+}
+
+/**
+ * Remove WAVs de nudge ÓRFÃOS de um `namespace` ('insp', 'med', …) — os que NÃO
+ * correspondem a nenhuma das `expectedKeys` (ex.: o usuário trocou a voz Gemini,
+ * ou as frases mudaram). Opera SÓ dentro do namespace, então nunca apaga áudio de
+ * outra fonte. Best-effort. Só chamar quando a sincronização COMPLETOU e gerou ao
+ * menos um WAV — senão apagaria áudio ainda válido.
+ */
+export async function cleanupNudgeAudio(
+  namespace: string,
+  expectedKeys: Set<string>,
+): Promise<void> {
+  try {
+    const prefix = `${NUDGE_PREFIX}${namespace}_`;
+    const keep = new Set<string>();
+    for (const k of expectedKeys) keep.add(`${prefix}${k}.wav`);
+    const entries = Paths.document.list();
+    entries
+      .filter(
+        (e): e is File =>
+          e instanceof File && e.name.startsWith(prefix) && e.name.endsWith('.wav'),
+      )
+      .filter((f) => !keep.has(f.name))
+      .forEach((f) => {
+        try {
+          f.delete();
+        } catch {
+          /* ignore */
+        }
+      });
+  } catch {
+    /* limpeza é best-effort */
+  }
+}
+
 /**
  * Limpa áudios de leitura AD-HOC (não salvos), mantendo no máximo `keep` mais
  * recentes. NUNCA apaga áudios amarrados a textos salvos (esses são guardados

@@ -31,6 +31,7 @@ import {
 } from '../services/notifications';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
+import { scheduleAllMedications } from '../services/medications';
 import {
   spokenNudgesAvailable,
   isExactAlarmAllowed,
@@ -696,9 +697,11 @@ export function SettingsScreen() {
                     Falar em voz alta
                   </Text>
                   <Text style={[typography.small, { color: colors.text.secondary }]}>
-                    A Comentora FALA os avisos inspiradores em voz alta (voz do
-                    sistema), mesmo com a tela apagada ou o app fechado. Não gasta
-                    a cota da API.
+                    A Comentora FALA em voz alta os avisos inspiradores E os seus
+                    lembretes (remédio, hábitos), mesmo com a tela apagada ou o app
+                    fechado. Usa a sua voz escolhida em "Sons e Vozes" (a voz do
+                    Gemini é preparada uma vez e reaproveitada; sem voz/cota, cai na
+                    voz do sistema).
                   </Text>
                 </View>
                 <Switch
@@ -709,6 +712,8 @@ export function SettingsScreen() {
                       await setConfig({ spokenNudgesEnabled: next });
                       if (next) {
                         await scheduleInspirationNotifications();
+                        // re-sincroniza as versões faladas dos lembretes também
+                        await scheduleAllMedications();
                         if (!isExactAlarmAllowed()) {
                           Alert.alert(
                             'Permita alarmes exatos',

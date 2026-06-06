@@ -8,6 +8,7 @@ import {
 } from './database';
 import { MED_CATEGORY, ensureChannel, ensureNotificationCategories } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
+import { syncSpokenMedications } from './spokenNudges';
 
 /**
  * Lembretes de medicamentos/suplementos. Cada lembrete habilitado VERIFICA:
@@ -194,6 +195,33 @@ export async function scheduleAllMedications(): Promise<string[]> {
       }
     }
   }
+
+  // Versões FALADAS dos lembretes (voz Gemini cacheada + fallback voz do
+  // sistema), armadas em background. Fecha a intenção de que TODO aviso possa
+  // ser falado, mesmo com a tela apagada. Best-effort, fora do caminho crítico.
+  const spokenItems = meds
+    .filter((med) => med.enabled)
+    .map((med) => {
+      const p = med.time.split(':').map((s) => parseInt(s, 10));
+      const hh = p[0];
+      const mm = p[1] ?? 0;
+      if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+      const dosage = med.dosage?.trim();
+      const text = dosage
+        ? `Hora do seu lembrete: ${med.name}. ${dosage}.`
+        : `Hora do seu lembrete: ${med.name}.`;
+      const days =
+        med.daysOfWeek && med.daysOfWeek.length > 0 ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
+      return {
+        id: med.id,
+        text,
+        hour: Math.min(23, Math.max(0, hh)),
+        minute: Math.min(59, Math.max(0, mm)),
+        daysOfWeek: days,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+  void syncSpokenMedications(spokenItems).catch(() => {});
 
   return ids;
 }
