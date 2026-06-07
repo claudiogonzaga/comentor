@@ -89,6 +89,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     const p = createAudioPlayer({ uri });
     player = p;
     try {
+      p.loop = false; // NUNCA repetir ao chegar no fim (sem loop)
       p.shouldCorrectPitch = true;
       if (rate && Math.abs(rate - 1) > 0.001) p.setPlaybackRate(rate, 'high');
     } catch {
@@ -99,6 +100,13 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       const cur = st?.currentTime ?? 0;
       const dur = st?.duration ?? 0;
       if (st?.didJustFinish) {
+        // PAUSA antes de voltar pro início — senão o seekTo(0) reinicia a fala
+        // (a intenção de tocar persiste) e vira LOOP infinito.
+        try {
+          p.pause();
+        } catch {
+          /* ignore */
+        }
         try {
           p.seekTo(0);
         } catch {
@@ -226,6 +234,15 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
           p.pause();
           set({ status: 'paused' });
         } else {
+          // Se está no fim, recomeça do início ao dar play (replay).
+          const { currentTime, duration } = get();
+          if (duration > 0 && currentTime >= duration - 0.25) {
+            try {
+              p.seekTo(0);
+            } catch {
+              /* ignore */
+            }
+          }
           p.play();
           set({ status: 'playing' });
         }

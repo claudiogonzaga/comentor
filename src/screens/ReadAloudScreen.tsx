@@ -197,7 +197,12 @@ export function ReadAloudScreen() {
   useEffect(() => {
     if (finishedTick === prevFinishRef.current) return;
     prevFinishRef.current = finishedTick;
-    if (breathingRef.current) setTimeout(() => navigation.navigate('Breathing'), 400);
+    if (breathingRef.current) {
+      // PARA a leitura antes de ir pra respiração — senão o player global
+      // continuaria tocando junto com o som da respiração.
+      useReadAloud.getState().stop();
+      setTimeout(() => navigation.navigate('Breathing'), 400);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedTick]);
 
