@@ -147,8 +147,10 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         }
         nav.navigate('Home');
       } else if (type.startsWith('med:')) {
-        // Medication/supplement reminders carry "Já tomei 💊" / "Lembrar
-        // depois". Resolve the action, then open the Medications screen.
+        // Lembretes de remédio/hábito trazem "Já tomei 💊" / "Lembrar depois".
+        // Resolve a ação e vai para a HOME (lista de TODOs/hábitos), NÃO para a
+        // tela de gerenciar/editar lembretes — tocar em "Já fiz" e cair na tela
+        // de edição era confuso (o usuário tinha que voltar pra ver o item feito).
         if (action === MED_DONE_ACTION && typeof data.medId === 'number') {
           try {
             await confirmMedication(data.medId);
@@ -162,7 +164,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
             /* still navigate even if it fails */
           }
         }
-        nav.navigate('Reminders');
+        nav.navigate('Home');
       }
     };
 
