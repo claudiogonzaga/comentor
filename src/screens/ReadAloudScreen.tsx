@@ -15,14 +15,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
+import { AudioScrubber } from '../components/AudioScrubber';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
-import {
-  prepareReadAloudAudio,
-  speakLongText,
-  playSavedAudio,
-  stopSpeaking,
-} from '../services/voice';
+import { useReadAloud } from '../store/useReadAloud';
+import { prepareReadAloudAudio, isReadAloudCached } from '../services/voice';
 import {
   createReadAloudText,
   deleteReadAloudText,
@@ -35,11 +32,18 @@ import type { ReadAloudText } from '../types';
 
 const RATE_OPTIONS = [0.75, 0.9, 1.0, 1.15, 1.3];
 
+/** Formata segundos como M:SS. */
+function fmtTime(s: number): string {
+  if (!Number.isFinite(s) || s < 0) s = 0;
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
 /** Extrai uma mensagem legível de um erro (para mostrar o motivo real). */
 function errMsg(e: unknown): string {
   const daily = !!(e as { dailyQuota?: boolean })?.dailyQuota;
   const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
-  // Cota DIÁRIA (RPD) esgotada: esperar minutos NÃO resolve — só o reset diário.
   if (daily || /cota di[áa]ria|daily/i.test(raw)) {
     return 'cota DIÁRIA da API esgotada (Nível 1 ≈ 100 leituras/dia no projeto). Reseta à meia-noite no horário do Pacífico (~4-5h da manhã no Brasil). Por enquanto, leio com a voz do sistema.';
   }
@@ -66,10 +70,50 @@ function looksBinary(s: string): boolean {
   return bad / Math.max(1, sample.length) > 0.1;
 }
 
+const PREPARING_MSG =
+  'Vou preparar o áudio — pode levar alguns minutos na 1ª vez. Você pode usar o ' +
+  'app normalmente e até sair desta tela; quando ficar pronto, começo a ler em ' +
+  'voz alta (mesmo em outra tela). Depois fica salvo e toca na hora.';
+
 /**
- * Tela "Leia para mim": cola/sobe um texto grande (visualização mental,
- * auto-hipnose, oração) e a Comentora lê em voz alta — com a mesma seleção de
- * voz do chat (sistema ou Gemini), velocidade ajustável e textos salvos.
+ * Barra do player (▶/⏸/⏹ + tempo + barra arrastável). Subcomponente próprio para
+ * que só ELE re-renderize a cada atualização de tempo (~2x/s), não a tela toda.
+ */
+function PlayerBar() {
+  const currentTime = useReadAloud((s) => s.currentTime);
+  const duration = useReadAloud((s) => s.duration);
+  const playing = useReadAloud((s) => s.status === 'playing');
+  const toggle = useReadAloud((s) => s.toggle);
+  const seek = useReadAloud((s) => s.seek);
+  const stop = useReadAloud((s) => s.stop);
+  const progress = duration > 0 ? currentTime / duration : 0;
+  return (
+    <View style={styles.player}>
+      <View style={styles.playerControls}>
+        <Pressable onPress={stop} hitSlop={8} style={styles.ctrlBtn}>
+          <Text style={styles.ctrlIcon}>■</Text>
+        </Pressable>
+        <Pressable onPress={toggle} hitSlop={8} style={[styles.ctrlBtn, styles.ctrlMain]}>
+          <Text style={styles.ctrlMainIcon}>{playing ? '❚❚' : '▶'}</Text>
+        </Pressable>
+      </View>
+      <View style={styles.playerBar}>
+        <View style={styles.timeRow}>
+          <Text style={styles.time}>{fmtTime(currentTime)}</Text>
+          <Text style={styles.time}>{fmtTime(duration)}</Text>
+        </View>
+        <AudioScrubber progress={progress} onSeek={seek} disabled={duration <= 0} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Tela "Leia para mim": cola/sobe um texto grande (visualização, auto-hipnose,
+ * oração) e a Comentora lê em voz alta. Na voz do Gemini, gera o áudio COMPLETO
+ * (em background — pode sair da tela) e toca num player com ▶/⏸/⏹ + barra
+ * ARRASTÁVEL. Na voz do sistema, lê direto (sem barra). A leitura roda num store
+ * GLOBAL, então continua tocando em qualquer tela.
  */
 export function ReadAloudScreen() {
   const navigation = useNavigation<any>();
@@ -77,20 +121,25 @@ export function ReadAloudScreen() {
   const autostart = !!route.params?.autostart;
   const { config, setConfig } = useAppStore();
   const [text, setText] = useState('');
-  const [reading, setReading] = useState(false);
-  const [progress, setProgress] = useState<{ i: number; total: number } | null>(null);
   const [saved, setSaved] = useState<ReadAloudText[]>([]);
   // "Em seguida, fazer o exercício de respiração" — encadeia as atividades.
   const [thenBreathing, setThenBreathing] = useState(false);
-  // Progresso da geração do áudio Gemini (só na 1ª vez).
-  const [synth, setSynth] = useState<{ done: number; total: number } | null>(null);
   const [savingAudio, setSavingAudio] = useState(false);
+  const [saveGen, setSaveGen] = useState<{ done: number; total: number } | null>(null);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const textRef = useRef('');
   const autostartedRef = useRef(false);
+  const breathingRef = useRef(thenBreathing);
+  breathingRef.current = thenBreathing;
 
-  // Voz GLOBAL do app (a mesma do chat) — o "Leia para mim" não tem mais voz
-  // própria. O usuário troca a voz em "Sons e Vozes" (atalho na tela).
+  // Estado da leitura GLOBAL (continua entre telas).
+  const status = useReadAloud((s) => s.status);
+  const gen = useReadAloud((s) => s.gen);
+  const isGemini = useReadAloud((s) => s.isGemini);
+  const raError = useReadAloud((s) => s.error);
+  const finishedTick = useReadAloud((s) => s.finishedTick);
+
+  // Voz GLOBAL do app (a mesma do chat).
   const provider = config?.voiceProvider ?? 'system';
   const geminiVoiceName = config?.geminiVoiceName ?? 'Aoede';
   const voiceId = config?.voiceId ?? null;
@@ -110,8 +159,8 @@ export function ReadAloudScreen() {
     }
   }, []);
 
-  // Carrega o rascunho salvo (para a sequência "respiração → leitura" funcionar
-  // sem digitar de novo) e persiste ao sair.
+  // Carrega o rascunho salvo e persiste ao sair. NÃO para a leitura ao sair —
+  // ela é global e deve continuar tocando em outra tela.
   useEffect(() => {
     reloadSaved();
     (async () => {
@@ -125,10 +174,32 @@ export function ReadAloudScreen() {
       }
     })();
     return () => {
-      stopSpeaking();
       setKV('read_aloud_draft', textRef.current).catch(() => {});
     };
   }, [reloadSaved]);
+
+  // Mudar a velocidade aplica na leitura em andamento (no-op se nada tocando).
+  useEffect(() => {
+    useReadAloud.getState().setRate(rate);
+  }, [rate]);
+
+  // Erro da geração/leitura → mostra e limpa (se a tela estiver aberta).
+  useEffect(() => {
+    if (raError) {
+      Alert.alert('Leitura', raError);
+      useReadAloud.getState().clearError();
+    }
+  }, [raError]);
+
+  // Término NATURAL da leitura → se marcado, encadeia a respiração (só dispara
+  // com a tela aberta; em outra tela, não puxa o usuário pra cá).
+  const prevFinishRef = useRef(finishedTick);
+  useEffect(() => {
+    if (finishedTick === prevFinishRef.current) return;
+    prevFinishRef.current = finishedTick;
+    if (breathingRef.current) setTimeout(() => navigation.navigate('Breathing'), 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedTick]);
 
   const handleUpload = async () => {
     try {
@@ -154,19 +225,16 @@ export function ReadAloudScreen() {
     }
   };
 
-  // Salva o texto na lista E (na voz Gemini) já gera e guarda o áudio, para a
-  // leitura depois tocar sem pausas. DEDUP: se o MESMO texto já está salvo (e,
-  // na voz Gemini, já tem áudio na mesma voz), não cria duplicata nem regera.
+  // Salva o texto na lista E (na voz Gemini) já gera e guarda o áudio. DEDUP.
   const handleSave = async () => {
     const t = text.trim();
     if (!t) return;
     Keyboard.dismiss();
     setKV('read_aloud_draft', text).catch(() => {});
     const title = (t.split('\n')[0] || t).slice(0, 48).trim() || 'Sem título';
-    const voice = geminiVoiceName; // voz global do app
+    const voice = geminiVoiceName;
     const existing = saved.find((s) => s.content.trim() === t);
 
-    // Voz do sistema: não há áudio a gerar.
     if (provider !== 'gemini') {
       if (existing) {
         Alert.alert('Já está salvo', 'Esse texto já está na sua lista.');
@@ -185,7 +253,6 @@ export function ReadAloudScreen() {
       return;
     }
 
-    // Voz Gemini, e já existe com áudio NA MESMA VOZ → nada a (re)gerar.
     if (existing?.audioUri && existing.audioVoice === voice) {
       Alert.alert(
         'Já está salvo',
@@ -194,7 +261,6 @@ export function ReadAloudScreen() {
       return;
     }
 
-    // Reaproveita o registro existente (sem duplicar) ou cria um novo.
     setSavingAudio(true);
     let targetId: number;
     try {
@@ -211,12 +277,12 @@ export function ReadAloudScreen() {
       return;
     }
 
-    setSynth({ done: 0, total: 1 });
+    setSaveGen({ done: 0, total: 1 });
     try {
       const uri = await prepareReadAloudAudio(t, {
         geminiVoiceName: voice,
         paused,
-        onProgress: (done, total) => setSynth({ done, total }),
+        onProgress: (done, total) => setSaveGen({ done, total }),
       });
       if (uri) await updateReadAloudTextAudio(targetId, uri, voice);
       await reloadSaved();
@@ -230,7 +296,7 @@ export function ReadAloudScreen() {
         `Salvei o texto, mas não consegui gerar o áudio Gemini: ${errMsg(e)}\n\nO áudio é gerado na 1ª leitura.`,
       );
     } finally {
-      setSynth(null);
+      setSaveGen(null);
       setSavingAudio(false);
     }
   };
@@ -249,93 +315,44 @@ export function ReadAloudScreen() {
     ]);
   };
 
-  // Lê um texto (gerando progressivamente na voz Gemini, ou direto no sistema).
-  const playContent = (raw: string) => {
+  // Dispara a leitura de um texto (gera em background na voz Gemini).
+  const startRead = (raw: string, title: string) => {
     const t = raw.trim();
     if (!t) return;
     Keyboard.dismiss();
-    setReading(true);
-    setProgress(null);
-    setSynth(null);
-    speakLongText(t, {
-      provider,
-      voiceId,
-      language: voiceLanguage,
-      geminiVoiceName,
-      rate,
-      paused,
-      onSynthProgress: (done, total) => setSynth({ done, total }),
-      onProgress: (i, total) => {
-        setSynth(null);
-        setProgress({ i: i + 1, total });
-      },
-      onFallback: (e) => {
-        // O Gemini falhou e a leitura caiu para a voz do sistema — avisa o motivo.
-        setSynth(null);
-        Alert.alert(
-          'Voz Gemini indisponível',
-          `Lendo com a voz do sistema porque a voz Gemini falhou: ${errMsg(e)}`,
-        );
-      },
-      onDone: () => {
-        setReading(false);
-        setProgress(null);
-        setSynth(null);
-        // Encadeamento: ao terminar a leitura, vai para a respiração (que já
-        // começa sozinha). Pequeno atraso para o áudio liberar.
-        if (thenBreathing) {
-          setTimeout(() => navigation.navigate('Breathing'), 400);
-        }
-      },
-      onError: () => {
-        setReading(false);
-        setProgress(null);
-        setSynth(null);
-        Alert.alert(
-          'Não consegui ler',
-          provider === 'gemini'
-            ? 'A voz Gemini falhou (verifique a chave da API e a cota). Tente a voz do sistema.'
-            : 'Algo deu errado ao ler o texto.',
-        );
-      },
-    });
-  };
-
-  const handlePlay = () => {
-    setKV('read_aloud_draft', text).catch(() => {});
-    playContent(text);
-  };
-
-  // Toca um texto SALVO: se já tem áudio guardado, toca direto (instantâneo, sem
-  // gerar nem gastar token); senão, carrega no editor e gera/toca progressivamente.
-  const handlePlaySaved = async (item: ReadAloudText) => {
-    setText(item.content);
-    if (item.audioUri) {
-      Keyboard.dismiss();
-      setReading(true);
-      setProgress(null);
-      setSynth(null);
-      await playSavedAudio(item.audioUri, {
-        rate,
-        onDone: () => {
-          setReading(false);
-          if (thenBreathing) setTimeout(() => navigation.navigate('Breathing'), 400);
-        },
-        onError: () => {
-          // Áudio sumiu/ilegível → gera de novo a partir do conteúdo.
-          playContent(item.content);
-        },
-      });
+    const ra = useReadAloud.getState();
+    if (provider === 'gemini') {
+      if (!isReadAloudCached(t, { geminiVoiceName, paused })) {
+        Alert.alert('Preparando o áudio', PREPARING_MSG, [{ text: 'Ok' }]);
+      }
+      void ra.startGemini(t, title, { provider: 'gemini', geminiVoiceName, paused, rate });
     } else {
-      playContent(item.content);
+      ra.startSystem(t, title, {
+        provider: 'system',
+        voiceId,
+        language: voiceLanguage,
+        rate,
+        paused,
+      });
     }
   };
 
-  const handleStop = async () => {
-    await stopSpeaking();
-    setReading(false);
-    setProgress(null);
-    setSynth(null);
+  const titleFor = (t: string) => (t.split('\n')[0] || t).slice(0, 40).trim() || 'Leitura';
+
+  const handlePlay = () => {
+    setKV('read_aloud_draft', text).catch(() => {});
+    startRead(text, titleFor(text.trim()));
+  };
+
+  // Texto SALVO: se já tem áudio guardado, toca direto (instantâneo); senão gera.
+  const handlePlaySaved = (item: ReadAloudText) => {
+    setText(item.content);
+    if (item.audioUri) {
+      Keyboard.dismiss();
+      void useReadAloud.getState().playSavedUri(item.audioUri, item.title || 'Leitura', rate);
+    } else {
+      startRead(item.content, item.title || titleFor(item.content.trim()));
+    }
   };
 
   // Início automático quando a tela é aberta encadeada (respiração → leitura).
@@ -347,15 +364,13 @@ export function ReadAloudScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autostart, draftLoaded, text]);
 
+  const busy = status === 'generating' || status === 'playing' || status === 'paused';
+  const showPlayer = (status === 'playing' || status === 'paused') && isGemini;
+
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => {
-            stopSpeaking();
-            navigation.goBack();
-          }}
-        >
+        <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.back}>‹ Voltar</Text>
         </Pressable>
         <Text style={[typography.subtitle, { color: colors.text.primary }]}>Leia para mim</Text>
@@ -365,8 +380,8 @@ export function ReadAloudScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
           Cole ou importe um texto — visualização, oração, auto-hipnose — e a
-          Comentora lê em voz alta. Use a voz do Gemini para uma leitura mais
-          profissional e pausada.
+          Comentora lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
+          para voltar/avançar, e você pode sair da tela enquanto o áudio é gerado.
         </Text>
 
         <TextInput
@@ -388,14 +403,16 @@ export function ReadAloudScreen() {
           )}
         </View>
 
-        <Button
-          label="Enviar arquivo"
-          variant="secondary"
-          onPress={handleUpload}
-        />
+        <Button label="Enviar arquivo" variant="secondary" onPress={handleUpload} />
         <View style={{ height: spacing.sm }} />
         <Button
-          label={savingAudio ? 'Salvando…' : 'Salvar e gerar áudio'}
+          label={
+            savingAudio
+              ? saveGen
+                ? `Gerando ${saveGen.done}/${saveGen.total}…`
+                : 'Salvando…'
+              : 'Salvar e gerar áudio'
+          }
           variant="secondary"
           onPress={handleSave}
           loading={savingAudio}
@@ -510,18 +527,20 @@ export function ReadAloudScreen() {
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        {synth ? (
-          <Text style={styles.progress}>
-            Preparando o áudio… {synth.done}/{synth.total} · começa a tocar já já e o
-            resto é gerado enquanto lê (depois fica salvo e toca na hora)
-          </Text>
-        ) : progress ? (
-          <Text style={styles.progress}>
-            Lendo… parte {progress.i} de {progress.total}
-          </Text>
-        ) : null}
-        {reading ? (
-          <Button label="Parar" variant="secondary" onPress={handleStop} />
+        {status === 'generating' ? (
+          <>
+            <Text style={styles.progress}>
+              {gen
+                ? `Preparando o áudio… ${gen.done}/${gen.total} · pode sair desta tela; começo a ler quando ficar pronto`
+                : 'Preparando a leitura…'}
+            </Text>
+            <Button label="Parar" variant="secondary" onPress={() => useReadAloud.getState().stop()} />
+          </>
+        ) : showPlayer ? (
+          <PlayerBar />
+        ) : busy ? (
+          // Leitura pela voz do sistema (sem barra)
+          <Button label="Parar" variant="secondary" onPress={() => useReadAloud.getState().stop()} />
         ) : (
           <Button
             label="▶  Leia para mim"
@@ -703,12 +722,6 @@ const styles = StyleSheet.create({
     color: colors.accent.gold,
     fontWeight: '700',
   },
-  geminiNote: {
-    ...typography.small,
-    color: colors.text.tertiary,
-    lineHeight: 17,
-    marginBottom: spacing.lg,
-  },
   chainRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -740,5 +753,49 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: spacing.sm,
+  },
+  player: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  playerControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  ctrlBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  ctrlIcon: {
+    color: colors.text.secondary,
+    fontSize: 16,
+  },
+  ctrlMain: {
+    borderColor: colors.accent.gold,
+    backgroundColor: 'rgba(244,197,83,0.12)',
+  },
+  ctrlMainIcon: {
+    color: colors.accent.gold,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  playerBar: {
+    flex: 1,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  time: {
+    ...typography.small,
+    color: colors.text.tertiary,
+    fontVariant: ['tabular-nums'],
   },
 });

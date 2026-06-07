@@ -65,7 +65,7 @@ let activePlaybackFinish: (() => void) | null = null;
 // `shouldPlayInBackground: true` faz o player não pausar ao sair do primeiro
 // plano. Idempotente — basta uma vez por sessão do app.
 let backgroundAudioReady = false;
-async function ensureBackgroundAudio(): Promise<void> {
+export async function ensureBackgroundAudio(): Promise<void> {
   if (backgroundAudioReady) return;
   try {
     await setAudioModeAsync({
@@ -530,6 +530,21 @@ export async function prepareReadAloudAudio(
     opts.onProgress,
   );
   return uri;
+}
+
+/**
+ * O áudio COMPLETO desta leitura (mesmo texto + voz + pausa) já está em cache?
+ * Usado para decidir se mostramos o aviso "vai levar alguns minutos" (só quando
+ * de fato vai GERAR) ou se já podemos tocar na hora.
+ */
+export function isReadAloudCached(
+  text: string,
+  opts: { geminiVoiceName?: string; paused?: boolean } = {},
+): boolean {
+  const src = opts.paused ? addSentencePauses(text) : text;
+  const chunks = chunkText(src, GEMINI_CHUNK_MAX);
+  if (chunks.length === 0) return false;
+  return getCachedReadAloudUri(chunks, opts.geminiVoiceName ?? activeGeminiVoiceName) != null;
 }
 
 /** Lê os pedaços `chunks` a partir de `startIdx` com a voz do sistema. */

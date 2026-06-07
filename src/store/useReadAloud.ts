@@ -1,0 +1,270 @@
+import { create } from 'zustand';
+import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
+import {
+  prepareReadAloudAudio,
+  speakLongText,
+  stopSpeaking,
+  ensureBackgroundAudio,
+} from '../services/voice';
+
+export type ReadAloudStatus = 'idle' | 'generating' | 'playing' | 'paused';
+
+export interface ReadAloudStartOpts {
+  provider: 'system' | 'gemini';
+  geminiVoiceName?: string;
+  voiceId?: string | null;
+  language?: string | null;
+  paused?: boolean;
+  rate?: number;
+}
+
+interface ReadAloudState {
+  status: ReadAloudStatus;
+  /** Progresso da geração do áudio Gemini (só na 1ª vez). */
+  gen: { done: number; total: number } | null;
+  currentTime: number;
+  duration: number;
+  /** Rótulo curto do que está tocando (1ª linha do texto). */
+  title: string;
+  /** Voz Gemini (tem arquivo → scrubber). Sistema = sem barra. */
+  isGemini: boolean;
+  error: string | null;
+  /** Incrementa a cada término NATURAL (para encadear respiração, etc.). */
+  finishedTick: number;
+
+  startGemini: (text: string, title: string, opts: ReadAloudStartOpts) => Promise<void>;
+  startSystem: (text: string, title: string, opts: ReadAloudStartOpts) => void;
+  playSavedUri: (uri: string, title: string, rate: number) => Promise<void>;
+  toggle: () => void;
+  stop: () => void;
+  seek: (fraction: number) => void;
+  setRate: (rate: number) => void;
+  clearError: () => void;
+}
+
+// Player e assinatura em nível de MÓDULO (não de componente): a leitura continua
+// mesmo que o usuário saia da tela "Leia para mim".
+let player: AudioPlayer | null = null;
+let sub: { remove: () => void } | null = null;
+// Token de geração/reprodução: cada start/stop o incrementa; trabalho de uma
+// geração antiga (que ainda estava gerando) é descartado quando o token muda.
+let token = 0;
+
+function teardownPlayer() {
+  try {
+    sub?.remove();
+  } catch {
+    /* ignore */
+  }
+  sub = null;
+  try {
+    player?.remove();
+  } catch {
+    /* ignore */
+  }
+  player = null;
+}
+
+function formatErr(e: unknown): string {
+  const daily = !!(e as { dailyQuota?: boolean })?.dailyQuota;
+  if (daily) {
+    return 'cota DIÁRIA da API esgotada (≈100 leituras/dia). Reseta à meia-noite no Pacífico (~4-5h no Brasil). Tente a voz do sistema em “Sons e Vozes”.';
+  }
+  const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  const low = raw.toLowerCase();
+  if (low.includes('429') || low.includes('quota') || low.includes('rate')) {
+    return 'limite POR MINUTO da API atingido — aguarde um pouquinho e tente de novo.';
+  }
+  if (low.includes('chave') || low.includes('api key') || low.includes('api_key')) {
+    return 'problema com a chave da API.';
+  }
+  return raw || 'não consegui gerar o áudio.';
+}
+
+export const useReadAloud = create<ReadAloudState>((set, get) => {
+  const attachAndPlay = async (uri: string, rate: number, mine: number) => {
+    await ensureBackgroundAudio();
+    if (mine !== token) return; // um start mais novo assumiu durante o await
+    teardownPlayer();
+    const p = createAudioPlayer({ uri });
+    player = p;
+    try {
+      p.shouldCorrectPitch = true;
+      if (rate && Math.abs(rate - 1) > 0.001) p.setPlaybackRate(rate, 'high');
+    } catch {
+      /* nem todo device aplica rate */
+    }
+    sub = p.addListener('playbackStatusUpdate', (st) => {
+      if (player !== p) return; // status de um player já substituído
+      const cur = st?.currentTime ?? 0;
+      const dur = st?.duration ?? 0;
+      if (st?.didJustFinish) {
+        try {
+          p.seekTo(0);
+        } catch {
+          /* ignore */
+        }
+        set((s) => ({
+          status: 'paused',
+          currentTime: 0,
+          duration: dur,
+          finishedTick: s.finishedTick + 1,
+        }));
+        return;
+      }
+      set({ currentTime: cur, duration: dur, status: st?.playing ? 'playing' : 'paused' });
+    });
+    set({ currentTime: 0, status: 'playing' });
+    try {
+      p.play();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return {
+    status: 'idle',
+    gen: null,
+    currentTime: 0,
+    duration: 0,
+    title: '',
+    isGemini: false,
+    error: null,
+    finishedTick: 0,
+
+    // Voz GEMINI: gera o áudio COMPLETO (pode levar minutos) e toca. Roda em
+    // nível de módulo → o usuário pode sair da tela; a leitura começa quando
+    // ficar pronta, em qualquer tela.
+    startGemini: async (text, title, opts) => {
+      const t = text.trim();
+      if (!t) return;
+      const mine = ++token;
+      await stopSpeaking();
+      teardownPlayer();
+      set({
+        status: 'generating',
+        isGemini: true,
+        title,
+        gen: { done: 0, total: 1 },
+        currentTime: 0,
+        duration: 0,
+        error: null,
+      });
+      try {
+        const uri = await prepareReadAloudAudio(t, {
+          geminiVoiceName: opts.geminiVoiceName,
+          paused: opts.paused,
+          onProgress: (done, total) => {
+            if (mine === token) set({ gen: { done, total } });
+          },
+        });
+        if (mine !== token) return; // parado/superado no meio
+        set({ gen: null });
+        if (uri) await attachAndPlay(uri, opts.rate ?? 1, mine);
+        else set({ status: 'idle' });
+      } catch (e) {
+        if (mine !== token) return;
+        set({ status: 'idle', gen: null, error: formatErr(e) });
+      }
+    },
+
+    // Voz do SISTEMA: lê direto (expo-speech; também continua entre telas). Sem
+    // arquivo/scrubber.
+    startSystem: (text, title, opts) => {
+      const t = text.trim();
+      if (!t) return;
+      const mine = ++token;
+      stopSpeaking();
+      teardownPlayer();
+      set({
+        status: 'playing',
+        isGemini: false,
+        title,
+        gen: null,
+        currentTime: 0,
+        duration: 0,
+        error: null,
+      });
+      speakLongText(t, {
+        provider: 'system',
+        voiceId: opts.voiceId,
+        language: opts.language,
+        rate: opts.rate,
+        paused: opts.paused,
+        onDone: () => {
+          if (mine === token) set((s) => ({ status: 'idle', finishedTick: s.finishedTick + 1 }));
+        },
+        onError: () => {
+          if (mine === token) set({ status: 'idle', error: 'não consegui ler o texto.' });
+        },
+      });
+    },
+
+    // Texto SALVO com áudio pronto → toca direto (instantâneo).
+    playSavedUri: async (uri, title, rate) => {
+      const mine = ++token;
+      await stopSpeaking();
+      teardownPlayer();
+      if (mine !== token) return;
+      set({
+        status: 'generating',
+        isGemini: true,
+        title,
+        gen: null,
+        currentTime: 0,
+        duration: 0,
+        error: null,
+      });
+      await attachAndPlay(uri, rate, mine);
+    },
+
+    toggle: () => {
+      const p = player;
+      if (!p) return;
+      try {
+        if (get().status === 'playing') {
+          p.pause();
+          set({ status: 'paused' });
+        } else {
+          p.play();
+          set({ status: 'playing' });
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+
+    stop: () => {
+      token++;
+      stopSpeaking();
+      teardownPlayer();
+      set({ status: 'idle', gen: null, currentTime: 0, duration: 0, title: '' });
+    },
+
+    // Arrastar a barra: pula no tempo SEM mudar play/pause (arrastar pausado
+    // continua pausado).
+    seek: (fraction) => {
+      const p = player;
+      const { duration } = get();
+      if (!p || duration <= 0) return;
+      try {
+        p.seekTo(Math.max(0, Math.min(1, fraction)) * duration);
+      } catch {
+        /* ignore */
+      }
+    },
+
+    setRate: (rate) => {
+      const p = player;
+      if (!p) return;
+      try {
+        p.shouldCorrectPitch = true;
+        p.setPlaybackRate(rate && rate > 0 ? rate : 1, 'high');
+      } catch {
+        /* ignore */
+      }
+    },
+
+    clearError: () => set({ error: null }),
+  };
+});
