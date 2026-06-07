@@ -33,6 +33,8 @@ interface SpokenNudgesNative {
   cancelAll(): Promise<void>;
   scheduledIds(): string[];
   rearmAll(): Promise<void>;
+  setHeadphonesOnly(enabled: boolean): void;
+  isHeadphonesConnected(): boolean;
 }
 
 let native: SpokenNudgesNative | null = null;
@@ -86,6 +88,27 @@ export function requestIgnoreBatteryOptimizations(): void {
     native?.requestIgnoreBatteryOptimizations();
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * Define a preferência "só falar com fone de ouvido". Mirror para o nativo (que
+ * lê na hora do disparo, sem o JS). Chamar quando a config muda e no init.
+ */
+export function setSpokenHeadphonesOnly(enabled: boolean): void {
+  try {
+    native?.setHeadphonesOnly(enabled);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Há um fone de ouvido conectado AGORA? (para a UI explicar o estado). */
+export function isHeadphonesConnected(): boolean {
+  try {
+    return native ? native.isHeadphonesConnected() : false;
+  } catch {
+    return false;
   }
 }
 

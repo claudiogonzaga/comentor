@@ -74,5 +74,16 @@ class SpokenNudgesModule : Module() {
     AsyncFunction("rearmAll") {
       SpokenScheduler.rearmAll(context)
     }
+
+    // "Só falar com fone": guarda a preferência onde o serviço nativo a lê na
+    // hora do disparo (sem o JS rodar). O JS chama isto quando a config muda.
+    Function("setHeadphonesOnly") { enabled: Boolean ->
+      SpokenStore.setHeadphonesOnly(context, enabled)
+    }
+
+    // Estado AGORA: há fone conectado? (para a UI refletir/explicar).
+    Function("isHeadphonesConnected") {
+      headphonesConnected(context)
+    }
   }
 }

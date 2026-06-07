@@ -68,6 +68,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       dnd_bypass_enabled INTEGER NOT NULL DEFAULT 0,
       voice_nudges_enabled INTEGER NOT NULL DEFAULT 0,
       spoken_nudges_enabled INTEGER NOT NULL DEFAULT 0,
+      spoken_headphones_only INTEGER NOT NULL DEFAULT 0,
       inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0,
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
@@ -388,6 +389,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN spoken_nudges_enabled INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  if (!colNames.includes('spoken_headphones_only')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN spoken_headphones_only INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -542,6 +548,7 @@ interface UserConfigRow {
   dnd_bypass_enabled: number | null;
   voice_nudges_enabled: number | null;
   spoken_nudges_enabled: number | null;
+  spoken_headphones_only: number | null;
   inspiration_mode_enabled: number | null;
   inspiration_per_day: number | null;
   breathing_sound_id: string | null;
@@ -588,6 +595,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
   spokenNudgesEnabled: (r.spoken_nudges_enabled ?? 0) === 1,
+  spokenHeadphonesOnly: (r.spoken_headphones_only ?? 0) === 1,
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
   inspirationPerDay: r.inspiration_per_day ?? 6,
   breathingSoundId: r.breathing_sound_id ?? 'cello',
@@ -646,6 +654,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     dndBypassEnabled: 'dnd_bypass_enabled',
     voiceNudgesEnabled: 'voice_nudges_enabled',
     spokenNudgesEnabled: 'spoken_nudges_enabled',
+    spokenHeadphonesOnly: 'spoken_headphones_only',
     inspirationModeEnabled: 'inspiration_mode_enabled',
     inspirationPerDay: 'inspiration_per_day',
     breathingSoundId: 'breathing_sound_id',

@@ -22,9 +22,21 @@ data class SpokenAlarm(
 object SpokenStore {
   private const val PREFS = "spoken_nudges_store"
   private const val KEY = "alarms"
+  private const val KEY_HEADPHONES_ONLY = "headphones_only"
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+  /**
+   * Preferência GLOBAL "só falar com fone de ouvido". Fica aqui (SharedPreferences)
+   * porque o serviço nativo a lê na hora do disparo, sem o JS rodar (alarme/boot).
+   */
+  fun getHeadphonesOnly(ctx: Context): Boolean =
+    prefs(ctx).getBoolean(KEY_HEADPHONES_ONLY, false)
+
+  fun setHeadphonesOnly(ctx: Context, value: Boolean) {
+    prefs(ctx).edit().putBoolean(KEY_HEADPHONES_ONLY, value).apply()
+  }
 
   fun all(ctx: Context): List<SpokenAlarm> {
     val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"

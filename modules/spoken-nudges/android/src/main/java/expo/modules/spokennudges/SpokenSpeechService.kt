@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -32,6 +34,14 @@ class SpokenSpeechService : Service() {
   private var player: MediaPlayer? = null
   private var tts: TextToSpeech? = null
   private var wakeLock: PowerManager.WakeLock? = null
+  // Roteia a fala pro fone (USAGE_MEDIA) quando há fone que carrega MÍDIA; senão
+  // alto-falante (USAGE_ALARM). @Volatile: lido no callback de init do TTS (outra thread).
+  @Volatile private var routeToHeadphones = false
+  // O dispositivo de fone detectado (para cravar a saída via setPreferredDevice).
+  private var preferredDevice: AudioDeviceInfo? = null
+  // Se subimos o volume de MÍDIA (estava 0) para o aviso ser ouvido no fone,
+  // guardamos o valor original para restaurar ao terminar.
+  private var savedMusicVolume = -1
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -41,6 +51,25 @@ class SpokenSpeechService : Service() {
     val body = intent?.getStringExtra("body") ?: ""
 
     startInForeground(title, body)
+
+    // Roteamento de áudio: detecta um fone que carregue MÍDIA (fio/BT-A2DP/USB/BLE
+    // — SCO de telefonia NÃO conta, pois mídia não sai por ele e cairia no alto-
+    // falante). Com fone → som sai pelo fone (USAGE_MEDIA + setPreferredDevice);
+    // sem fone → USAGE_ALARM (alto-falante, alto). E se o usuário marcou "só com
+    // fone" e não há fone de mídia → não fala (a notificação paralela já aparece).
+    val device = mediaHeadphoneDevice(this)
+    routeToHeadphones = device != null
+    preferredDevice = device
+    if (SpokenStore.getHeadphonesOnly(this) && device == null) {
+      Log.d(SpokenScheduler.TAG, "service: 'só com fone' ligado e sem fone — não fala")
+      stopEverything()
+      return START_NOT_STICKY
+    }
+
+    // Com fone, o áudio sai como MÍDIA (STREAM_MUSIC). Se a mídia estiver no zero,
+    // o aviso ficaria mudo — subimos temporariamente e restauramos ao terminar.
+    if (routeToHeadphones) ensureMediaAudible()
+
     acquireWake()
 
     if (!audioPath.isNullOrEmpty()) {
@@ -58,7 +87,15 @@ class SpokenSpeechService : Service() {
     try {
       val path = if (audioPath.startsWith("file://")) Uri.parse(audioPath).path ?: audioPath else audioPath
       val mp = MediaPlayer()
-      mp.setAudioAttributes(alarmSpeechAttrs())
+      mp.setAudioAttributes(speechAttrs())
+      // Crava a saída no fone detectado (reforça o roteamento do USAGE_MEDIA).
+      if (routeToHeadphones && preferredDevice != null &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+      ) {
+        try {
+          mp.setPreferredDevice(preferredDevice)
+        } catch (_: Exception) {}
+      }
       mp.setDataSource(path)
       mp.setOnPreparedListener { it.start() }
       mp.setOnCompletionListener { stopEverything() }
@@ -86,7 +123,7 @@ class SpokenSpeechService : Service() {
           return@TextToSpeech
         }
         try {
-          t.setAudioAttributes(alarmSpeechAttrs())
+          t.setAudioAttributes(speechAttrs())
         } catch (_: Exception) {}
         try {
           // pt-BR se disponível; senão segue na voz padrão do aparelho.
@@ -116,11 +153,52 @@ class SpokenSpeechService : Service() {
     }
   }
 
-  private fun alarmSpeechAttrs(): AudioAttributes =
-    AudioAttributes.Builder()
-      .setUsage(AudioAttributes.USAGE_ALARM)
+  /**
+   * Atributos de áudio da fala. Com FONE conectado, roteia como MÍDIA (sai pelo
+   * fone — BT/fio/USB); sem fone, USAGE_ALARM (alto-falante, alto, fura volume de
+   * notificação baixo). O USAGE_ALARM é justamente o que força o alto-falante
+   * mesmo com fone — por isso trocamos para MEDIA quando há fone.
+   */
+  private fun speechAttrs(): AudioAttributes {
+    val usage =
+      if (routeToHeadphones) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_ALARM
+    return AudioAttributes.Builder()
+      .setUsage(usage)
       .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
       .build()
+  }
+
+  /**
+   * Garante audibilidade ao rotear pro fone: se o volume de MÍDIA (STREAM_MUSIC)
+   * estiver no zero, sobe para ~60% do máximo e guarda o original p/ restaurar.
+   * No-op se já houver volume. Best-effort (DND pode bloquear).
+   */
+  private fun ensureMediaAudible() {
+    try {
+      val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      if (am.getStreamVolume(AudioManager.STREAM_MUSIC) <= 0) {
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        savedMusicVolume = 0
+        am.setStreamVolume(
+          AudioManager.STREAM_MUSIC,
+          (max * 0.6f).toInt().coerceAtLeast(1),
+          0,
+        )
+      }
+    } catch (e: Exception) {
+      Log.w(SpokenScheduler.TAG, "ensureMediaAudible falhou: ${e.message}")
+      savedMusicVolume = -1
+    }
+  }
+
+  private fun restoreMediaVolume() {
+    if (savedMusicVolume < 0) return
+    try {
+      val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      am.setStreamVolume(AudioManager.STREAM_MUSIC, savedMusicVolume, 0)
+    } catch (_: Exception) {}
+    savedMusicVolume = -1
+  }
 
   private fun startInForeground(title: String, body: String) {
     val channelId = "comentor-spoken-fgs"
@@ -172,6 +250,8 @@ class SpokenSpeechService : Service() {
   }
 
   private fun stopEverything() {
+    restoreMediaVolume()
+    preferredDevice = null
     try { player?.release() } catch (_: Exception) {}
     player = null
     try {
@@ -201,3 +281,32 @@ class SpokenSpeechService : Service() {
     private const val NOTIF_ID = 1011
   }
 }
+
+/**
+ * Retorna um dispositivo de saída de FONE que carrega MÍDIA (com fio, Bluetooth
+ * A2DP, USB ou BLE), ou null. O SCO (telefonia/mono) é EXCLUÍDO de propósito:
+ * mídia não sai por SCO e cairia no alto-falante — o oposto do que queremos.
+ * Usado para (a) rotear a fala pro fone e (b) o gate "só com fone". Top-level
+ * para o serviço E o módulo reusarem.
+ */
+fun mediaHeadphoneDevice(ctx: Context): AudioDeviceInfo? {
+  return try {
+    val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { d ->
+      when (d.type) {
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_USB_HEADSET -> true
+        else ->
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            d.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+      }
+    }
+  } catch (e: Exception) {
+    null
+  }
+}
+
+/** Há um fone que carrega MÍDIA conectado? (gate "só com fone" + estado p/ a UI). */
+fun headphonesConnected(ctx: Context): Boolean = mediaHeadphoneDevice(ctx) != null

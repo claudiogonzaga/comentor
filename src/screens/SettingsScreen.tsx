@@ -40,6 +40,8 @@ import {
   requestIgnoreBatteryOptimizations,
   scheduleSpokenTest,
   cancelAllSpoken,
+  setSpokenHeadphonesOnly,
+  isHeadphonesConnected,
 } from '../services/spokenNudges';
 import { testApiKey } from '../services/gemini';
 import {
@@ -108,6 +110,7 @@ export function SettingsScreen() {
   );
   const [inspPerDay, setInspPerDay] = useState(config?.inspirationPerDay ?? 6);
   const [spokenNudges, setSpokenNudges] = useState(config?.spokenNudgesEnabled ?? false);
+  const [headphonesOnly, setHeadphonesOnly] = useState(config?.spokenHeadphonesOnly ?? false);
   const [testingSpoken, setTestingSpoken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -136,6 +139,7 @@ export function SettingsScreen() {
       setInspirationMode(config.inspirationModeEnabled ?? false);
       setInspPerDay(config.inspirationPerDay ?? 6);
       setSpokenNudges(config.spokenNudgesEnabled ?? false);
+      setHeadphonesOnly(config.spokenHeadphonesOnly ?? false);
       setAIBackend(config.aiBackend);
       setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
       setAllowMobileData(config.allowMobileDataDownload);
@@ -748,6 +752,41 @@ export function SettingsScreen() {
                   thumbColor={spokenNudges ? colors.text.onGold : colors.text.tertiary}
                 />
               </View>
+
+              {spokenNudges && (
+                <View style={[styles.toggleRow, { marginTop: spacing.sm }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                      Só falar com fone de ouvido
+                    </Text>
+                    <Text style={[typography.small, { color: colors.text.secondary }]}>
+                      Quando ligado, a Comentora só fala se houver fone conectado
+                      (com fio, Bluetooth ou USB). De qualquer forma, com fone
+                      conectado o som SEMPRE sai pelo fone — nunca no alto-falante.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={headphonesOnly}
+                    onValueChange={async (next) => {
+                      setHeadphonesOnly(next);
+                      try {
+                        await setConfig({ spokenHeadphonesOnly: next });
+                        setSpokenHeadphonesOnly(next); // espelha pro nativo (lê no disparo)
+                        if (next && !isHeadphonesConnected()) {
+                          Alert.alert(
+                            'Sem fone agora',
+                            'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
+                          );
+                        }
+                      } catch (err) {
+                        console.warn('toggle headphones-only failed:', err);
+                      }
+                    }}
+                    trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+                    thumbColor={headphonesOnly ? colors.text.onGold : colors.text.tertiary}
+                  />
+                </View>
+              )}
 
               {spokenNudges && (
                 <Pressable

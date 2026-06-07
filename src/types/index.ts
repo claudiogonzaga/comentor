@@ -97,6 +97,13 @@ export interface UserConfig {
    */
   spokenNudgesEnabled: boolean;
   /**
+   * Só falar os avisos em voz alta quando houver FONE de ouvido conectado
+   * (com fio, Bluetooth ou USB). Útil pra não tocar no alto-falante em público.
+   * Independente disso, quando há fone conectado o áudio SEMPRE sai pelo fone
+   * (roteado como mídia), nunca pelo alto-falante.
+   */
+  spokenHeadphonesOnly: boolean;
+  /**
    * Modo "inspiração": quando true, a Comentora envia alertas de hora em hora
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */
