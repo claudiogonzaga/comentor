@@ -1,11 +1,7 @@
 import { create } from 'zustand';
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
-import {
-  prepareReadAloudAudio,
-  speakLongText,
-  stopSpeaking,
-  ensureBackgroundAudio,
-} from '../services/voice';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { prepareReadAloudAudio, speakLongText, stopSpeaking } from '../services/voice';
+import { startReadAloudKeepAlive, stopReadAloudKeepAlive } from '../services/readAloudKeepAlive';
 
 export type ReadAloudStatus = 'idle' | 'generating' | 'playing' | 'paused';
 
@@ -83,7 +79,18 @@ function formatErr(e: unknown): string {
 
 export const useReadAloud = create<ReadAloudState>((set, get) => {
   const attachAndPlay = async (uri: string, rate: number, mine: number) => {
-    await ensureBackgroundAudio();
+    // Modo de áudio da REPRODUÇÃO: toca em background + duca outras mídias.
+    // Setado DIRETO (não pelo ensureBackgroundAudio guardado) para sempre
+    // sobrescrever o 'mixWithOthers' que o keep-alive da geração deixou.
+    try {
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'duckOthers',
+      });
+    } catch {
+      /* segue tocando em primeiro plano se falhar */
+    }
     if (mine !== token) return; // um start mais novo assumiu durante o await
     teardownPlayer();
     const p = createAudioPlayer({ uri });
@@ -158,6 +165,9 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
         duration: 0,
         error: null,
       });
+      // Mantém o app VIVO durante a geração — senão, ao SAIR do app, o Android
+      // congela o JS e a geração para no meio (ex.: travou em 2/13).
+      void startReadAloudKeepAlive();
       try {
         const uri = await prepareReadAloudAudio(t, {
           geminiVoiceName: opts.geminiVoiceName,
@@ -166,11 +176,16 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
             if (mine === token) set({ gen: { done, total } });
           },
         });
-        if (mine !== token) return; // parado/superado no meio
+        if (mine !== token) {
+          stopReadAloudKeepAlive();
+          return; // parado/superado no meio
+        }
         set({ gen: null });
+        stopReadAloudKeepAlive(); // para o silêncio antes de tocar o áudio real
         if (uri) await attachAndPlay(uri, opts.rate ?? 1, mine);
         else set({ status: 'idle' });
       } catch (e) {
+        stopReadAloudKeepAlive();
         if (mine !== token) return;
         set({ status: 'idle', gen: null, error: formatErr(e) });
       }
@@ -254,6 +269,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     stop: () => {
       token++;
       stopSpeaking();
+      stopReadAloudKeepAlive();
       teardownPlayer();
       set({ status: 'idle', gen: null, currentTime: 0, duration: 0, title: '' });
     },

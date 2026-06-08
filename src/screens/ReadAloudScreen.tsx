@@ -21,6 +21,10 @@ import { useAppStore } from '../store/useAppStore';
 import { useReadAloud } from '../store/useReadAloud';
 import { prepareReadAloudAudio, isReadAloudCached } from '../services/voice';
 import {
+  startReadAloudKeepAlive,
+  stopReadAloudKeepAlive,
+} from '../services/readAloudKeepAlive';
+import {
   createReadAloudText,
   deleteReadAloudText,
   getKV,
@@ -283,6 +287,7 @@ export function ReadAloudScreen() {
     }
 
     setSaveGen({ done: 0, total: 1 });
+    void startReadAloudKeepAlive(); // mantém vivo se o usuário sair do app
     try {
       const uri = await prepareReadAloudAudio(t, {
         geminiVoiceName: voice,
@@ -301,6 +306,7 @@ export function ReadAloudScreen() {
         `Salvei o texto, mas não consegui gerar o áudio Gemini: ${errMsg(e)}\n\nO áudio é gerado na 1ª leitura.`,
       );
     } finally {
+      stopReadAloudKeepAlive();
       setSaveGen(null);
       setSavingAudio(false);
     }
