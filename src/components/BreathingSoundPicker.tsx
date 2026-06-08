@@ -1,5 +1,13 @@
-import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import { Card } from './Card';
@@ -13,15 +21,37 @@ interface Props {
   value: string;
   /** file:// do áudio próprio do usuário (config.breathingSoundUri). */
   customUri: string | null;
+  /** Nome dado pelo usuário ao seu áudio (config.breathingSoundName). */
+  customName: string | null;
   /** Seleciona uma trilha (embutida ou 'custom'). */
   onSelect: (id: string) => void;
   /** Chamado após copiar o arquivo do usuário — passa o novo file:// persistido. */
   onUploadCustom: (uri: string) => void;
+  /** Chamado quando o usuário (re)nomeia o seu áudio. */
+  onRenameCustom: (name: string) => void;
 }
 
-export function BreathingSoundPicker({ value, customUri, onSelect, onUploadCustom }: Props) {
+export function BreathingSoundPicker({
+  value,
+  customUri,
+  customName,
+  onSelect,
+  onUploadCustom,
+  onRenameCustom,
+}: Props) {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [nameInput, setNameInput] = useState(customName ?? '');
+
+  // Mantém o campo em sincronia se o nome mudar por fora (ex.: após o upload).
+  useEffect(() => {
+    setNameInput(customName ?? '');
+  }, [customName]);
+
+  const commitName = () => {
+    const trimmed = nameInput.trim().slice(0, 40);
+    onRenameCustom(trimmed || 'Meu áudio');
+  };
 
   const handlePreview = (id: string) => {
     setPreviewing(id);
@@ -54,6 +84,11 @@ export function BreathingSoundPicker({ value, customUri, onSelect, onUploadCusto
       const dest = new File(Paths.document, `breathing_custom_${Date.now()}.${ext}`);
       new File(picked.uri).copy(dest);
       onUploadCustom(dest.uri);
+      // Nome inicial = nome do arquivo (sem extensão); o usuário pode renomear.
+      const base = (picked.name ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40);
+      const defName = base || 'Meu áudio';
+      setNameInput(defName);
+      onRenameCustom(defName);
     } catch {
       Alert.alert(
         'Não consegui usar esse arquivo',
@@ -91,7 +126,9 @@ export function BreathingSoundPicker({ value, customUri, onSelect, onUploadCusto
                   else onSelect(s.id);
                 }}
               >
-                <Text style={styles.rowTitle}>{s.name}</Text>
+                <Text style={styles.rowTitle}>
+                  {isCustom && customUri ? customName || 'Meu áudio' : s.name}
+                </Text>
                 <Text style={styles.rowSub}>{desc}</Text>
               </Pressable>
               {canPreview ? (
@@ -121,22 +158,40 @@ export function BreathingSoundPicker({ value, customUri, onSelect, onUploadCusto
             </View>
 
             {isCustom && (
-              <Pressable
-                onPress={handleUpload}
-                disabled={uploading}
-                style={styles.uploadBtn}
-              >
-                {uploading ? (
-                  <ActivityIndicator color={colors.accent.gold} size="small" />
-                ) : (
-                  <>
-                    <GreekIcon name="download" size={15} color={colors.accent.gold} />
-                    <Text style={styles.uploadText}>
-                      {customUri ? 'Trocar meu arquivo' : 'Enviar um arquivo de áudio'}
-                    </Text>
-                  </>
+              <>
+                <Pressable
+                  onPress={handleUpload}
+                  disabled={uploading}
+                  style={styles.uploadBtn}
+                >
+                  {uploading ? (
+                    <ActivityIndicator color={colors.accent.gold} size="small" />
+                  ) : (
+                    <>
+                      <GreekIcon name="download" size={15} color={colors.accent.gold} />
+                      <Text style={styles.uploadText}>
+                        {customUri ? 'Trocar meu arquivo' : 'Enviar um arquivo de áudio'}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+                {customUri && (
+                  <View style={styles.nameRow}>
+                    <Text style={styles.nameLabel}>Nome</Text>
+                    <TextInput
+                      value={nameInput}
+                      onChangeText={setNameInput}
+                      onEndEditing={commitName}
+                      onBlur={commitName}
+                      placeholder="ex.: Chuva, Mantra, Mar…"
+                      placeholderTextColor={colors.text.tertiary}
+                      style={styles.nameInput}
+                      maxLength={40}
+                      returnKeyType="done"
+                    />
+                  </View>
                 )}
-              </Pressable>
+              </>
             )}
           </View>
         );
@@ -236,6 +291,28 @@ const styles = StyleSheet.create({
   uploadText: {
     ...typography.small,
     color: colors.accent.gold,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginLeft: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  nameLabel: {
+    ...typography.small,
+    color: colors.text.secondary,
+  },
+  nameInput: {
+    flex: 1,
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+    backgroundColor: colors.bg.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   hint: {
     ...typography.small,

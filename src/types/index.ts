@@ -118,6 +118,8 @@ export interface UserConfig {
   breathingSoundId: string;
   /** file:// do áudio próprio do usuário, quando `breathingSoundId === 'custom'`. */
   breathingSoundUri: string | null;
+  /** Nome dado pelo usuário ao seu áudio próprio (exibido na lista de sons). */
+  breathingSoundName: string | null;
   /** Duração desejada do exercício de respiração, em minutos (vira nº de ciclos). */
   breathingDurationMinutes: number;
   /**

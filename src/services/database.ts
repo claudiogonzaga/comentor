@@ -319,6 +319,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN breathing_sound_uri TEXT`,
     );
   }
+  if (!colNames.includes('breathing_sound_name')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN breathing_sound_name TEXT`,
+    );
+  }
   // v1.25: duração configurável do exercício de respiração (em minutos).
   // Default = 16 min (sessão de breath work).
   if (!colNames.includes('breathing_duration_minutes')) {
@@ -553,6 +558,7 @@ interface UserConfigRow {
   inspiration_per_day: number | null;
   breathing_sound_id: string | null;
   breathing_sound_uri: string | null;
+  breathing_sound_name: string | null;
   breathing_duration_minutes: number | null;
   read_aloud_voice_id: string | null;
   read_aloud_voice_language: string | null;
@@ -600,6 +606,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   inspirationPerDay: r.inspiration_per_day ?? 6,
   breathingSoundId: r.breathing_sound_id ?? 'cello',
   breathingSoundUri: r.breathing_sound_uri ?? null,
+  breathingSoundName: r.breathing_sound_name ?? null,
   breathingDurationMinutes: r.breathing_duration_minutes ?? 16,
   readAloudVoiceId: r.read_aloud_voice_id ?? null,
   readAloudVoiceLanguage: r.read_aloud_voice_language ?? null,
@@ -659,6 +666,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     inspirationPerDay: 'inspiration_per_day',
     breathingSoundId: 'breathing_sound_id',
     breathingSoundUri: 'breathing_sound_uri',
+    breathingSoundName: 'breathing_sound_name',
     breathingDurationMinutes: 'breathing_duration_minutes',
     readAloudVoiceId: 'read_aloud_voice_id',
     readAloudVoiceLanguage: 'read_aloud_voice_language',
