@@ -11,6 +11,7 @@ import type {
   InterviewMessage,
   InterviewSummary,
   LocalModelId,
+  BreathingCustomSound,
   Medication,
   Nudge,
   NudgeType,
@@ -411,6 +412,48 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // v1.51: VÁRIOS sons de respiração próprios (cada um nomeado), numa tabela.
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS breathing_custom_sounds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  // Migração (uma vez): move o som próprio ÚNICO antigo (breathing_sound_uri/name)
+  // para a lista; depois zera breathing_sound_uri para não re-migrar.
+  try {
+    const oldCfg = await database.getFirstAsync<{
+      breathing_sound_id: string | null;
+      breathing_sound_uri: string | null;
+      breathing_sound_name: string | null;
+    }>(
+      'SELECT breathing_sound_id, breathing_sound_uri, breathing_sound_name FROM user_config WHERE id = 1',
+    );
+    const oldUri = oldCfg?.breathing_sound_uri;
+    if (oldUri) {
+      const cnt = await database.getFirstAsync<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM breathing_custom_sounds',
+      );
+      if ((cnt?.n ?? 0) === 0) {
+        const nm = (oldCfg?.breathing_sound_name ?? '').trim() || 'Meu áudio';
+        const ins = await database.runAsync(
+          'INSERT INTO breathing_custom_sounds (name, uri) VALUES (?, ?)',
+          [nm, oldUri],
+        );
+        if (oldCfg?.breathing_sound_id === 'custom') {
+          await database.runAsync('UPDATE user_config SET breathing_sound_id = ? WHERE id = 1', [
+            `custom:${ins.lastInsertRowId as number}`,
+          ]);
+        }
+      }
+      await database.runAsync('UPDATE user_config SET breathing_sound_uri = NULL WHERE id = 1');
+    }
+  } catch {
+    /* migração best-effort */
+  }
   // v1.34: cada texto salvo guarda o seu próprio áudio (não regera nem gasta
   // token). Migração defensiva para instalações que já tinham a tabela.
   const raCols = await database.getAllAsync<{ name: string }>(
@@ -1431,6 +1474,61 @@ export async function deleteReadAloudText(id: number): Promise<void> {
       } catch {
         /* ignore */
       }
+    }
+  }
+}
+
+// --------- Sons de respiração próprios (vários, nomeados) ---------
+
+interface BreathingCustomSoundRow {
+  id: number;
+  name: string;
+  uri: string;
+  created_at: string;
+}
+
+export async function listBreathingCustomSounds(): Promise<BreathingCustomSound[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<BreathingCustomSoundRow>(
+    'SELECT * FROM breathing_custom_sounds ORDER BY id ASC',
+  );
+  return rows.map((r) => ({ id: r.id, name: r.name, uri: r.uri }));
+}
+
+export async function createBreathingCustomSound(input: {
+  name: string;
+  uri: string;
+}): Promise<BreathingCustomSound> {
+  const d = await getDb();
+  const name = input.name.trim() || 'Meu áudio';
+  const res = await d.runAsync(
+    'INSERT INTO breathing_custom_sounds (name, uri) VALUES (?, ?)',
+    [name, input.uri],
+  );
+  return { id: res.lastInsertRowId as number, name, uri: input.uri };
+}
+
+export async function renameBreathingCustomSound(id: number, name: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE breathing_custom_sounds SET name = ? WHERE id = ?', [
+    name.trim() || 'Meu áudio',
+    id,
+  ]);
+}
+
+export async function deleteBreathingCustomSound(id: number): Promise<void> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ uri: string }>(
+    'SELECT uri FROM breathing_custom_sounds WHERE id = ?',
+    [id],
+  );
+  await d.runAsync('DELETE FROM breathing_custom_sounds WHERE id = ?', [id]);
+  const uri = row?.uri;
+  if (uri) {
+    try {
+      new File(uri).delete();
+    } catch {
+      /* ignore */
     }
   }
 }

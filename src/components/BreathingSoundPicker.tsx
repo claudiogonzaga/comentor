@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,47 +15,39 @@ import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { BREATHING_SOUNDS } from '../constants/breathingSounds';
 import { previewBreathingSound, stopBreathingSound } from '../services/breathingSound';
+import type { BreathingCustomSound } from '../types';
 
 interface Props {
-  /** id do som selecionado (config.breathingSoundId). */
+  /** id selecionado: embutido ('cello'…) ou 'custom:<id>'. */
   value: string;
-  /** file:// do áudio próprio do usuário (config.breathingSoundUri). */
-  customUri: string | null;
-  /** Nome dado pelo usuário ao seu áudio (config.breathingSoundName). */
-  customName: string | null;
-  /** Seleciona uma trilha (embutida ou 'custom'). */
+  /** Sons próprios do usuário (vários, cada um nomeado). */
+  customSounds: BreathingCustomSound[];
+  /** Seleciona uma trilha (embutida ou 'custom:<id>'). */
   onSelect: (id: string) => void;
-  /** Chamado após copiar o arquivo do usuário — passa o novo file:// persistido. */
-  onUploadCustom: (uri: string) => void;
-  /** Chamado quando o usuário (re)nomeia o seu áudio. */
-  onRenameCustom: (name: string) => void;
+  /** Após enviar um arquivo: cria um novo som próprio (nome + file://). */
+  onAddSound: (name: string, uri: string) => void;
+  /** Renomeia um som próprio. */
+  onRename: (id: number, name: string) => void;
+  /** Exclui um som próprio. */
+  onDelete: (id: number) => void;
 }
+
+const EMBEDDED = BREATHING_SOUNDS.filter((s) => s.id !== 'custom');
 
 export function BreathingSoundPicker({
   value,
-  customUri,
-  customName,
+  customSounds,
   onSelect,
-  onUploadCustom,
-  onRenameCustom,
+  onAddSound,
+  onRename,
+  onDelete,
 }: Props) {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [nameInput, setNameInput] = useState(customName ?? '');
 
-  // Mantém o campo em sincronia se o nome mudar por fora (ex.: após o upload).
-  useEffect(() => {
-    setNameInput(customName ?? '');
-  }, [customName]);
-
-  const commitName = () => {
-    const trimmed = nameInput.trim().slice(0, 40);
-    onRenameCustom(trimmed || 'Meu áudio');
-  };
-
-  const handlePreview = (id: string) => {
+  const handlePreview = (id: string, uri: string | null) => {
     setPreviewing(id);
-    previewBreathingSound(id, customUri);
+    previewBreathingSound(id, uri);
     setTimeout(() => setPreviewing((c) => (c === id ? null : c)), 8000);
   };
 
@@ -70,25 +62,13 @@ export function BreathingSoundPicker({
       });
       if (res.canceled || !res.assets?.[0]) return;
       const picked = res.assets[0];
-      // Remove o arquivo custom anterior, se houver, pra não acumular lixo.
-      if (customUri) {
-        try {
-          new File(customUri).delete();
-        } catch {
-          /* ignore */
-        }
-      }
       const ext =
         (picked.name?.split('.').pop() ?? 'mp3').replace(/[^a-z0-9]/gi, '').toLowerCase() ||
         'mp3';
       const dest = new File(Paths.document, `breathing_custom_${Date.now()}.${ext}`);
       new File(picked.uri).copy(dest);
-      onUploadCustom(dest.uri);
-      // Nome inicial = nome do arquivo (sem extensão); o usuário pode renomear.
-      const base = (picked.name ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40);
-      const defName = base || 'Meu áudio';
-      setNameInput(defName);
-      onRenameCustom(defName);
+      const base = (picked.name ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40) || 'Meu áudio';
+      onAddSound(base, dest.uri);
     } catch {
       Alert.alert(
         'Não consegui usar esse arquivo',
@@ -99,6 +79,13 @@ export function BreathingSoundPicker({
     }
   };
 
+  const confirmDelete = (cs: BreathingCustomSound) => {
+    Alert.alert('Excluir som', `Remover "${cs.name}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => onDelete(cs.id) },
+    ]);
+  };
+
   return (
     <Card style={styles.card}>
       <View style={styles.sectionRow}>
@@ -106,99 +93,90 @@ export function BreathingSoundPicker({
         <Text style={styles.section}>Som da respiração</Text>
       </View>
       <Text style={styles.subtitle}>
-        Trilha calma que toca no exercício de respiração. Toque em &quot;ouvir&quot;
-        para experimentar.
+        Trilha calma que toca no exercício. Toque em &quot;ouvir&quot; para
+        experimentar. Você pode enviar vários sons seus e dar um nome a cada um.
       </Text>
 
-      {BREATHING_SOUNDS.map((s) => {
+      {EMBEDDED.map((s) => {
         const selected = s.id === value;
-        const isCustom = s.id === 'custom';
-        const canPreview = isCustom ? !!customUri : s.asset != null;
-        const desc =
-          isCustom && customUri ? 'Seu áudio está pronto — toque para selecionar' : s.description;
         return (
-          <View key={s.id}>
-            <View style={[styles.row, selected && styles.rowSelected]}>
-              <Pressable
-                style={styles.rowMain}
-                onPress={() => {
-                  if (isCustom && !customUri) handleUpload();
-                  else onSelect(s.id);
-                }}
-              >
-                <Text style={styles.rowTitle}>
-                  {isCustom && customUri ? customName || 'Meu áudio' : s.name}
-                </Text>
-                <Text style={styles.rowSub}>{desc}</Text>
-              </Pressable>
-              {canPreview ? (
-                <Pressable
-                  onPress={() => handlePreview(s.id)}
-                  style={[styles.playBtn, previewing === s.id && styles.playBtnActive]}
-                  hitSlop={6}
-                >
-                  {previewing === s.id ? (
-                    <GreekIcon name="wind" size={16} />
-                  ) : (
-                    <Text style={styles.playText}>ouvir</Text>
-                  )}
-                </Pressable>
+          <View key={s.id} style={[styles.row, selected && styles.rowSelected]}>
+            <Pressable style={styles.rowMain} onPress={() => onSelect(s.id)}>
+              <Text style={styles.rowTitle}>{s.name}</Text>
+              <Text style={styles.rowSub} numberOfLines={1}>
+                {s.description}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => handlePreview(s.id, null)}
+              style={[styles.playBtn, previewing === s.id && styles.playBtnActive]}
+              hitSlop={6}
+            >
+              {previewing === s.id ? (
+                <GreekIcon name="wind" size={16} />
               ) : (
-                <View style={{ width: 56 }} />
+                <Text style={styles.playText}>ouvir</Text>
               )}
-              <Pressable
-                onPress={() => {
-                  if (isCustom && !customUri) handleUpload();
-                  else onSelect(s.id);
-                }}
-                hitSlop={6}
-              >
-                <View style={[styles.radio, selected && styles.radioActive]} />
-              </Pressable>
-            </View>
-
-            {isCustom && (
-              <>
-                <Pressable
-                  onPress={handleUpload}
-                  disabled={uploading}
-                  style={styles.uploadBtn}
-                >
-                  {uploading ? (
-                    <ActivityIndicator color={colors.accent.gold} size="small" />
-                  ) : (
-                    <>
-                      <GreekIcon name="download" size={15} color={colors.accent.gold} />
-                      <Text style={styles.uploadText}>
-                        {customUri ? 'Trocar meu arquivo' : 'Enviar um arquivo de áudio'}
-                      </Text>
-                    </>
-                  )}
-                </Pressable>
-                {customUri && (
-                  <View style={styles.nameRow}>
-                    <Text style={styles.nameLabel}>Nome</Text>
-                    <TextInput
-                      value={nameInput}
-                      onChangeText={setNameInput}
-                      onEndEditing={commitName}
-                      onBlur={commitName}
-                      placeholder="ex.: Chuva, Mantra, Mar…"
-                      placeholderTextColor={colors.text.tertiary}
-                      style={styles.nameInput}
-                      maxLength={40}
-                      returnKeyType="done"
-                    />
-                  </View>
-                )}
-              </>
-            )}
+            </Pressable>
+            <Pressable onPress={() => onSelect(s.id)} hitSlop={6}>
+              <View style={[styles.radio, selected && styles.radioActive]} />
+            </Pressable>
           </View>
         );
       })}
 
+      {customSounds.length > 0 && <Text style={styles.groupLabel}>SEUS SONS</Text>}
+      {customSounds.map((cs) => {
+        const id = `custom:${cs.id}`;
+        const selected = id === value;
+        return (
+          <View key={cs.id} style={[styles.row, selected && styles.rowSelected]}>
+            <View style={styles.rowMain}>
+              <TextInput
+                defaultValue={cs.name}
+                onEndEditing={(e) => onRename(cs.id, e.nativeEvent.text)}
+                placeholder="Nome do som"
+                placeholderTextColor={colors.text.tertiary}
+                style={styles.nameInput}
+                maxLength={40}
+                returnKeyType="done"
+              />
+            </View>
+            <Pressable
+              onPress={() => handlePreview(id, cs.uri)}
+              style={[styles.playBtn, previewing === id && styles.playBtnActive]}
+              hitSlop={6}
+            >
+              {previewing === id ? (
+                <GreekIcon name="wind" size={16} />
+              ) : (
+                <Text style={styles.playText}>ouvir</Text>
+              )}
+            </Pressable>
+            <Pressable onPress={() => onSelect(id)} hitSlop={6}>
+              <View style={[styles.radio, selected && styles.radioActive]} />
+            </Pressable>
+            <Pressable onPress={() => confirmDelete(cs)} hitSlop={8} style={styles.delBtn}>
+              <Text style={styles.delText}>✕</Text>
+            </Pressable>
+          </View>
+        );
+      })}
+
+      <Pressable onPress={handleUpload} disabled={uploading} style={styles.addBtn}>
+        {uploading ? (
+          <ActivityIndicator color={colors.accent.gold} size="small" />
+        ) : (
+          <>
+            <GreekIcon name="download" size={15} color={colors.accent.gold} />
+            <Text style={styles.addText}>Adicionar um som meu</Text>
+          </>
+        )}
+      </Pressable>
+
       <Text style={styles.hint}>
-        As trilhas têm cerca de 3 minutos e tocam em repetição durante o exercício.
+        As trilhas embutidas têm cerca de 3 min e tocam em repetição. Os seus sons
+        também tocam em loop durante o exercício.
       </Text>
     </Card>
   );
@@ -224,10 +202,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
+  groupLabel: {
+    ...typography.label,
+    color: colors.accent.gold,
+    textTransform: 'uppercase',
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -250,6 +235,16 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.text.secondary,
     marginTop: 2,
+  },
+  nameInput: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+    backgroundColor: colors.bg.surface,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   playBtn: {
     width: 56,
@@ -279,45 +274,38 @@ const styles = StyleSheet.create({
     borderColor: colors.accent.gold,
     backgroundColor: colors.accent.gold,
   },
-  uploadBtn: {
+  delBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  delText: {
+    color: colors.accent.danger,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.sm,
-    marginLeft: spacing.md,
-  },
-  uploadText: {
-    ...typography.small,
-    color: colors.accent.gold,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginLeft: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  nameLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
-  nameInput: {
-    flex: 1,
-    ...typography.bodyMedium,
-    color: colors.text.primary,
-    backgroundColor: colors.bg.surface,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderColor: colors.accent.gold,
+    borderStyle: 'dashed',
+  },
+  addText: {
+    ...typography.bodyMedium,
+    color: colors.accent.gold,
   },
   hint: {
     ...typography.small,
     color: colors.text.tertiary,
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
     lineHeight: 17,
   },
 });

@@ -118,7 +118,10 @@ export interface UserConfig {
   breathingSoundId: string;
   /** file:// do áudio próprio do usuário, quando `breathingSoundId === 'custom'`. */
   breathingSoundUri: string | null;
-  /** Nome dado pelo usuário ao seu áudio próprio (exibido na lista de sons). */
+  /**
+   * (legado) Nome do áudio próprio único — preservado só para a migração para a
+   * lista de vários sons (breathing_custom_sounds). Não usado na UI nova.
+   */
   breathingSoundName: string | null;
   /** Duração desejada do exercício de respiração, em minutos (vira nº de ciclos). */
   breathingDurationMinutes: number;
@@ -161,6 +164,14 @@ export interface ReadAloudText {
   /** Voz Gemini usada no áudio guardado. */
   audioVoice: string | null;
   updatedAt: string;
+}
+
+/** Um som de respiração próprio do usuário (vários permitidos), cada um nomeado. */
+export interface BreathingCustomSound {
+  id: number;
+  name: string;
+  /** file:// do arquivo de áudio copiado para o app. */
+  uri: string;
 }
 
 export interface InterviewSummary {

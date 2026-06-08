@@ -42,7 +42,10 @@ function resolveSource(
   id: string,
   customUri: string | null,
 ): number | { uri: string } | null {
-  if (id === 'custom') return customUri ? { uri: customUri } : null;
+  // 'custom' (legado) ou 'custom:<id>' (vários sons): o caller resolve o uri.
+  if (id === 'custom' || id.startsWith('custom:')) {
+    return customUri ? { uri: customUri } : null;
+  }
   const asset = getBreathingSound(id as BreathingSoundId).asset;
   return asset ?? null;
 }

@@ -6,7 +6,9 @@ import { Button } from '../components/Button';
 import { colors, spacing, typography } from '../theme';
 import { speak, stopSpeaking } from '../services/voice';
 import { playBreathingSound, stopBreathingSound } from '../services/breathingSound';
+import { listBreathingCustomSounds } from '../services/database';
 import { useAppStore } from '../store/useAppStore';
+import type { BreathingCustomSound } from '../types';
 
 const DEFAULT_BREATHING_MINUTES = 16;
 
@@ -38,6 +40,24 @@ export function BreathingScreen() {
   const durationMin = config?.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES;
   const [remainingMs, setRemainingMs] = useState(durationMin * 60000);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Sons próprios — para resolver o file:// quando o selecionado é 'custom:<id>'.
+  const customSoundsRef = useRef<BreathingCustomSound[]>([]);
+  const [soundsReady, setSoundsReady] = useState(false);
+  useEffect(() => {
+    listBreathingCustomSounds()
+      .then((list) => {
+        customSoundsRef.current = list;
+      })
+      .catch(() => {})
+      .finally(() => setSoundsReady(true));
+  }, []);
+
+  const resolveCustomUri = (): string | null => {
+    const id = config?.breathingSoundId ?? 'cello';
+    if (!id.startsWith('custom:')) return null;
+    const cid = parseInt(id.slice('custom:'.length), 10);
+    return customSoundsRef.current.find((s) => s.id === cid)?.uri ?? null;
+  };
 
   const clearTick = () => {
     if (tickRef.current) {
@@ -83,7 +103,7 @@ export function BreathingScreen() {
     // Trilha de fundo escolhida nas configurações (em loop durante o exercício).
     playBreathingSound({
       id: config?.breathingSoundId ?? 'cello',
-      customUri: config?.breathingSoundUri ?? null,
+      customUri: resolveCustomUri(),
     });
   };
 
@@ -99,12 +119,12 @@ export function BreathingScreen() {
   // trilha já toca, sem precisar de um segundo toque. Espera a config carregar e
   // dispara uma vez.
   useEffect(() => {
-    if (autoStartedRef.current || !config) return;
+    if (autoStartedRef.current || !config || !soundsReady) return;
     autoStartedRef.current = true;
     const t = setTimeout(() => start(), 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config]);
+  }, [config, soundsReady]);
 
   useEffect(() => {
     return () => {
