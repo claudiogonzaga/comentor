@@ -281,4 +281,10 @@ export interface Medication {
    * dias específicos (ex.: [2, 4] = terça e quinta).
    */
   daysOfWeek: number[];
+  /**
+   * Jejum intermitente: se != null, este "hábito" é um jejum de N horas. Nesse
+   * caso `time` é a 1ª refeição; a janela de alimentação = 24 − N horas, e o app
+   * avisa 30 min antes do fim e no fim ("pare de comer").
+   */
+  fastingHours: number | null;
 }

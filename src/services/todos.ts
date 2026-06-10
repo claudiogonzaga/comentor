@@ -146,12 +146,22 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
       const days = med.daysOfWeek?.length ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
       if (!days.includes(todayDow)) continue;
       const key = `med:${med.id}`;
+      let subtitle = med.dosage?.trim() || undefined;
+      if (med.fastingHours != null) {
+        const fastH = Math.min(23, Math.max(1, Math.round(med.fastingHours)));
+        const tp = med.time.split(':').map((s) => parseInt(s, 10));
+        const firstMin = (tp[0] || 0) * 60 + (tp[1] || 0);
+        const endMin = (firstMin + (24 - fastH) * 60) % (24 * 60);
+        const fmt = (mins: number) =>
+          `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+        subtitle = `Comer ${med.time}–${fmt(endMin)} · jejum de ${fastH}h`;
+      }
       items.push({
         key,
         kind: 'med',
         medId: med.id,
         title: med.name,
-        subtitle: med.dosage?.trim() || undefined,
+        subtitle,
         time: med.time,
         icon: iconForEmoji(med.emoji, 'med'),
         done: done.has(key),

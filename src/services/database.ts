@@ -478,6 +478,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE medications ADD COLUMN days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6'`,
     );
   }
+  // v1.53: jejum intermitente — N horas de jejum (NULL = hábito normal).
+  if (!medCols.some((c) => c.name === 'fasting_hours')) {
+    await database.execAsync(`ALTER TABLE medications ADD COLUMN fasting_hours INTEGER`);
+  }
 
   // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
   // existing per-user customizations from being overwritten on later runs.
@@ -1236,6 +1240,7 @@ interface MedicationRow {
   enabled: number;
   days_of_week: string | null;
   order_index: number;
+  fasting_hours: number | null;
 }
 
 const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6];
@@ -1269,6 +1274,7 @@ const rowToMedication = (r: MedicationRow): Medication => ({
   enabled: r.enabled === 1,
   orderIndex: r.order_index,
   daysOfWeek: parseDaysOfWeek(r.days_of_week),
+  fastingHours: r.fasting_hours ?? null,
 });
 
 export async function listMedications(): Promise<Medication[]> {
@@ -1295,6 +1301,7 @@ export async function createMedication(input: {
   emoji?: string | null;
   enabled?: boolean;
   daysOfWeek?: number[];
+  fastingHours?: number | null;
 }): Promise<Medication> {
   const d = await getDb();
   // Novo lembrete entra no fim da lista.
@@ -1303,8 +1310,8 @@ export async function createMedication(input: {
   );
   const orderIndex = (max?.m ?? -1) + 1;
   const res = await d.runAsync(
-    `INSERT INTO medications (name, dosage, time, emoji, enabled, days_of_week, order_index)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO medications (name, dosage, time, emoji, enabled, days_of_week, order_index, fasting_hours)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name.trim(),
       input.dosage?.trim() || null,
@@ -1313,6 +1320,7 @@ export async function createMedication(input: {
       input.enabled === false ? 0 : 1,
       serializeDaysOfWeek(input.daysOfWeek),
       orderIndex,
+      input.fastingHours ?? null,
     ],
   );
   const created = await getMedication(res.lastInsertRowId as number);
@@ -1325,7 +1333,10 @@ export async function createMedication(input: {
 export async function updateMedication(
   id: number,
   patch: Partial<
-    Pick<Medication, 'name' | 'dosage' | 'time' | 'emoji' | 'enabled' | 'daysOfWeek'>
+    Pick<
+      Medication,
+      'name' | 'dosage' | 'time' | 'emoji' | 'enabled' | 'daysOfWeek' | 'fastingHours'
+    >
   >,
 ): Promise<Medication | null> {
   const d = await getDb();
@@ -1354,6 +1365,10 @@ export async function updateMedication(
   if (patch.daysOfWeek !== undefined) {
     fields.push('days_of_week = ?');
     values.push(serializeDaysOfWeek(patch.daysOfWeek));
+  }
+  if (patch.fastingHours !== undefined) {
+    fields.push('fasting_hours = ?');
+    values.push(patch.fastingHours ?? null);
   }
   if (fields.length === 0) return getMedication(id);
   fields.push("updated_at = datetime('now')");

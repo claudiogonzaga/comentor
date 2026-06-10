@@ -72,6 +72,7 @@ interface HabitTemplate {
   emoji: string;
   time: string;
   daysOfWeek?: number[];
+  fastingHours?: number;
 }
 
 /** Hábitos saudáveis prontos — preenchem o editor com um toque. */
@@ -81,7 +82,23 @@ const HABIT_TEMPLATES: HabitTemplate[] = [
   { name: 'Exercício de respiração', dosage: '', emoji: '🌬️', time: '21:00' },
   { name: 'Cardio zona 2', dosage: '20 min', emoji: '🏃', time: '18:00', daysOfWeek: [1, 3, 5] },
   { name: 'Beber água', dosage: '1 copo', emoji: '💧', time: '10:00' },
+  { name: 'Jejum intermitente', dosage: '', emoji: '⏳', time: '12:00', fastingHours: 16 },
 ];
+
+/** Opções de horas de jejum no editor. */
+const FASTING_HOURS_OPTIONS = [12, 14, 16, 18, 20];
+
+/** A partir da 1ª refeição + horas de jejum, calcula a janela de alimentação. */
+function fastingWindow(time: string, fastH: number): { end: string; warn: string; eat: number } {
+  const parts = time.split(':').map((s) => parseInt(s, 10));
+  const firstMin = (parts[0] || 0) * 60 + (parts[1] || 0);
+  const eat = Math.max(1, 24 - fastH);
+  const endMin = (firstMin + eat * 60) % (24 * 60);
+  const warnMin = (endMin - 30 + 24 * 60) % (24 * 60);
+  const fmt = (mins: number) =>
+    `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  return { end: fmt(endMin), warn: fmt(warnMin), eat };
+}
 
 /** Rótulos curtos por índice (0=domingo … 6=sábado, igual a Date.getDay()). */
 const DAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -103,6 +120,8 @@ interface EditorState {
   time: string;
   emoji: string;
   daysOfWeek: number[];
+  /** Jejum intermitente: horas de jejum, ou null = hábito normal. */
+  fastingHours: number | null;
 }
 
 const EMPTY_EDITOR: EditorState = {
@@ -113,6 +132,7 @@ const EMPTY_EDITOR: EditorState = {
   time: '08:00',
   emoji: '💧',
   daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+  fastingHours: null,
 };
 
 export function RemindersScreen() {
@@ -150,6 +170,7 @@ export function RemindersScreen() {
       time: t.time,
       emoji: t.emoji,
       daysOfWeek: t.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6],
+      fastingHours: t.fastingHours ?? null,
     }));
   };
 
@@ -162,6 +183,7 @@ export function RemindersScreen() {
       time: med.time,
       emoji: med.emoji ?? '💧',
       daysOfWeek: med.daysOfWeek?.length ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6],
+      fastingHours: med.fastingHours ?? null,
     });
   };
 
@@ -200,6 +222,7 @@ export function RemindersScreen() {
           emoji: editor.emoji,
           enabled: true,
           daysOfWeek: editor.daysOfWeek,
+          fastingHours: editor.fastingHours,
         });
       } else {
         await updateMedication(editor.id, {
@@ -208,6 +231,7 @@ export function RemindersScreen() {
           time: editor.time,
           emoji: editor.emoji,
           daysOfWeek: editor.daysOfWeek,
+          fastingHours: editor.fastingHours,
         });
       }
       await scheduleAllMedications();
@@ -405,21 +429,79 @@ export function RemindersScreen() {
               returnKeyType="next"
             />
 
-            <Text style={styles.fieldLabel}>Detalhe (opcional)</Text>
-            <TextInput
-              value={editor.dosage}
-              onChangeText={(t) => setEditor((s) => ({ ...s, dosage: t }))}
-              placeholder="Ex.: 1 copo, 2 cápsulas, 16h de jejum…"
-              placeholderTextColor={colors.text.tertiary}
-              style={styles.input}
-            />
+            {/* Jejum intermitente */}
+            <View style={styles.fastingToggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Jejum intermitente</Text>
+                <Text style={styles.fastingHint}>
+                  Defina as horas de jejum e a 1ª refeição; aviso 30 min antes de
+                  fechar a janela de alimentação.
+                </Text>
+              </View>
+              <Switch
+                value={editor.fastingHours != null}
+                onValueChange={(v) =>
+                  setEditor((s) => ({
+                    ...s,
+                    fastingHours: v ? (s.fastingHours ?? 16) : null,
+                    emoji: v ? '⏳' : s.emoji,
+                  }))
+                }
+                trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+                thumbColor={
+                  editor.fastingHours != null ? colors.text.onGold : colors.text.tertiary
+                }
+              />
+            </View>
+
+            {editor.fastingHours == null ? (
+              <>
+                <Text style={styles.fieldLabel}>Detalhe (opcional)</Text>
+                <TextInput
+                  value={editor.dosage}
+                  onChangeText={(t) => setEditor((s) => ({ ...s, dosage: t }))}
+                  placeholder="Ex.: 1 copo, 2 cápsulas…"
+                  placeholderTextColor={colors.text.tertiary}
+                  style={styles.input}
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.fieldLabel}>Horas de jejum</Text>
+                <View style={styles.fastingChips}>
+                  {FASTING_HOURS_OPTIONS.map((hrs) => {
+                    const on = editor.fastingHours === hrs;
+                    return (
+                      <Pressable
+                        key={hrs}
+                        onPress={() => setEditor((s) => ({ ...s, fastingHours: hrs }))}
+                        style={[styles.fastingChip, on && styles.fastingChipOn]}
+                      >
+                        <Text style={[styles.fastingChipText, on && styles.fastingChipTextOn]}>
+                          {hrs}h
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            )}
 
             <View style={{ height: spacing.md }} />
             <TimePickerInput
-              label="Horário"
+              label={editor.fastingHours != null ? 'Primeira refeição' : 'Horário'}
               value={editor.time}
               onChange={(hhmm) => setEditor((s) => ({ ...s, time: hhmm }))}
             />
+
+            {editor.fastingHours != null && (
+              <Text style={styles.fastingPreview}>
+                {(() => {
+                  const w = fastingWindow(editor.time, editor.fastingHours!);
+                  return `Janela de alimentação: ${editor.time} → ${w.end} (${w.eat}h). Aviso às ${w.warn}; pare de comer às ${w.end}.`;
+                })()}
+              </Text>
+            )}
 
             <View style={{ height: spacing.md }} />
             <View style={styles.daysLabelRow}>
@@ -611,6 +693,50 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+  },
+  fastingToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  fastingHint: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  fastingChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  fastingChip: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg.surface,
+  },
+  fastingChipOn: {
+    borderColor: colors.accent.gold,
+    backgroundColor: 'rgba(244,197,83,0.12)',
+  },
+  fastingChipText: {
+    ...typography.bodyMedium,
+    color: colors.text.secondary,
+  },
+  fastingChipTextOn: {
+    color: colors.accent.gold,
+    fontWeight: '700',
+  },
+  fastingPreview: {
+    ...typography.small,
+    color: colors.accent.gold,
+    marginTop: spacing.sm,
+    lineHeight: 17,
   },
   templateRow: {
     flexDirection: 'row',

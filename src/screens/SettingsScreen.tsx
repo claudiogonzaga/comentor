@@ -893,6 +893,22 @@ export function SettingsScreen() {
           </Text>
         </Card>
 
+        <Pressable onPress={() => navigation.navigate('Reminders')}>
+          <Card style={styles.linkCard}>
+            <View style={styles.linkIcon}>
+              <GreekIcon name="bell" size={24} color={colors.accent.gold} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkTitle}>Hábitos saudáveis</Text>
+              <Text style={styles.linkSub}>
+                Sol, luz azul, respiração, cardio, remédios, água, jejum… + nudge
+                de trabalho sentado. A coruja insiste até você marcar que fez.
+              </Text>
+            </View>
+            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
+          </Card>
+        </Pressable>
+
         <Pressable onPress={() => navigation.navigate('SonsVozes')}>
           <Card style={styles.linkCard}>
             <View style={styles.linkIcon}>
@@ -902,22 +918,6 @@ export function SettingsScreen() {
               <Text style={styles.linkTitle}>Sons e Vozes</Text>
               <Text style={styles.linkSub}>
                 Canto da coruja nas notificações e a voz da Comentora.
-              </Text>
-            </View>
-            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
-          </Card>
-        </Pressable>
-
-        <Pressable onPress={() => navigation.navigate('Reminders')}>
-          <Card style={styles.linkCard}>
-            <View style={styles.linkIcon}>
-              <GreekIcon name="bell" size={24} color={colors.accent.gold} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.linkTitle}>Hábitos saudáveis</Text>
-              <Text style={styles.linkSub}>
-                Sol, luz azul, respiração, cardio, remédios, água… + nudge de
-                trabalho sentado. A coruja insiste até você marcar que fez.
               </Text>
             </View>
             <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />

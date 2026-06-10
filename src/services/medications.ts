@@ -116,6 +116,77 @@ export async function scheduleAllMedications(): Promise<string[]> {
         : [0, 1, 2, 3, 4, 5, 6];
     const isDaily = activeDays.length >= 7;
 
+    // JEJUM INTERMITENTE: em vez do lembrete normal, agenda (a) um aviso 30 min
+    // antes do fim da janela de alimentação e (b) um aviso no FIM ("pare de
+    // comer"). `time` é a 1ª refeição; janela = 24 − fastingHours. Sem âncora
+    // "hora de tomar" e sem corrente de insistências.
+    if (med.fastingHours != null) {
+      const fastH = Math.min(23, Math.max(1, Math.round(med.fastingHours)));
+      const firstMin = safeHour * 60 + safeMinute;
+      const endMin = (firstMin + (24 - fastH) * 60) % (24 * 60);
+      const warnMin = (endMin - 30 + 24 * 60) % (24 * 60);
+      const hhmm = (mins: number) =>
+        `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+      const fastingNotifs = [
+        {
+          atMin: warnMin,
+          body: `Faltam 30 min para fechar sua janela de alimentação (até ${hhmm(endMin)}). Aproveite para comer.`,
+        },
+        {
+          atMin: endMin,
+          body: `Janela de alimentação fechada (${hhmm(endMin)}). Hora de parar de comer — começa o jejum de ${fastH}h. 🙌`,
+        },
+      ];
+      for (const n of fastingNotifs) {
+        const content = {
+          title,
+          body: n.body,
+          data: { type: `med:${med.id}`, medId: med.id },
+          sound,
+        };
+        const nh = Math.floor(n.atMin / 60);
+        const nm = n.atMin % 60;
+        if (isDaily) {
+          try {
+            const id = await Notifications.scheduleNotificationAsync({
+              content,
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.DAILY,
+                hour: nh,
+                minute: nm,
+                channelId,
+              },
+            });
+            ids.push(id);
+          } catch (err) {
+            console.warn(`failed to schedule fasting notif ${med.id}:`, err);
+          }
+        } else {
+          for (const dow of activeDays) {
+            try {
+              const id = await Notifications.scheduleNotificationAsync({
+                content,
+                trigger: {
+                  type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+                  weekday: dow + 1,
+                  hour: nh,
+                  minute: nm,
+                  channelId,
+                },
+              });
+              ids.push(id);
+            } catch (err) {
+              console.warn(
+                `failed to schedule weekly fasting notif ${med.id} (dow ${dow}):`,
+                err,
+              );
+            }
+          }
+        }
+      }
+      continue; // jejum não usa âncora nem corrente de insistências
+    }
+
     const anchorContent = {
       title,
       body: baseBody,
@@ -200,7 +271,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
   // sistema), armadas em background. Fecha a intenção de que TODO aviso possa
   // ser falado, mesmo com a tela apagada. Best-effort, fora do caminho crítico.
   const spokenItems = meds
-    .filter((med) => med.enabled)
+    .filter((med) => med.enabled && med.fastingHours == null)
     .map((med) => {
       const p = med.time.split(':').map((s) => parseInt(s, 10));
       const hh = p[0];
