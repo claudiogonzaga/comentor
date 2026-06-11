@@ -350,9 +350,49 @@ export function ReadAloudScreen() {
 
   const titleFor = (t: string) => (t.split('\n')[0] || t).slice(0, 40).trim() || 'Leitura';
 
+  // Toca PREFERINDO um áudio já SALVO: se o texto da caixinha já tem áudio
+  // guardado (mesma voz Gemini), toca o arquivo na hora — sem regerar nem gastar
+  // tokens. No encadeamento (respiração → leitura), `fallbackMostRecent` faz cair
+  // para o ÁUDIO SALVO MAIS RECENTE quando o texto da caixinha não tem um.
+  // Lê a lista fresca do banco para não depender do estado ainda carregando.
+  const playPreferSaved = async (
+    raw: string,
+    opts?: { fallbackMostRecent?: boolean },
+  ) => {
+    const t = raw.trim();
+    if (provider === 'gemini') {
+      let list = saved;
+      try {
+        list = await listReadAloudTexts();
+      } catch {
+        /* usa o que já estava em memória */
+      }
+      const match = t
+        ? list.find(
+            (s) => s.content.trim() === t && s.audioUri && s.audioVoice === geminiVoiceName,
+          )
+        : undefined;
+      const chosen =
+        match ??
+        (opts?.fallbackMostRecent
+          ? list.find((s) => s.audioUri && s.audioVoice === geminiVoiceName)
+          : undefined);
+      if (chosen?.audioUri) {
+        Keyboard.dismiss();
+        setText(chosen.content);
+        void useReadAloud
+          .getState()
+          .playSavedUri(chosen.audioUri, chosen.title || titleFor(chosen.content), rate);
+        return;
+      }
+    }
+    if (!t) return;
+    startRead(t, titleFor(t));
+  };
+
   const handlePlay = () => {
     setKV('read_aloud_draft', text).catch(() => {});
-    startRead(text, titleFor(text.trim()));
+    void playPreferSaved(text);
   };
 
   // Texto SALVO: se já tem áudio guardado, toca direto (instantâneo); senão gera.
@@ -370,7 +410,12 @@ export function ReadAloudScreen() {
   useEffect(() => {
     if (!autostart || autostartedRef.current || !draftLoaded || !text.trim()) return;
     autostartedRef.current = true;
-    const t = setTimeout(() => handlePlay(), 400);
+    // Encadeado da respiração: toca o áudio JÁ SALVO (o do texto da caixinha ou,
+    // se não houver, o salvo mais recente) — não regera quando já existe arquivo.
+    const t = setTimeout(
+      () => void playPreferSaved(textRef.current, { fallbackMostRecent: true }),
+      400,
+    );
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autostart, draftLoaded, text]);
