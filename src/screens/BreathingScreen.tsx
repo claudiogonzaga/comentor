@@ -101,7 +101,7 @@ export function BreathingScreen() {
       }
     }, 500);
     // Trilha de fundo escolhida nas configurações (em loop durante o exercício).
-    playBreathingSound({
+    void playBreathingSound({
       id: config?.breathingSoundId ?? 'cello',
       customUri: resolveCustomUri(),
     });

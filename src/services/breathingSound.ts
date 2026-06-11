@@ -6,11 +6,32 @@
 // (id 'custom', cujo file:// vem da config). Falhas são engolidas — nunca
 // derrubam o app.
 
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { getBreathingSound, type BreathingSoundId } from '../constants/breathingSounds';
 
 let active: AudioPlayer | null = null;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
+let backgroundReady = false;
+
+/**
+ * Liga a reprodução em SEGUNDO PLANO (continua com a tela apagada/bloqueada). O
+ * usuário apaga a tela para dormir — o som da respiração precisa seguir tocando.
+ * Igual ao "Leia para mim": `shouldPlayInBackground` mantém o foreground service
+ * de mídia do expo-audio segurando o áudio. Idempotente.
+ */
+async function ensureBackgroundAudio(): Promise<void> {
+  if (backgroundReady) return;
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'duckOthers',
+    });
+    backgroundReady = true;
+  } catch {
+    /* se falhar, toca em primeiro plano mesmo */
+  }
+}
 
 function release(player: AudioPlayer): void {
   try {
@@ -55,14 +76,15 @@ function resolveSource(
  * som ativo. Retorna false se não havia nada para tocar (ex.: 'custom' sem
  * arquivo).
  */
-export function playBreathingSound(opts: {
+export async function playBreathingSound(opts: {
   id: string;
   customUri?: string | null;
   loop?: boolean;
-}): boolean {
+}): Promise<boolean> {
   const source = resolveSource(opts.id, opts.customUri ?? null);
   if (source == null) return false;
   try {
+    await ensureBackgroundAudio(); // continua tocando com a tela apagada
     stopBreathingSound();
     const player = createAudioPlayer(source);
     active = player;
@@ -81,8 +103,9 @@ export function previewBreathingSound(
   customUri: string | null,
   seconds = 8,
 ): void {
-  const ok = playBreathingSound({ id, customUri, loop: false });
-  if (!ok) return;
-  if (previewTimer) clearTimeout(previewTimer);
-  previewTimer = setTimeout(() => stopBreathingSound(), seconds * 1000);
+  void playBreathingSound({ id, customUri, loop: false }).then((ok) => {
+    if (!ok) return;
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => stopBreathingSound(), seconds * 1000);
+  });
 }
