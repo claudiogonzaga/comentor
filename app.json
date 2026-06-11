@@ -2,7 +2,7 @@
   "expo": {
     "name": "Comentora",
     "slug": "comentor",
-    "version": "1.58.0",
+    "version": "1.59.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -45,7 +45,7 @@
         "android.permission.health.READ_EXERCISE",
         "android.permission.health.READ_STEPS",
         "android.permission.health.READ_HEART_RATE",
-        "android.permission.health.READ_LEAN_BODY_MASS",
+        "android.permission.health.READ_WEIGHT",
         "android.permission.health.READ_BODY_FAT"
       ]
     },

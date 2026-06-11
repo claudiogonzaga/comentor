@@ -429,6 +429,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('birth_year')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN birth_year INTEGER`);
   }
+  // v1.59: sexo (tela "Sobre você").
+  if (!colNames.includes('sex')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN sex TEXT`);
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -652,6 +656,7 @@ interface UserConfigRow {
   sedentary_end: string | null;
   sedentary_interval_min: number | null;
   birth_year: number | null;
+  sex: string | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -705,6 +710,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   sedentaryEnd: r.sedentary_end ?? '17:00',
   sedentaryIntervalMin: r.sedentary_interval_min ?? 60,
   birthYear: r.birth_year ?? null,
+  sex: (r.sex ?? null) as UserConfig['sex'],
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -770,6 +776,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     sedentaryEnd: 'sedentary_end',
     sedentaryIntervalMin: 'sedentary_interval_min',
     birthYear: 'birth_year',
+    sex: 'sex',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

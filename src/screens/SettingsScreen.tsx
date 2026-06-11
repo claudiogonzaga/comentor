@@ -6,63 +6,22 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { TimePickerInput } from '../components/TimePickerInput';
 import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
-import { ensureSleepHabit, rescheduleAllNotifications } from '../services/coach';
-import {
-  ensureChannel,
-  ensurePermissions,
-  scheduleNightReminders,
-  sendTestNotification,
-  openDndAccessSettings,
-  openOwlChannelSettings,
-} from '../services/notifications';
-import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
-import { scheduleInspirationNotifications } from '../services/inspiration';
-import { scheduleAllMedications } from '../services/medications';
-import {
-  spokenNudgesAvailable,
-  isExactAlarmAllowed,
-  openExactAlarmSettings,
-  isIgnoringBatteryOptimizations,
-  requestIgnoreBatteryOptimizations,
-  scheduleSpokenTest,
-  cancelAllSpoken,
-  setSpokenHeadphonesOnly,
-  isHeadphonesConnected,
-  setSpokenQuietHours,
-} from '../services/spokenNudges';
-import { testApiKey } from '../services/gemini';
-import {
-  deleteAllDownloadedModels,
-  deleteDownloadedModel,
-  getDownloadedModelSize,
-  isModelDownloaded,
-} from '../services/modelDownload';
+import { deleteAllDownloadedModels } from '../services/modelDownload';
 import { releaseModel } from '../services/localModel';
 import { resetAllUserData } from '../services/database';
-import {
-  LOCAL_MODEL_LIST,
-  formatModelSize,
-} from '../constants/models';
-import {
-  DEFAULT_SYSTEM_PROMPT,
-  PROMPT_PLACEHOLDERS,
-} from '../constants/promptTemplate';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
-import type { AIBackend, GeminiModel, LocalModelId, Tone } from '../types';
+import type { Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
   { value: 'gentle', label: 'Gentil' },
@@ -70,281 +29,20 @@ const TONES: { value: Tone; label: string }[] = [
   { value: 'brutal', label: 'Brutal' },
 ];
 
-const MODELS: { value: GeminiModel; label: string; sub: string }[] = [
-  { value: 'gemini-3.1-flash-lite', label: '3.1 Flash Lite', sub: 'novo, mais econômico (default)' },
-  { value: 'gemini-3.1-flash', label: '3.1 Flash', sub: 'novo, melhor argumentação' },
-  { value: 'gemini-2.5-flash-lite', label: '2.5 Flash Lite', sub: 'estável, barato' },
-  { value: 'gemini-2.5-flash', label: '2.5 Flash', sub: 'estável, mais inteligente' },
-  { value: 'gemini-2.0-flash-lite', label: '2.0 Flash Lite', sub: 'fallback antigo' },
-  { value: 'gemini-2.0-flash', label: '2.0 Flash', sub: 'fallback antigo' },
-];
-
 export function SettingsScreen() {
   const navigation = useNavigation<any>();
   const { config, setConfig, setApiKey, refreshConfig } = useAppStore();
 
-  const [bedtime, setBedtime] = useState(config?.bedtime ?? '23:00');
-  const [interval, setInterval] = useState(String(config?.reminderIntervalMinutes ?? 10));
-  const [name, setName] = useState(config?.name ?? '');
   const [tone, setTone] = useState<Tone>(config?.tone ?? 'firm');
-  const [model, setModel] = useState<GeminiModel>(config?.geminiModel ?? 'gemini-3.1-flash-lite');
-  const [aiBackend, setAIBackend] = useState<AIBackend>(config?.aiBackend ?? 'remote');
-  const [localModelId, setLocalModelId] = useState<LocalModelId>(
-    (config?.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id,
-  );
-  const [allowMobileData, setAllowMobileData] = useState(config?.allowMobileDataDownload ?? false);
-  const [downloadedSizes, setDownloadedSizes] = useState<Record<string, number>>({});
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState(config?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT);
-  const [prepEnabled, setPrepEnabled] = useState(config?.prepRemindersEnabled ?? true);
-  const [voiceEnabled, setVoiceEnabled] = useState(config?.voiceModeEnabled ?? false);
-  const [awarenessEnabled, setAwarenessEnabled] = useState(
-    config?.sleepAwarenessEnabled ?? true,
-  );
-  const [notifPerDay, setNotifPerDay] = useState(
-    config?.notificationsPerDay ?? 4,
-  );
-  const [dndBypass, setDndBypass] = useState(config?.dndBypassEnabled ?? false);
-  const [voiceNudges, setVoiceNudges] = useState(config?.voiceNudgesEnabled ?? false);
-  const [inspirationMode, setInspirationMode] = useState(
-    config?.inspirationModeEnabled ?? false,
-  );
-  const [inspPerDay, setInspPerDay] = useState(config?.inspirationPerDay ?? 6);
-  const [spokenNudges, setSpokenNudges] = useState(config?.spokenNudgesEnabled ?? false);
-  const [headphonesOnly, setHeadphonesOnly] = useState(config?.spokenHeadphonesOnly ?? false);
-  const [testingSpoken, setTestingSpoken] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testingNotif, setTestingNotif] = useState(false);
-  const [keyStatus, setKeyStatus] = useState<'idle' | 'ok' | 'error'>('idle');
-  const [keyError, setKeyError] = useState<string | null>(null);
-  const [showPlaceholders, setShowPlaceholders] = useState(false);
-  const [promptExpanded, setPromptExpanded] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     if (config) {
-      setBedtime(config.bedtime);
-      setInterval(String(config.reminderIntervalMinutes));
-      setName(config.name ?? '');
       setTone(config.tone);
-      setModel(config.geminiModel);
-      setSystemPrompt(config.systemPrompt);
-      setPrepEnabled(config.prepRemindersEnabled);
-      setVoiceEnabled(config.voiceModeEnabled);
-      setAwarenessEnabled(config.sleepAwarenessEnabled);
-      setNotifPerDay(config.notificationsPerDay ?? 4);
-      setDndBypass(config.dndBypassEnabled ?? false);
-      setVoiceNudges(config.voiceNudgesEnabled ?? false);
-      setInspirationMode(config.inspirationModeEnabled ?? false);
-      setInspPerDay(config.inspirationPerDay ?? 6);
-      setSpokenNudges(config.spokenNudgesEnabled ?? false);
-      setHeadphonesOnly(config.spokenHeadphonesOnly ?? false);
-      setAIBackend(config.aiBackend);
-      setLocalModelId((config.localModelId as LocalModelId | null) ?? LOCAL_MODEL_LIST[0].id);
-      setAllowMobileData(config.allowMobileDataDownload);
     }
   }, [config]);
 
-  const refreshLocalModelStatus = async () => {
-    const sizes: Record<string, number> = {};
-    for (const m of LOCAL_MODEL_LIST) {
-      sizes[m.id] = (await isModelDownloaded(m.id)) ? await getDownloadedModelSize(m.id) : 0;
-    }
-    setDownloadedSizes(sizes);
-  };
-
-  useEffect(() => {
-    void refreshLocalModelStatus();
-  }, []);
-
-  const trimmedKey = apiKeyInput.trim();
-  const hasStoredKey = !!config?.hasApiKey;
-  const localCurrentDownloaded = !!config?.localModelDownloaded && !!config?.localModelId;
-  const canSave =
-    (aiBackend === 'remote' && (hasStoredKey || trimmedKey.length >= 20)) ||
-    (aiBackend === 'local' && localCurrentDownloaded);
-
-  const handleTestNotification = async () => {
-    setTestingNotif(true);
-    try {
-      const { granted, scheduledCount, channel } = await sendTestNotification();
-      if (!granted) {
-        Alert.alert(
-          'Notificações desligadas',
-          'O Android está bloqueando as notificações da Comentora. Vá em Configurações do Android → Apps → Comentor → Notificações e ative tudo.',
-        );
-        return;
-      }
-
-      // Diagnóstico do canal lido de volta do Android — ajuda a entender, no
-      // próprio aparelho, por que o som ou o espelhamento no relógio falham.
-      let diag = '';
-      if (channel) {
-        const soundLabel =
-          channel.sound === null
-            ? 'SEM SOM (silencioso)'
-            : channel.sound === 'custom'
-              ? 'canto da coruja'
-              : 'som padrão';
-        const importanceOk = channel.importance >= 4;
-        diag =
-          `\n\nDiagnóstico do canal:\n` +
-          `• Som: ${soundLabel}\n` +
-          `• Importância: ${channel.importance}/5 ${importanceOk ? '(ok)' : '(baixa)'}\n` +
-          `• Atravessa Não Perturbe: ${channel.bypassDnd ? 'sim' : 'não'}\n` +
-          `• Visível na tela bloqueada/relógio: ${channel.lockscreenVisibility === 1 ? 'sim' : 'restrito'}` +
-          (channel.sound === null
-            ? `\n\nO canal está SILENCIOSO. Toque em "Ajustar volume / som" e ative o som, ou apague os dados do app para recriar o canal.`
-            : '');
-      }
-
-      Alert.alert(
-        'Teste enviado',
-        `Uma notificação deve aparecer em ~3 segundos.\n\n` +
-          `${scheduledCount} lembrete(s) já agendado(s) para os próximos dias.` +
-          diag +
-          `\n\nSe a notificação NÃO aparecer, o problema é a permissão ou a otimização de bateria do aparelho.`,
-      );
-    } finally {
-      setTestingNotif(false);
-    }
-  };
-
-  const handleTestKey = async () => {
-    if (!trimmedKey) {
-      Alert.alert(
-        'Sem chave para testar',
-        'Cole uma chave no campo abaixo primeiro.',
-      );
-      return;
-    }
-    setTesting(true);
-    setKeyError(null);
-    const result = await testApiKey(trimmedKey, model);
-    setTesting(false);
-    if (result.ok) {
-      setKeyStatus('ok');
-    } else {
-      setKeyStatus('error');
-      setKeyError(result.error ?? 'erro desconhecido');
-    }
-  };
-
-  const handleDownloadModel = async (id: LocalModelId) => {
-    await setConfig({
-      localModelId: id,
-      localModelDownloaded: false,
-      allowMobileDataDownload: allowMobileData,
-    });
-    navigation.navigate('ModelDownload', { modelId: id, fromOnboarding: false });
-  };
-
-  const handleDeleteModel = (id: LocalModelId) => {
-    const m = LOCAL_MODEL_LIST.find((x) => x.id === id);
-    if (!m) return;
-    Alert.alert(
-      `Deletar ${m.label}?`,
-      `Vai liberar ~${formatModelSize(m.sizeBytes)} no celular. Você pode baixar de novo a qualquer momento.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Deletar',
-          style: 'destructive',
-          onPress: async () => {
-            await releaseModel();
-            await deleteDownloadedModel(id);
-            if (config?.localModelId === id) {
-              await setConfig({ localModelDownloaded: false });
-            }
-            await refreshLocalModelStatus();
-            await refreshConfig();
-          },
-        },
-      ],
-    );
-  };
-
-  const resetPrompt = () => {
-    Alert.alert(
-      'Restaurar prompt padrão?',
-      'Suas alterações no prompt serão perdidas. Confirme.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Restaurar',
-          style: 'destructive',
-          onPress: () => setSystemPrompt(DEFAULT_SYSTEM_PROMPT),
-        },
-      ],
-    );
-  };
-
-  const save = async () => {
-    if (!canSave) {
-      const msg = aiBackend === 'remote'
-        ? 'Cadastre uma chave de API válida para salvar.'
-        : 'Baixe um modelo local para usar essa modalidade.';
-      Alert.alert('Configuração incompleta', msg);
-      return;
-    }
-
-    setSaving(true);
-    try {
-      if (aiBackend === 'remote' && trimmedKey) {
-        if (keyStatus !== 'ok') {
-          const result = await testApiKey(trimmedKey, model);
-          if (!result.ok) {
-            setKeyStatus('error');
-            setKeyError(result.error ?? 'chave inválida');
-            Alert.alert(
-              'Chave inválida',
-              `O Gemini não aceitou: ${result.error ?? 'erro desconhecido'}.`,
-            );
-            setSaving(false);
-            return;
-          }
-          setKeyStatus('ok');
-        }
-        await setApiKey(trimmedKey);
-        setApiKeyInput('');
-      }
-
-      const intervalNum = Math.max(5, Math.min(60, parseInt(interval, 10) || 10));
-      const finalPrompt = systemPrompt.trim().length > 0 ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
-      await setConfig({
-        bedtime,
-        reminderIntervalMinutes: intervalNum,
-        name: name.trim() || null,
-        tone,
-        geminiModel: model,
-        systemPrompt: finalPrompt,
-        prepRemindersEnabled: prepEnabled,
-        voiceModeEnabled: voiceEnabled,
-        sleepAwarenessEnabled: awarenessEnabled,
-        notificationsPerDay: notifPerDay,
-        aiBackend,
-        localModelId: aiBackend === 'local' ? localModelId : config?.localModelId ?? null,
-        allowMobileDataDownload: allowMobileData,
-      });
-      const habit = await ensureSleepHabit(bedtime);
-      if (await ensurePermissions()) {
-        await ensureChannel();
-        await scheduleNightReminders({
-          bedtime,
-          intervalMinutes: intervalNum,
-          maxReminders: 12,
-          habitId: habit.id,
-          prepRemindersEnabled: prepEnabled,
-        });
-        await scheduleSleepAwarenessNotifications();
-      }
-      Alert.alert('Salvo', 'Suas preferências foram atualizadas.');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
@@ -365,10 +63,6 @@ export function SettingsScreen() {
     const url = updateInfo?.downloadUrl ?? updateInfo?.releaseUrl;
     if (!url) return;
     Linking.openURL(url);
-  };
-
-  const handleRedoInterview = () => {
-    navigation.navigate('Interview', { mode: 'redo' });
   };
 
   const handleResetAllData = () => {
@@ -407,25 +101,6 @@ export function SettingsScreen() {
     );
   };
 
-  const removeKey = async () => {
-    Alert.alert(
-      'Remover chave de API?',
-      'Sem ela, o app fica em modo offline (mensagens pré-escritas) ou você precisa trocar para um modelo local.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Remover',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteApiKey();
-            await setConfig({ hasApiKey: false });
-            await refreshConfig();
-          },
-        },
-      ],
-    );
-  };
-
   return (
     <ScreenContainer>
       <View style={styles.header}>
@@ -437,565 +112,20 @@ export function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Card style={styles.card}>
-          <Text style={styles.section}>Sono</Text>
-
-          <Text style={styles.label}>Como te chamo</Text>
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Seu nome (opcional)"
-            placeholderTextColor={colors.text.tertiary}
-            style={styles.input}
-          />
-
-          <View style={{ marginTop: spacing.md }}>
-            <TimePickerInput
-              label="Horário de dormir"
-              value={bedtime}
-              onChange={setBedtime}
-            />
-          </View>
-
-          <Text style={styles.label}>Intervalo entre lembretes (min)</Text>
-          <TextInput
-            value={interval}
-            onChangeText={(v) => setInterval(v.replace(/[^0-9]/g, '').slice(0, 2))}
-            style={[styles.input, styles.inputCenter]}
-            keyboardType="number-pad"
-          />
-
-          <View style={styles.toggleRow}>
+        <Pressable onPress={() => navigation.navigate('AboutYou')}>
+          <Card style={styles.linkCard}>
+            <View style={styles.linkIcon}>
+              <GreekIcon name="owl" size={24} color={colors.accent.gold} />
+            </View>
             <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Abrir o chat com voz ligada
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Por padrão a coruja só escreve. Ligando aqui, as conversas já
-                começam com a leitura em voz alta — e você ainda pode
-                silenciar pelo botão dentro do chat.
+              <Text style={styles.linkTitle}>Sobre você</Text>
+              <Text style={styles.linkSub}>
+                Nome, sexo, idade, conexão com o Health Connect e a entrevista.
               </Text>
             </View>
-            <Switch
-              value={voiceEnabled}
-              onValueChange={setVoiceEnabled}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={voiceEnabled ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Falar as notificações em voz alta
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Alternativa ao som: a coruja lê a notificação em voz alta (usa a
-                voz escolhida acima) — útil se você não escuta o piado. Não fala
-                por cima de uma chamada: se Teams/Meet/WhatsApp estiver em uso,
-                esse app fica em primeiro plano e a Comentora não fala. Por
-                limite do Android, a leitura em voz só funciona com o app aberto
-                em primeiro plano — com a tela bloqueada quem te avisa é o piado
-                da coruja.
-              </Text>
-            </View>
-            <Switch
-              value={voiceNudges}
-              onValueChange={async (next) => {
-                setVoiceNudges(next);
-                try {
-                  await setConfig({ voiceNudgesEnabled: next });
-                } catch (err) {
-                  console.warn('toggle voice nudges failed:', err);
-                }
-              }}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={voiceNudges ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Lembretes da Comentora
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Pequenas notificações ao longo do dia com fatos sobre a
-                importância do sono, em horários variados.
-              </Text>
-            </View>
-            <Switch
-              value={awarenessEnabled}
-              onValueChange={setAwarenessEnabled}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={awarenessEnabled ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          {awarenessEnabled && (
-            <View style={styles.toggleRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                  Quantos por dia
-                </Text>
-                <Text style={[typography.small, { color: colors.text.secondary }]}>
-                  Número de lembretes por dia. A frequência dobra depois do
-                  pôr do sol (~18h), conforme a hora de dormir se aproxima.
-                </Text>
-              </View>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: spacing.sm,
-                }}
-              >
-                <Pressable
-                  onPress={() => setNotifPerDay((n) => Math.max(1, n - 1))}
-                  hitSlop={8}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    borderWidth: 1.5,
-                    borderColor: colors.accent.gold,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>
-                    −
-                  </Text>
-                </Pressable>
-                <Text
-                  style={[
-                    typography.subtitle,
-                    { color: colors.text.primary, minWidth: 26, textAlign: 'center' },
-                  ]}
-                >
-                  {notifPerDay}
-                </Text>
-                <Pressable
-                  onPress={() => setNotifPerDay((n) => Math.min(12, n + 1))}
-                  hitSlop={8}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    borderWidth: 1.5,
-                    borderColor: colors.accent.gold,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>
-                    +
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Modo inspiração
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Ao longo do dia (8h–21h) a Comentora te manda mensagens curtas de
-                otimismo, persistência e inspiração. Escolha quantas você quer
-                receber logo abaixo.
-              </Text>
-            </View>
-            <Switch
-              value={inspirationMode}
-              onValueChange={async (next) => {
-                setInspirationMode(next);
-                try {
-                  await setConfig({ inspirationModeEnabled: next });
-                  await scheduleInspirationNotifications();
-                } catch (err) {
-                  console.warn('toggle inspiration mode failed:', err);
-                }
-              }}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={inspirationMode ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          {inspirationMode && (
-            <View style={styles.toggleRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                  Quantas por dia
-                </Text>
-                <Text style={[typography.small, { color: colors.text.secondary }]}>
-                  Mensagens de inspiração espalhadas ao longo do dia (8h–21h).
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                <Pressable
-                  onPress={async () => {
-                    const next = Math.max(1, inspPerDay - 1);
-                    setInspPerDay(next);
-                    try {
-                      await setConfig({ inspirationPerDay: next });
-                      await scheduleInspirationNotifications();
-                    } catch (err) {
-                      console.warn('set inspiration per day failed:', err);
-                    }
-                  }}
-                  hitSlop={8}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    borderWidth: 1.5,
-                    borderColor: colors.accent.gold,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>−</Text>
-                </Pressable>
-                <Text
-                  style={[
-                    typography.subtitle,
-                    { color: colors.text.primary, minWidth: 26, textAlign: 'center' },
-                  ]}
-                >
-                  {inspPerDay}
-                </Text>
-                <Pressable
-                  onPress={async () => {
-                    const next = Math.min(14, inspPerDay + 1);
-                    setInspPerDay(next);
-                    try {
-                      await setConfig({ inspirationPerDay: next });
-                      await scheduleInspirationNotifications();
-                    } catch (err) {
-                      console.warn('set inspiration per day failed:', err);
-                    }
-                  }}
-                  hitSlop={8}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    borderWidth: 1.5,
-                    borderColor: colors.accent.gold,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ color: colors.accent.gold, fontSize: 22, lineHeight: 24 }}>+</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-
-          {spokenNudgesAvailable() && (
-            <>
-              <View style={styles.toggleRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                    Falar em voz alta
-                  </Text>
-                  <Text style={[typography.small, { color: colors.text.secondary }]}>
-                    A Comentora FALA em voz alta os avisos inspiradores E os seus
-                    lembretes (remédio, hábitos), mesmo com a tela apagada ou o app
-                    fechado. Usa a sua voz escolhida em "Sons e Vozes" (a voz do
-                    Gemini é preparada uma vez e reaproveitada; sem voz/cota, cai na
-                    voz do sistema).
-                  </Text>
-                </View>
-                <Switch
-                  value={spokenNudges}
-                  onValueChange={async (next) => {
-                    setSpokenNudges(next);
-                    try {
-                      await setConfig({ spokenNudgesEnabled: next });
-                      if (next) {
-                        await scheduleInspirationNotifications();
-                        // re-sincroniza as versões faladas dos lembretes também
-                        await scheduleAllMedications();
-                        if (!isExactAlarmAllowed()) {
-                          Alert.alert(
-                            'Permita alarmes exatos',
-                            'Para falar na hora certa mesmo com o app fechado, o Android precisa da permissão de "alarmes e lembretes".',
-                            [
-                              { text: 'Agora não', style: 'cancel' },
-                              { text: 'Abrir ajustes', onPress: () => openExactAlarmSettings() },
-                            ],
-                          );
-                        }
-                        if (!isIgnoringBatteryOptimizations()) {
-                          Alert.alert(
-                            'Desative a economia de bateria',
-                            'Em alguns celulares (Xiaomi, Samsung…) a economia de bateria pode impedir a Comentora de falar. Recomendo liberar a execução sem restrição.',
-                            [
-                              { text: 'Agora não', style: 'cancel' },
-                              {
-                                text: 'Abrir ajustes',
-                                onPress: () => requestIgnoreBatteryOptimizations(),
-                              },
-                            ],
-                          );
-                        }
-                      } else {
-                        await cancelAllSpoken();
-                      }
-                    } catch (err) {
-                      console.warn('toggle spoken nudges failed:', err);
-                    }
-                  }}
-                  trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-                  thumbColor={spokenNudges ? colors.text.onGold : colors.text.tertiary}
-                />
-              </View>
-
-              {spokenNudges && (
-                <View style={[styles.toggleRow, { marginTop: spacing.sm }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                      Só falar com fone de ouvido
-                    </Text>
-                    <Text style={[typography.small, { color: colors.text.secondary }]}>
-                      Quando ligado, a Comentora só fala se houver fone conectado
-                      (com fio, Bluetooth ou USB). De qualquer forma, com fone
-                      conectado o som SEMPRE sai pelo fone — nunca no alto-falante.
-                    </Text>
-                  </View>
-                  <Switch
-                    value={headphonesOnly}
-                    onValueChange={async (next) => {
-                      setHeadphonesOnly(next);
-                      try {
-                        await setConfig({ spokenHeadphonesOnly: next });
-                        setSpokenHeadphonesOnly(next); // espelha pro nativo (lê no disparo)
-                        if (next && !isHeadphonesConnected()) {
-                          Alert.alert(
-                            'Sem fone agora',
-                            'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
-                          );
-                        }
-                      } catch (err) {
-                        console.warn('toggle headphones-only failed:', err);
-                      }
-                    }}
-                    trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-                    thumbColor={headphonesOnly ? colors.text.onGold : colors.text.tertiary}
-                  />
-                </View>
-              )}
-
-              {spokenNudges && (
-                <View style={{ marginTop: spacing.md }}>
-                  <View style={styles.toggleRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                        Horário silencioso (sem voz)
-                      </Text>
-                      <Text style={[typography.small, { color: colors.text.secondary }]}>
-                        Nos horários e dias escolhidos, os avisos NÃO falam em voz
-                        alta — só notificam. Ex.: trabalho, audiências, academia.
-                      </Text>
-                    </View>
-                    <Switch
-                      value={config?.spokenQuietEnabled ?? false}
-                      onValueChange={async (next) => {
-                        await setConfig({ spokenQuietEnabled: next });
-                        setSpokenQuietHours({
-                          spokenQuietEnabled: next,
-                          spokenQuietStart: config?.spokenQuietStart ?? '09:00',
-                          spokenQuietEnd: config?.spokenQuietEnd ?? '18:00',
-                          spokenQuietDays: config?.spokenQuietDays ?? 127,
-                        });
-                      }}
-                      trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-                      thumbColor={
-                        (config?.spokenQuietEnabled ?? false)
-                          ? colors.text.onGold
-                          : colors.text.tertiary
-                      }
-                    />
-                  </View>
-
-                  {(config?.spokenQuietEnabled ?? false) && (
-                    <View style={{ marginTop: spacing.sm }}>
-                      <View style={styles.quietTimesRow}>
-                        <View style={{ flex: 1 }}>
-                          <TimePickerInput
-                            label="Início"
-                            value={config?.spokenQuietStart ?? '09:00'}
-                            onChange={async (hhmm) => {
-                              await setConfig({ spokenQuietStart: hhmm });
-                              setSpokenQuietHours({
-                                spokenQuietEnabled: true,
-                                spokenQuietStart: hhmm,
-                                spokenQuietEnd: config?.spokenQuietEnd ?? '18:00',
-                                spokenQuietDays: config?.spokenQuietDays ?? 127,
-                              });
-                            }}
-                          />
-                        </View>
-                        <View style={{ width: spacing.md }} />
-                        <View style={{ flex: 1 }}>
-                          <TimePickerInput
-                            label="Fim"
-                            value={config?.spokenQuietEnd ?? '18:00'}
-                            onChange={async (hhmm) => {
-                              await setConfig({ spokenQuietEnd: hhmm });
-                              setSpokenQuietHours({
-                                spokenQuietEnabled: true,
-                                spokenQuietStart: config?.spokenQuietStart ?? '09:00',
-                                spokenQuietEnd: hhmm,
-                                spokenQuietDays: config?.spokenQuietDays ?? 127,
-                              });
-                            }}
-                          />
-                        </View>
-                      </View>
-
-                      <Text style={styles.quietDaysLabel}>Dias</Text>
-                      <View style={styles.quietDaysRow}>
-                        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((lbl, idx) => {
-                          const mask = config?.spokenQuietDays ?? 127;
-                          const on = ((mask >> idx) & 1) === 1;
-                          return (
-                            <Pressable
-                              key={lbl}
-                              onPress={async () => {
-                                const nextMask = mask ^ (1 << idx);
-                                await setConfig({ spokenQuietDays: nextMask });
-                                setSpokenQuietHours({
-                                  spokenQuietEnabled: true,
-                                  spokenQuietStart: config?.spokenQuietStart ?? '09:00',
-                                  spokenQuietEnd: config?.spokenQuietEnd ?? '18:00',
-                                  spokenQuietDays: nextMask,
-                                });
-                              }}
-                              style={[styles.quietDayChip, on && styles.quietDayChipOn]}
-                            >
-                              <Text style={[styles.quietDayText, on && styles.quietDayTextOn]}>
-                                {lbl}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                      <Text style={styles.quietHint}>
-                        Dica: para o horário de trabalho, deixe Seg–Sex marcados.
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {spokenNudges && (
-                <Pressable
-                  onPress={async () => {
-                    setTestingSpoken(true);
-                    try {
-                      const r = await scheduleSpokenTest(60);
-                      if (r.ok) {
-                        Alert.alert(
-                          'Teste agendado ✓',
-                          'Em 1 minuto a Comentora vai falar. Pode trancar a tela ou até fechar o app — você deve ouvir a voz mesmo assim.',
-                        );
-                      } else {
-                        Alert.alert('Não consegui agendar o teste', r.reason ?? 'erro desconhecido');
-                      }
-                    } finally {
-                      setTestingSpoken(false);
-                    }
-                  }}
-                  disabled={testingSpoken}
-                  style={{
-                    marginTop: spacing.sm,
-                    alignSelf: 'flex-start',
-                    paddingVertical: spacing.sm,
-                    paddingHorizontal: spacing.md,
-                    borderRadius: radius.md,
-                    borderWidth: 1.5,
-                    borderColor: colors.accent.gold,
-                    opacity: testingSpoken ? 0.6 : 1,
-                  }}
-                >
-                  <Text style={[typography.small, { color: colors.accent.gold }]}>
-                    {testingSpoken ? 'Gerando áudio…' : '▶ Testar agora (fala em 1 min)'}
-                  </Text>
-                </Pressable>
-              )}
-            </>
-          )}
-
-          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
-            O lembrete de respiração antes de dormir agora vive em &quot;Lembretes e
-            hábitos&quot; (você pode escolher horário, ligar/desligar como qualquer outro).
-          </Text>
-
-          <View style={{ height: spacing.md }} />
-          <Button
-            label="Testar notificação agora"
-            variant="secondary"
-            onPress={handleTestNotification}
-            loading={testingNotif}
-          />
-          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
-            Não está recebendo lembretes? Toque acima — se a notificação de teste
-            não aparecer, o Android está bloqueando (permissão ou bateria).
-          </Text>
-
-          <View style={{ height: spacing.md }} />
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Atravessar o Não Perturbe
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                No modo Não Perturbe a coruja ainda te alcança — só que sem
-                som: ela apenas vibra, no padrão do canto da coruja. Você
-                precisa liberar o &quot;acesso ao Não Perturbe&quot; do Android.
-              </Text>
-            </View>
-            <Switch
-              value={dndBypass}
-              onValueChange={async (next) => {
-                setDndBypass(next);
-                try {
-                  await setConfig({ dndBypassEnabled: next });
-                  await rescheduleAllNotifications();
-                  if (next) await openDndAccessSettings();
-                } catch (err) {
-                  console.warn('toggle dnd bypass failed:', err);
-                }
-              }}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={dndBypass ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          {dndBypass && (
-            <Button
-              label="Liberar acesso ao Não Perturbe"
-              variant="secondary"
-              onPress={openDndAccessSettings}
-            />
-          )}
-
-          <View style={{ height: spacing.sm }} />
-          <Button
-            label="Ajustar volume / som das notificações"
-            variant="secondary"
-            onPress={openOwlChannelSettings}
-          />
-          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
-            O Android não permite que o app mude o volume da notificação — quem
-            controla é o sistema. Este botão abre a tela onde você ajusta
-            volume, som e importância da coruja.
-          </Text>
-        </Card>
+            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
+          </Card>
+        </Pressable>
 
         <Pressable onPress={() => navigation.navigate('Reminders')}>
           <Card style={styles.linkCard}>
@@ -1019,9 +149,26 @@ export function SettingsScreen() {
               <GreekIcon name="sound" size={24} color={colors.accent.gold} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.linkTitle}>Sons e Vozes</Text>
+              <Text style={styles.linkTitle}>Configurar Sons e Notificações</Text>
               <Text style={styles.linkSub}>
-                Canto da coruja nas notificações e a voz da Comentora.
+                Canto da coruja, voz da Comentora, avisos falados, lembretes do
+                dia, modo inspiração, Não Perturbe e volume.
+              </Text>
+            </View>
+            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
+          </Card>
+        </Pressable>
+
+        <Pressable onPress={() => navigation.navigate('BrainVoice')}>
+          <Card style={styles.linkCard}>
+            <View style={styles.linkIcon}>
+              <GreekIcon name="brain" size={24} color={colors.accent.gold} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkTitle}>Cérebro e Voz da Comentora</Text>
+              <Text style={styles.linkSub}>
+                A voz com que ela fala, a inteligência (API ou no celular) e o
+                prompt com a personalidade dela.
               </Text>
             </View>
             <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
@@ -1034,7 +181,10 @@ export function SettingsScreen() {
             {TONES.map((t) => (
               <Pressable
                 key={t.value}
-                onPress={() => setTone(t.value)}
+                onPress={() => {
+                  setTone(t.value);
+                  void setConfig({ tone: t.value });
+                }}
                 style={[styles.chip, tone === t.value && styles.chipActive]}
               >
                 <Text style={[styles.chipText, tone === t.value && styles.chipTextActive]}>
@@ -1045,285 +195,11 @@ export function SettingsScreen() {
           </View>
         </Card>
 
-        <Card style={styles.card}>
-          <Text style={styles.section}>Sobre você</Text>
-          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
-            {config?.interviewCompletedAt
-              ? 'Você já fez a entrevista inicial. Pode refazer ou aprofundar a qualquer momento.'
-              : 'Faça uma entrevista guiada para a Comentora entender melhor suas dificuldades.'}
-          </Text>
-          <Pressable onPress={handleRedoInterview} style={styles.outlineBtn}>
-            <Text style={styles.outlineBtnText}>
-              {config?.interviewCompletedAt ? 'Refazer / aprofundar entrevista' : 'Fazer entrevista'}
-            </Text>
-          </Pressable>
-        </Card>
+        
 
-        <Card style={styles.card}>
-          <Text style={styles.section}>Inteligência</Text>
-          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
-            Escolha entre API do Gemini (mais rápida, precisa de chave) ou modelo rodando direto no celular (privado, sem cota).
-          </Text>
+        
 
-          <View style={styles.backendRow}>
-            <Pressable
-              onPress={() => setAIBackend('remote')}
-              style={[styles.backendChip, aiBackend === 'remote' && styles.backendChipActive]}
-            >
-              <View style={styles.backendIcon}>
-                <GreekIcon name="cloud" size={22} />
-              </View>
-              <Text style={[
-                styles.backendLabel,
-                aiBackend === 'remote' && styles.backendLabelActive,
-              ]}>API</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setAIBackend('local')}
-              style={[styles.backendChip, aiBackend === 'local' && styles.backendChipActive]}
-            >
-              <View style={styles.backendIcon}>
-                <GreekIcon name="phone" size={22} />
-              </View>
-              <Text style={[
-                styles.backendLabel,
-                aiBackend === 'local' && styles.backendLabelActive,
-              ]}>No celular</Text>
-            </Pressable>
-          </View>
-
-          {aiBackend === 'remote' && (
-            <View style={styles.subPanel}>
-              <Text style={styles.label}>Modelo Gemini</Text>
-              {MODELS.map((m) => (
-                <Pressable
-                  key={m.value}
-                  onPress={() => setModel(m.value)}
-                  style={[styles.modelRow, model === m.value && styles.modelRowActive]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                      {m.label}
-                    </Text>
-                    <Text style={[typography.small, { color: colors.text.secondary }]}>{m.sub}</Text>
-                  </View>
-                  <View style={[styles.radio, model === m.value && styles.radioActive]} />
-                </Pressable>
-              ))}
-
-              <Text style={[styles.label, { marginTop: spacing.lg }]}>Chave de API</Text>
-              {hasStoredKey ? (
-                <View>
-                  <View style={styles.keyStatus}>
-                    <Text style={[typography.body, { color: colors.text.primary }]}>
-                      ✓ Chave salva e criptografada
-                    </Text>
-                  </View>
-                  <Pressable onPress={removeKey}>
-                    <Text style={[typography.small, styles.dangerLink]}>
-                      Remover chave
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <Text style={[typography.small, { color: colors.accent.danger, marginBottom: spacing.sm }]}>
-                  Nenhuma chave cadastrada.
-                </Text>
-              )}
-              <TextInput
-                value={apiKeyInput}
-                onChangeText={(v) => {
-                  setApiKeyInput(v);
-                  setKeyStatus('idle');
-                  setKeyError(null);
-                }}
-                placeholder={hasStoredKey ? 'cadastrar nova chave (substitui a atual)' : 'cole aqui sua chave'}
-                placeholderTextColor={colors.text.tertiary}
-                style={styles.input}
-                autoCapitalize="none"
-                secureTextEntry
-              />
-              <View style={styles.keyHelpRow}>
-                <Pressable
-                  onPress={handleTestKey}
-                  disabled={!trimmedKey || testing}
-                  style={[styles.testBtn, (!trimmedKey || testing) && { opacity: 0.5 }]}
-                >
-                  {testing ? (
-                    <ActivityIndicator color={colors.accent.gold} size="small" />
-                  ) : (
-                    <Text style={styles.testBtnText}>Testar chave</Text>
-                  )}
-                </Pressable>
-                {keyStatus === 'ok' && <Text style={styles.keyOk}>✓ válida</Text>}
-                {keyStatus === 'error' && (
-                  <Text style={styles.keyErr} numberOfLines={2}>
-                    ✗ {keyError}
-                  </Text>
-                )}
-              </View>
-              <Pressable onPress={() => Linking.openURL('https://aistudio.google.com/apikey')}>
-                <Text style={[typography.small, styles.linkHint]}>
-                  Obtenha sua chave grátis →
-                </Text>
-              </Pressable>
-            </View>
-          )}
-
-          {aiBackend === 'local' && (
-            <View style={styles.subPanel}>
-              <Text style={styles.label}>Modelo no celular</Text>
-              {LOCAL_MODEL_LIST.map((m) => {
-                const isSelected = localModelId === m.id;
-                const downloadedSize = downloadedSizes[m.id] ?? 0;
-                const isDownloaded = downloadedSize > 0;
-                return (
-                  <View
-                    key={m.id}
-                    style={[
-                      styles.localModelCard,
-                      isSelected && styles.localModelCardActive,
-                    ]}
-                  >
-                    <Pressable
-                      onPress={() => setLocalModelId(m.id)}
-                      style={styles.localModelRow}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <View style={styles.modelTitleRow}>
-                          <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                            {m.label}
-                          </Text>
-                          {m.hasThinking && (
-                            <View style={styles.thinkingBadge}>
-                              <GreekIcon name="brain" size={12} color={colors.accent.lavender} />
-                              <Text style={styles.thinkingBadgeText}>thinking</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text style={[typography.small, { color: colors.accent.gold, marginTop: 2 }]}>
-                          {m.vendor} · {formatModelSize(m.sizeBytes)}
-                          {isDownloaded ? '  ✓ baixado' : '  · não baixado'}
-                        </Text>
-                        <Text style={[typography.small, { color: colors.text.secondary, marginTop: 4 }]}>
-                          {m.description}
-                        </Text>
-                      </View>
-                      <View style={[styles.radio, isSelected && styles.radioActive]} />
-                    </Pressable>
-                    <View style={styles.localModelActions}>
-                      {isDownloaded ? (
-                        <Pressable
-                          onPress={() => handleDeleteModel(m.id)}
-                          style={styles.deleteBtn}
-                          hitSlop={8}
-                        >
-                          <GreekIcon name="trash" size={14} color={colors.accent.danger} />
-                          <Text style={styles.deleteBtnText}>Deletar</Text>
-                        </Pressable>
-                      ) : (
-                        <Pressable
-                          onPress={() => handleDownloadModel(m.id)}
-                          style={styles.downloadBtn}
-                          hitSlop={8}
-                        >
-                          <GreekIcon name="download" size={14} color={colors.accent.gold} />
-                          <Text style={styles.downloadBtnText}>Baixar</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  </View>
-                );
-              })}
-
-              <View style={styles.toggleRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                    Permitir download via dados móveis
-                  </Text>
-                  <Text style={[typography.small, { color: colors.text.secondary }]}>
-                    Por padrão só baixa em Wi-Fi (recomendado)
-                  </Text>
-                </View>
-                <Switch
-                  value={allowMobileData}
-                  onValueChange={setAllowMobileData}
-                  trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-                  thumbColor={allowMobileData ? colors.text.onGold : colors.text.tertiary}
-                />
-              </View>
-
-              {!localCurrentDownloaded && aiBackend === 'local' && (
-                <Text style={[typography.small, { color: colors.accent.warning, marginTop: spacing.sm }]}>
-                  Você precisa baixar o modelo selecionado antes de salvar.
-                </Text>
-              )}
-            </View>
-          )}
-        </Card>
-
-        <Card style={styles.card}>
-          <View style={styles.promptHeader}>
-            <Text style={styles.section}>Prompt da Comentora</Text>
-            <Pressable
-              onPress={() => setPromptExpanded((v) => !v)}
-              style={styles.promptToggleBtn}
-            >
-              <Text style={styles.promptToggleText}>
-                {promptExpanded ? 'Recolher ▲' : 'Editar prompt ▼'}
-              </Text>
-            </Pressable>
-          </View>
-          {!promptExpanded ? (
-            <Text style={[typography.small, { color: colors.text.secondary }]}>
-              {systemPrompt.length} caracteres. As regras e a personalidade do
-              Comentora estão escondidas pra não tomar espaço. Toque em
-              &quot;Editar prompt&quot; pra ler ou alterar.
-            </Text>
-          ) : (
-            <>
-              <View style={styles.promptHeaderActions}>
-                <Pressable onPress={resetPrompt}>
-                  <Text style={[typography.small, styles.linkHint]}>Restaurar padrão</Text>
-                </Pressable>
-              </View>
-              <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
-                Edite a personalidade e regras da IA. Use os placeholders abaixo no formato {'{nome}'} —
-                eles são substituídos a cada chamada com dados reais.
-              </Text>
-              <Pressable
-                onPress={() => setShowPlaceholders((v) => !v)}
-                style={styles.placeholdersToggle}
-              >
-                <Text style={[typography.small, { color: colors.accent.gold }]}>
-                  {showPlaceholders ? '▼' : '▶'} Placeholders disponíveis
-                </Text>
-              </Pressable>
-              {showPlaceholders && (
-                <View style={styles.placeholdersList}>
-                  {PROMPT_PLACEHOLDERS.map((p) => (
-                    <View key={p.key} style={styles.placeholderRow}>
-                      <Text style={styles.placeholderKey}>{p.key}</Text>
-                      <Text style={styles.placeholderDesc}>{p.desc}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-              <TextInput
-                value={systemPrompt}
-                onChangeText={setSystemPrompt}
-                multiline
-                textAlignVertical="top"
-                style={[styles.input, styles.promptInput]}
-                placeholder="Prompt da Comentora…"
-                placeholderTextColor={colors.text.tertiary}
-              />
-              <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
-                {systemPrompt.length} caracteres
-              </Text>
-            </>
-          )}
-        </Card>
+        
 
         <Card style={styles.card}>
           <Text style={styles.section}>Atualizações</Text>
@@ -1385,15 +261,7 @@ export function SettingsScreen() {
           </Pressable>
         </Card>
 
-        <View style={{ height: spacing.md }} />
-        <Button label="Salvar" onPress={save} loading={saving} disabled={!canSave} />
-        {!canSave && (
-          <Text style={styles.requiredNote}>
-            {aiBackend === 'remote'
-              ? 'Cadastre uma chave de API válida para salvar.'
-              : 'Baixe o modelo local selecionado para salvar.'}
-          </Text>
-        )}
+        
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
     </ScreenContainer>

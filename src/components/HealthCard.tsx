@@ -168,21 +168,10 @@ export function HealthCard() {
                 : 'sem registro'
             }
           />
-          <MetricRow
-            icon="activity"
-            label="Exercício na semana (zera segunda)"
-            value={
-              snapshot && snapshot.exerciseSessionsWeek > 0
-                ? `${snapshot.exerciseSessionsWeek} ${
-                    snapshot.exerciseSessionsWeek === 1 ? 'sessão' : 'sessões'
-                  } · ${snapshot.exerciseMinutesWeek} min`
-                : 'nenhum registro'
-            }
-          />
           {birthYear != null && (
             <MetricRow
               icon="heart"
-              label="Zona 2 na semana (60–70% da máxima)"
+              label="Zona 2 na semana (zera segunda)"
               value={
                 snapshot?.zone2MinutesWeek != null
                   ? `${snapshot.zone2MinutesWeek} min`
@@ -212,8 +201,8 @@ export function HealthCard() {
           />
           <MetricRow
             icon="activity"
-            label="Massa magra"
-            value={snapshot?.leanMassKg != null ? `${snapshot.leanMassKg} kg` : 'sem registro'}
+            label="Peso"
+            value={snapshot?.weightKg != null ? `${snapshot.weightKg} kg` : 'sem registro'}
           />
           <MetricRow
             icon="activity"

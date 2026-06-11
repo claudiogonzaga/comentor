@@ -50,7 +50,7 @@ const CORE_PERMISSIONS: Permission[] = [
 
 const EXTRA_PERMISSIONS: Permission[] = [
   { accessType: 'read', recordType: 'HeartRate' },
-  { accessType: 'read', recordType: 'LeanBodyMass' },
+  { accessType: 'read', recordType: 'Weight' },
   { accessType: 'read', recordType: 'BodyFat' },
 ];
 
@@ -164,8 +164,8 @@ export interface HealthSnapshot {
   stepsWeek: number;
   /** Passos de hoje (desde a meia-noite local). */
   stepsToday: number;
-  /** Massa magra mais recente, em kg (último ano). null = sem registro/permissão. */
-  leanMassKg: number | null;
+  /** Peso corporal mais recente, em kg (último ano). null = sem registro/permissão. */
+  weightKg: number | null;
   /** % de gordura corporal mais recente (último ano). null = sem registro/permissão. */
   bodyFatPct: number | null;
 }
@@ -307,17 +307,18 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
       zone2MinutesWeek = null;
     }
 
-    // COMPOSIÇÃO CORPORAL: registro mais recente do último ano.
+    // COMPOSIÇÃO CORPORAL: registro mais recente do último ano. (Era massa
+    // magra, mas o Health Connect do usuário não a expõe — peso é universal.)
     const yearStart = new Date(now.getTime() - 365 * 24 * 3600_000).toISOString();
-    let leanMassKg: number | null = null;
+    let weightKg: number | null = null;
     try {
-      const lean = (await m.readRecords('LeanBodyMass' as never, {
+      const weight = (await m.readRecords('Weight' as never, {
         timeRangeFilter: { operator: 'between', startTime: yearStart, endTime: nowISO },
         ascendingOrder: false,
         pageSize: 1,
-      } as never)) as { records: { mass?: { inKilograms?: number } }[] };
-      const kg = lean.records[0]?.mass?.inKilograms;
-      if (typeof kg === 'number' && kg > 0) leanMassKg = Math.round(kg * 10) / 10;
+      } as never)) as { records: { weight?: { inKilograms?: number } }[] };
+      const kg = weight.records[0]?.weight?.inKilograms;
+      if (typeof kg === 'number' && kg > 0) weightKg = Math.round(kg * 10) / 10;
     } catch {
       /* sem permissão/registro */
     }
@@ -342,7 +343,7 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
       zone2MinutesWeek,
       stepsWeek: stepsTotal,
       stepsToday,
-      leanMassKg,
+      weightKg,
       bodyFatPct,
     };
   } catch {
@@ -380,7 +381,7 @@ export function formatHealthForCoach(s: HealthSnapshot): string {
     parts.push(`${s.hrHighMinutesWeek} min na semana com FC acima de 80% da máxima`);
   }
   if (s.stepsWeek > 0) parts.push(`${s.stepsWeek.toLocaleString('pt-BR')} passos na semana`);
-  if (s.leanMassKg != null) parts.push(`massa magra ${s.leanMassKg} kg`);
+  if (s.weightKg != null) parts.push(`peso ${s.weightKg} kg`);
   if (s.bodyFatPct != null) parts.push(`${s.bodyFatPct}% de gordura corporal`);
   return parts.join('; ');
 }

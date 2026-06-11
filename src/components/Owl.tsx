@@ -4,9 +4,10 @@ import type { OwlMood } from '../types';
 
 // A Comentora é representada pela coruja de Atena num medalhão de vaso grego
 // (figura negra sobre terracota, cercada por louro e meandro). A imagem é um
-// emblema fixo; a vida vem de animações por cima: flutuação suave, PISCADAS
-// aleatórias (pálpebras desenhadas sobre os olhos) e uma inclinação curiosa
-// de cabeça de vez em quando. Dormindo, ela fica de olhos fechados.
+// emblema fixo; a vida vem de animações por cima: flutuação suave e PISCADAS
+// raras e aleatórias (pálpebras desenhadas sobre os olhos) — raras de
+// propósito, pra deixar a dúvida se ela pisca ou não. Dormindo, fica de olhos
+// fechados. (Girar só a cabeça não dá: a arte é uma imagem única.)
 
 const MASCOT = require('../../assets/owl-mascot.png');
 
@@ -31,8 +32,6 @@ export function Owl({ mood = 'calm', size = 160, animated = true }: OwlProps) {
   const float = useRef(new Animated.Value(0)).current;
   /** 0 = olhos abertos, 1 = fechados (escala Y das pálpebras). */
   const lid = useRef(new Animated.Value(0)).current;
-  /** -1..1 → inclinação da cabeça (graus via interpolate). */
-  const tilt = useRef(new Animated.Value(0)).current;
   const asleep = mood === 'sleeping';
   const lively = animated && !asleep;
 
@@ -64,7 +63,6 @@ export function Owl({ mood = 'calm', size = 160, animated = true }: OwlProps) {
   useEffect(() => {
     if (asleep) {
       lid.setValue(1);
-      tilt.setValue(0);
       return;
     }
     lid.setValue(0);
@@ -94,41 +92,27 @@ export function Owl({ mood = 'calm', size = 160, animated = true }: OwlProps) {
       ]).start(() => done?.());
     };
 
+    // Piscar RARO, pra deixar a dúvida se ela pisca ou não: cada piscada cai
+    // num segundo sorteado (≈4–60s; média ~2 por minuto), às vezes dupla.
     const scheduleBlink = () => {
-      after(2500 + Math.random() * 4500, () => {
+      after(4000 + Math.random() * 56000, () => {
         blinkOnce(() => {
-          if (Math.random() < 0.3) after(170, () => blinkOnce(scheduleBlink));
+          if (Math.random() < 0.35) after(170, () => blinkOnce(scheduleBlink));
           else scheduleBlink();
         });
       });
     };
 
-    const scheduleTilt = () => {
-      after(9000 + Math.random() * 16000, () => {
-        const dir = Math.random() < 0.5 ? -1 : 1;
-        blinkOnce();
-        Animated.sequence([
-          Animated.spring(tilt, { toValue: dir, friction: 5, useNativeDriver: true }),
-          Animated.delay(500 + Math.random() * 600),
-          Animated.spring(tilt, { toValue: 0, friction: 5, useNativeDriver: true }),
-        ]).start(() => scheduleTilt());
-      });
-    };
-
     scheduleBlink();
-    scheduleTilt();
     return () => {
       alive = false;
       timers.forEach(clearTimeout);
       lid.stopAnimation();
-      tilt.stopAnimation();
       lid.setValue(0);
-      tilt.setValue(0);
     };
-  }, [lively, asleep, lid, tilt]);
+  }, [lively, asleep, lid]);
 
   const translateY = float.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
-  const rotate = tilt.interpolate({ inputRange: [-1, 1], outputRange: ['-5deg', '5deg'] });
 
   const lidR = size * LID_R;
   const eyelid = (cxFrac: number) => (
@@ -148,7 +132,7 @@ export function Owl({ mood = 'calm', size = 160, animated = true }: OwlProps) {
   );
 
   return (
-    <Animated.View style={{ width: size, height: size, transform: [{ translateY }, { rotate }] }}>
+    <Animated.View style={{ width: size, height: size, transform: [{ translateY }] }}>
       <Image
         source={MASCOT}
         resizeMode="contain"

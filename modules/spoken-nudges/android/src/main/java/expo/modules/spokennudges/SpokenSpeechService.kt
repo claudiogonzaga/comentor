@@ -67,9 +67,10 @@ class SpokenSpeechService : Service() {
       return START_NOT_STICKY
     }
     // Horário silencioso: dentro da janela/dia escolhidos, não fala (só a
-    // notificação paralela aparece) — evita voz no trabalho/academia.
-    if (isQuietNow(this)) {
-      Log.d(SpokenScheduler.TAG, "service: horário silencioso — não fala")
+    // notificação paralela aparece) — evita voz no trabalho/academia. EXCETO
+    // com fone conectado: aí a fala sai pelo fone, sem constranger ninguém.
+    if (device == null && isQuietNow(this)) {
+      Log.d(SpokenScheduler.TAG, "service: horário silencioso (sem fone) — não fala")
       stopEverything()
       return START_NOT_STICKY
     }

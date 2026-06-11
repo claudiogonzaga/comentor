@@ -16,6 +16,8 @@ import { BreathingScreen } from '../screens/BreathingScreen';
 import { ReadAloudScreen } from '../screens/ReadAloudScreen';
 import { RemindersScreen } from '../screens/RemindersScreen';
 import { SoundsVoiceScreen } from '../screens/SoundsVoiceScreen';
+import { AboutYouScreen } from '../screens/AboutYouScreen';
+import { BrainVoiceScreen } from '../screens/BrainVoiceScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import {
@@ -50,6 +52,8 @@ export type RootStackParamList = {
   ReadAloud: { autostart?: boolean } | undefined;
   Reminders: undefined;
   SonsVozes: undefined;
+  AboutYou: undefined;
+  BrainVoice: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -210,8 +214,10 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         // os alarmes em background, mas TAMBÉM esta fala em primeiro plano. Sem
         // fone conectado, NÃO fala (evita constrangimento em reunião/audiência).
         if (cfg?.spokenHeadphonesOnly && !isHeadphonesConnected()) return;
-        // Horário silencioso (janela + dias sem voz) — não fala em primeiro plano.
-        if (isSpokenQuietNow(cfg)) return;
+        // Horário silencioso (janela + dias sem voz) — não fala em primeiro
+        // plano, EXCETO com fone conectado: aí a voz sai pelo fone, sem
+        // constranger ninguém (o silencioso existe pra não tocar no falante).
+        if (isSpokenQuietNow(cfg) && !isHeadphonesConnected()) return;
         // Don't talk over the owl's own voice (chat reading / preview).
         if (isSpeaking()) return;
         const d = (notification.request.content.data ?? {}) as { type?: string };
@@ -306,6 +312,16 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen
           name="SonsVozes"
           component={SoundsVoiceScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="AboutYou"
+          component={AboutYouScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="BrainVoice"
+          component={BrainVoiceScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
       </Stack.Navigator>

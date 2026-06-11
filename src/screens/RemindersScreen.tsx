@@ -29,7 +29,10 @@ import {
   updateMedication,
 } from '../services/database';
 import { scheduleAllMedications } from '../services/medications';
-import { ensurePermissions } from '../services/notifications';
+import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
+import { ensureSleepHabit } from '../services/coach';
+import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
+import { useAppStore } from '../store/useAppStore';
 import { iconForEmoji } from '../services/todos';
 import type { Medication } from '../types';
 
@@ -137,10 +140,44 @@ const EMPTY_EDITOR: EditorState = {
 
 export function RemindersScreen() {
   const navigation = useNavigation<any>();
+  const { config, setConfig } = useAppStore();
   const [meds, setMeds] = useState<Medication[] | null>(null);
   const [editor, setEditor] = useState<EditorState>(EMPTY_EDITOR);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Sono (veio de Configurações): horário de dormir + intervalo de insistência.
+  const [bedtime, setBedtime] = useState(config?.bedtime ?? '23:00');
+  const [intervalStr, setIntervalStr] = useState(String(config?.reminderIntervalMinutes ?? 10));
+
+  useEffect(() => {
+    if (config) {
+      setBedtime(config.bedtime);
+      setIntervalStr(String(config.reminderIntervalMinutes));
+    }
+  }, [config]);
+
+  // Salva e reagenda os lembretes noturnos (mesma lógica do antigo "Salvar"
+  // de Configurações, agora automática a cada mudança).
+  const saveSleep = async (nextBedtime: string, nextIntervalStr: string) => {
+    const intervalNum = Math.max(5, Math.min(60, parseInt(nextIntervalStr, 10) || 10));
+    try {
+      await setConfig({ bedtime: nextBedtime, reminderIntervalMinutes: intervalNum });
+      const habit = await ensureSleepHabit(nextBedtime);
+      if (await ensurePermissions()) {
+        await ensureChannel();
+        await scheduleNightReminders({
+          bedtime: nextBedtime,
+          intervalMinutes: intervalNum,
+          maxReminders: 12,
+          habitId: habit.id,
+          prepRemindersEnabled: config?.prepRemindersEnabled ?? true,
+        });
+        await scheduleSleepAwarenessNotifications();
+      }
+    } catch (err) {
+      console.warn('saveSleep failed:', err);
+    }
+  };
 
   const reload = useCallback(async () => {
     const list = await listMedications();
@@ -288,6 +325,33 @@ export function RemindersScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Sono — horário de dormir + insistência (veio de Configurações). */}
+        <Card style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>Sono</Text>
+          <TimePickerInput
+            label="Horário de dormir"
+            value={bedtime}
+            onChange={(hhmm) => {
+              setBedtime(hhmm);
+              void saveSleep(hhmm, intervalStr);
+            }}
+          />
+          <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.md }]}>
+            Intervalo entre lembretes (min)
+          </Text>
+          <TextInput
+            value={intervalStr}
+            onChangeText={(v) => setIntervalStr(v.replace(/[^0-9]/g, '').slice(0, 2))}
+            onEndEditing={() => void saveSleep(bedtime, intervalStr)}
+            style={styles.sleepIntervalInput}
+            keyboardType="number-pad"
+          />
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
+            Perto do horário, a coruja lembra e insiste nesse intervalo até você
+            confirmar que foi dormir. Salva automaticamente.
+          </Text>
+        </Card>
+
         {/* Nudges diários da Comentora (respiração, pôr do sol…). */}
         <NudgesCard />
 
@@ -571,6 +635,17 @@ const styles = StyleSheet.create({
     ...typography.subtitle,
     color: colors.text.primary,
     marginBottom: spacing.xs,
+  },
+  sleepIntervalInput: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+    backgroundColor: colors.bg.surfaceStrong,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+    width: 96,
   },
   intro: {
     ...typography.small,

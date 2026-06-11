@@ -168,6 +168,8 @@ export interface UserConfig {
    * informado (a métrica de FC alta fica oculta).
    */
   birthYear: number | null;
+  /** Sexo (contexto p/ a Comentora e futuras faixas de saúde). */
+  sex: 'feminino' | 'masculino' | null;
 }
 
 /** Texto salvo na tela "Leia para mim" (visualização, oração, hipnose…). */
