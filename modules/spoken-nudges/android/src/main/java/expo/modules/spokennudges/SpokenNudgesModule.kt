@@ -85,5 +85,11 @@ class SpokenNudgesModule : Module() {
     Function("isHeadphonesConnected") {
       headphonesConnected(context)
     }
+
+    // Horário silencioso: guarda janela (minutos do dia) + dias (bitmask) onde os
+    // avisos não falam. O serviço nativo lê no disparo.
+    Function("setQuietHours") { enabled: Boolean, startMin: Int, endMin: Int, daysMask: Int ->
+      SpokenStore.setQuiet(context, enabled, startMin, endMin, daysMask)
+    }
   }
 }

@@ -104,6 +104,16 @@ export interface UserConfig {
    */
   spokenHeadphonesOnly: boolean;
   /**
+   * Horário silencioso: janela do dia (início–fim) + dias em que os avisos NÃO
+   * falam em voz alta (só notificam). Ex.: silenciar a voz no horário de trabalho
+   * / audiências / academia. `spokenQuietDays` é um BITMASK (bit d = dia d, com
+   * 0=domingo … 6=sábado); 127 = todos os dias.
+   */
+  spokenQuietEnabled: boolean;
+  spokenQuietStart: string; // HH:MM
+  spokenQuietEnd: string; // HH:MM
+  spokenQuietDays: number; // bitmask 0–6
+  /**
    * Modo "inspiração": quando true, a Comentora envia alertas de hora em hora
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */

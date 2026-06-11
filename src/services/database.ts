@@ -70,6 +70,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       voice_nudges_enabled INTEGER NOT NULL DEFAULT 0,
       spoken_nudges_enabled INTEGER NOT NULL DEFAULT 0,
       spoken_headphones_only INTEGER NOT NULL DEFAULT 0,
+      spoken_quiet_enabled INTEGER NOT NULL DEFAULT 0,
+      spoken_quiet_start TEXT NOT NULL DEFAULT '09:00',
+      spoken_quiet_end TEXT NOT NULL DEFAULT '18:00',
+      spoken_quiet_days INTEGER NOT NULL DEFAULT 127,
       inspiration_mode_enabled INTEGER NOT NULL DEFAULT 0,
       ai_backend TEXT NOT NULL DEFAULT 'remote',
       local_model_id TEXT,
@@ -400,6 +404,27 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN spoken_headphones_only INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  // v1.54: horário silencioso (janela + dias sem voz).
+  if (!colNames.includes('spoken_quiet_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN spoken_quiet_enabled INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  if (!colNames.includes('spoken_quiet_start')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN spoken_quiet_start TEXT NOT NULL DEFAULT '09:00'`,
+    );
+  }
+  if (!colNames.includes('spoken_quiet_end')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN spoken_quiet_end TEXT NOT NULL DEFAULT '18:00'`,
+    );
+  }
+  if (!colNames.includes('spoken_quiet_days')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN spoken_quiet_days INTEGER NOT NULL DEFAULT 127`,
+    );
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -601,6 +626,10 @@ interface UserConfigRow {
   voice_nudges_enabled: number | null;
   spoken_nudges_enabled: number | null;
   spoken_headphones_only: number | null;
+  spoken_quiet_enabled: number | null;
+  spoken_quiet_start: string | null;
+  spoken_quiet_end: string | null;
+  spoken_quiet_days: number | null;
   inspiration_mode_enabled: number | null;
   inspiration_per_day: number | null;
   breathing_sound_id: string | null;
@@ -649,6 +678,10 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
   spokenNudgesEnabled: (r.spoken_nudges_enabled ?? 0) === 1,
   spokenHeadphonesOnly: (r.spoken_headphones_only ?? 0) === 1,
+  spokenQuietEnabled: (r.spoken_quiet_enabled ?? 0) === 1,
+  spokenQuietStart: r.spoken_quiet_start ?? '09:00',
+  spokenQuietEnd: r.spoken_quiet_end ?? '18:00',
+  spokenQuietDays: r.spoken_quiet_days ?? 127,
   inspirationModeEnabled: (r.inspiration_mode_enabled ?? 0) === 1,
   inspirationPerDay: r.inspiration_per_day ?? 6,
   breathingSoundId: r.breathing_sound_id ?? 'cello',
@@ -709,6 +742,10 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     voiceNudgesEnabled: 'voice_nudges_enabled',
     spokenNudgesEnabled: 'spoken_nudges_enabled',
     spokenHeadphonesOnly: 'spoken_headphones_only',
+    spokenQuietEnabled: 'spoken_quiet_enabled',
+    spokenQuietStart: 'spoken_quiet_start',
+    spokenQuietEnd: 'spoken_quiet_end',
+    spokenQuietDays: 'spoken_quiet_days',
     inspirationModeEnabled: 'inspiration_mode_enabled',
     inspirationPerDay: 'inspiration_per_day',
     breathingSoundId: 'breathing_sound_id',

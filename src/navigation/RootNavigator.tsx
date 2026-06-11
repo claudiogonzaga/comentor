@@ -30,7 +30,7 @@ import {
 import { confirmNudge, snoozeNudge } from '../services/nudges';
 import { confirmMedication, snoozeMedication } from '../services/medications';
 import { saveLastNotification } from '../services/lastNotification';
-import { isHeadphonesConnected } from '../services/spokenNudges';
+import { isHeadphonesConnected, isSpokenQuietNow } from '../services/spokenNudges';
 import { markSleepDone } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
 import { colors } from '../theme';
@@ -210,6 +210,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         // os alarmes em background, mas TAMBÉM esta fala em primeiro plano. Sem
         // fone conectado, NÃO fala (evita constrangimento em reunião/audiência).
         if (cfg?.spokenHeadphonesOnly && !isHeadphonesConnected()) return;
+        // Horário silencioso (janela + dias sem voz) — não fala em primeiro plano.
+        if (isSpokenQuietNow(cfg)) return;
         // Don't talk over the owl's own voice (chat reading / preview).
         if (isSpeaking()) return;
         const d = (notification.request.content.data ?? {}) as { type?: string };

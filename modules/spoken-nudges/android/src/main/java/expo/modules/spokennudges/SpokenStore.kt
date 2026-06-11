@@ -23,6 +23,10 @@ object SpokenStore {
   private const val PREFS = "spoken_nudges_store"
   private const val KEY = "alarms"
   private const val KEY_HEADPHONES_ONLY = "headphones_only"
+  private const val KEY_QUIET_ENABLED = "quiet_enabled"
+  private const val KEY_QUIET_START = "quiet_start" // minutos do dia
+  private const val KEY_QUIET_END = "quiet_end" // minutos do dia
+  private const val KEY_QUIET_DAYS = "quiet_days" // bitmask (bit d = dia d, 0=dom)
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -37,6 +41,22 @@ object SpokenStore {
   fun setHeadphonesOnly(ctx: Context, value: Boolean) {
     prefs(ctx).edit().putBoolean(KEY_HEADPHONES_ONLY, value).apply()
   }
+
+  /** Horário silencioso (janela + dias em que NÃO se fala). Lido no disparo. */
+  fun setQuiet(ctx: Context, enabled: Boolean, startMin: Int, endMin: Int, daysMask: Int) {
+    prefs(ctx)
+      .edit()
+      .putBoolean(KEY_QUIET_ENABLED, enabled)
+      .putInt(KEY_QUIET_START, startMin)
+      .putInt(KEY_QUIET_END, endMin)
+      .putInt(KEY_QUIET_DAYS, daysMask)
+      .apply()
+  }
+
+  fun getQuietEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_QUIET_ENABLED, false)
+  fun getQuietStart(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_START, 9 * 60)
+  fun getQuietEnd(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_END, 18 * 60)
+  fun getQuietDays(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_DAYS, 127)
 
   fun all(ctx: Context): List<SpokenAlarm> {
     val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"

@@ -35,6 +35,7 @@ interface SpokenNudgesNative {
   rearmAll(): Promise<void>;
   setHeadphonesOnly(enabled: boolean): void;
   isHeadphonesConnected(): boolean;
+  setQuietHours(enabled: boolean, startMin: number, endMin: number, daysMask: number): void;
 }
 
 let native: SpokenNudgesNative | null = null;
@@ -110,6 +111,45 @@ export function isHeadphonesConnected(): boolean {
   } catch {
     return false;
   }
+}
+
+interface QuietConfig {
+  spokenQuietEnabled?: boolean;
+  spokenQuietStart?: string; // HH:MM
+  spokenQuietEnd?: string; // HH:MM
+  spokenQuietDays?: number; // bitmask 0–6
+}
+
+function hhmmToMin(hhmm: string | undefined, fallback: number): number {
+  const p = (hhmm ?? '').split(':').map((s) => parseInt(s, 10));
+  if (!Number.isFinite(p[0])) return fallback;
+  return Math.min(23, Math.max(0, p[0])) * 60 + Math.min(59, Math.max(0, p[1] || 0));
+}
+
+/** Mirror do horário silencioso para o nativo (que o lê no disparo do alarme). */
+export function setSpokenQuietHours(cfg: QuietConfig): void {
+  try {
+    native?.setQuietHours(
+      !!cfg.spokenQuietEnabled,
+      hhmmToMin(cfg.spokenQuietStart, 9 * 60),
+      hhmmToMin(cfg.spokenQuietEnd, 18 * 60),
+      cfg.spokenQuietDays ?? 127,
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Estamos AGORA dentro do horário silencioso? (gate da fala em primeiro plano). */
+export function isSpokenQuietNow(cfg: QuietConfig | null | undefined): boolean {
+  if (!cfg?.spokenQuietEnabled) return false;
+  const now = new Date();
+  const days = cfg.spokenQuietDays ?? 127;
+  if (((days >> now.getDay()) & 1) === 0) return false;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const start = hhmmToMin(cfg.spokenQuietStart, 9 * 60);
+  const end = hhmmToMin(cfg.spokenQuietEnd, 18 * 60);
+  return start <= end ? nowMin >= start && nowMin < end : nowMin >= start || nowMin < end;
 }
 
 // ---- agendamento ----

@@ -8,7 +8,7 @@ import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
-import { setSpokenHeadphonesOnly } from '../services/spokenNudges';
+import { setSpokenHeadphonesOnly, setSpokenQuietHours } from '../services/spokenNudges';
 
 interface AppState {
   ready: boolean;
@@ -34,8 +34,9 @@ export const useAppStore = create<AppState>((set) => ({
     const apiKey = await getApiKey();
     const hasApiKey = !!apiKey;
     syncVoiceFromConfig(config);
-    // Espelha a preferência "só falar com fone" pro nativo (que a lê no disparo).
+    // Espelha "só falar com fone" + horário silencioso pro nativo (lidos no disparo).
     setSpokenHeadphonesOnly(config.spokenHeadphonesOnly);
+    setSpokenQuietHours(config);
     set({ config: { ...config, hasApiKey }, hasApiKey, ready: true });
     // Ensure daily nudges (bluelight, breathing) are scheduled
     // — seeded on first run, re-scheduled on every cold start so the

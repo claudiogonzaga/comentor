@@ -19,6 +19,7 @@ import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import java.util.Calendar
 import java.util.Locale
 
 /**
@@ -62,6 +63,13 @@ class SpokenSpeechService : Service() {
     preferredDevice = device
     if (SpokenStore.getHeadphonesOnly(this) && device == null) {
       Log.d(SpokenScheduler.TAG, "service: 'só com fone' ligado e sem fone — não fala")
+      stopEverything()
+      return START_NOT_STICKY
+    }
+    // Horário silencioso: dentro da janela/dia escolhidos, não fala (só a
+    // notificação paralela aparece) — evita voz no trabalho/academia.
+    if (isQuietNow(this)) {
+      Log.d(SpokenScheduler.TAG, "service: horário silencioso — não fala")
       stopEverything()
       return START_NOT_STICKY
     }
@@ -310,3 +318,23 @@ fun mediaHeadphoneDevice(ctx: Context): AudioDeviceInfo? {
 
 /** Há um fone que carrega MÍDIA conectado? (gate "só com fone" + estado p/ a UI). */
 fun headphonesConnected(ctx: Context): Boolean = mediaHeadphoneDevice(ctx) != null
+
+/**
+ * Estamos AGORA dentro do "horário silencioso" (janela + dia escolhidos)? Se sim,
+ * os avisos não falam. `quietDays` é bitmask (bit d = dia d, 0=domingo).
+ */
+fun isQuietNow(ctx: Context): Boolean {
+  if (!SpokenStore.getQuietEnabled(ctx)) return false
+  return try {
+    val cal = Calendar.getInstance()
+    val dow = cal.get(Calendar.DAY_OF_WEEK) - 1 // Calendar: domingo=1 → 0
+    if ((SpokenStore.getQuietDays(ctx) shr dow) and 1 == 0) return false
+    val nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+    val start = SpokenStore.getQuietStart(ctx)
+    val end = SpokenStore.getQuietEnd(ctx)
+    if (start <= end) nowMin >= start && nowMin < end
+    else nowMin >= start || nowMin < end // janela que cruza a meia-noite
+  } catch (e: Exception) {
+    false
+  }
+}
