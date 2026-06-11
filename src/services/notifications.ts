@@ -52,6 +52,14 @@ export const MED_CATEGORY = 'comentor-med-actions';
 export const MED_DONE_ACTION = 'med-done';
 export const MED_SNOOZE_ACTION = 'med-snooze';
 
+/**
+ * Variante da MED_CATEGORY para hábitos de FAZER (ver sol, respiração, beber
+ * água…), em vez de tomar. Mesmos action identifiers (o roteamento em
+ * RootNavigator é idêntico) — muda só o texto do botão: "Já fiz ✅" sem o
+ * remédio/pílula, que não fazia sentido para um hábito.
+ */
+export const MED_DO_CATEGORY = 'comentor-med-do-actions';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -109,6 +117,19 @@ export async function ensureNotificationCategories() {
     {
       identifier: MED_DONE_ACTION,
       buttonTitle: 'Já tomei 💊',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: MED_SNOOZE_ACTION,
+      buttonTitle: 'Lembrar depois',
+      options: { opensAppToForeground: true },
+    },
+  ]);
+  // Mesmos botões, mas para hábitos de FAZER (não tomar): "Já fiz ✅" sem pílula.
+  await Notifications.setNotificationCategoryAsync(MED_DO_CATEGORY, [
+    {
+      identifier: MED_DONE_ACTION,
+      buttonTitle: 'Já fiz ✅',
       options: { opensAppToForeground: true },
     },
     {

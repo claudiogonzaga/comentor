@@ -6,9 +6,60 @@ import {
   markNudgeDone,
   markNudgeUndone,
 } from './database';
-import { MED_CATEGORY, ensureChannel, ensureNotificationCategories } from './notifications';
+import {
+  MED_CATEGORY,
+  MED_DO_CATEGORY,
+  ensureChannel,
+  ensureNotificationCategories,
+} from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenMedications } from './spokenNudges';
+import type { Medication } from '../types';
+
+/**
+ * Distingue lembrete de TOMAR (remédio/suplemento) de FAZER (ver sol, beber
+ * água, respiração…). O sinal é o emoji escolhido — só 💊 (remédio) e 🌿
+ * (suplemento) são "tomar". Tudo o mais é um hábito de fazer, que recebe
+ * "Já fiz ✅" em vez do equivocado "Já tomei 💊".
+ */
+const INGEST_EMOJIS = new Set(['💊', '🌿']);
+function isIngest(med: Pick<Medication, 'emoji'>): boolean {
+  return INGEST_EMOJIS.has((med.emoji ?? '').trim());
+}
+
+/**
+ * Monta título, corpo e categoria de um lembrete conforme seja de tomar ou
+ * fazer. `pendingBody` é o texto da corrente de insistências ("ainda pendente").
+ */
+function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
+  emoji: string;
+  title: string;
+  baseBody: string;
+  pendingBody: string;
+  category: string;
+} {
+  const ingest = isIngest(med);
+  const emoji = med.emoji ?? (ingest ? '💊' : '🔔');
+  const detail = med.dosage?.trim();
+  if (ingest) {
+    const baseBody = detail ? `Hora de tomar: ${detail}.` : 'Hora de tomar o seu lembrete.';
+    return {
+      emoji,
+      title: `${emoji} ${med.name}`,
+      baseBody,
+      pendingBody: `${baseBody}\n\nAinda pendente — toque em "Já tomei 💊" quando tomar.`,
+      category: MED_CATEGORY,
+    };
+  }
+  const baseBody = detail ? `Está na hora: ${detail}.` : 'Está na hora deste hábito.';
+  return {
+    emoji,
+    title: `${emoji} ${med.name}`,
+    baseBody,
+    pendingBody: `${baseBody}\n\nAinda pendente — toque em "Já fiz ✅" quando concluir.`,
+    category: MED_DO_CATEGORY,
+  };
+}
 
 /**
  * Lembretes de medicamentos/suplementos. Cada lembrete habilitado VERIFICA:
@@ -101,11 +152,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
     const safeMinute = Math.min(59, Math.max(0, m));
 
     const key = completionKey(med.id);
-    const emoji = med.emoji ?? '💊';
-    const title = `${emoji} ${med.name}`;
-    const baseBody = med.dosage?.trim()
-      ? `Hora de tomar: ${med.dosage.trim()}.`
-      : 'Hora de tomar o seu lembrete.';
+    const { title, baseBody, pendingBody, category } = reminderCopy(med);
 
     // Dias da semana em que o lembrete vale (0=domingo … 6=sábado, igual a
     // Date.getDay()). Os 7 dias = diário; um subconjunto = semanal em dias
@@ -192,7 +239,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
       body: baseBody,
       data: { type: `med:${med.id}`, medId: med.id },
       sound,
-      categoryIdentifier: MED_CATEGORY,
+      categoryIdentifier: category,
     };
 
     // Âncora recorrente. Diário → um gatilho DAILY; semanal → um gatilho
@@ -248,10 +295,10 @@ export async function scheduleAllMedications(): Promise<string[]> {
           const id = await Notifications.scheduleNotificationAsync({
             content: {
               title,
-              body: `${baseBody}\n\nAinda pendente — toque em "Já tomei 💊" quando tomar.`,
+              body: pendingBody,
               data: { type: `med:${med.id}`, medId: med.id, followup: true },
               sound,
-              categoryIdentifier: MED_CATEGORY,
+              categoryIdentifier: category,
             },
             trigger: {
               type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -370,20 +417,17 @@ export async function snoozeMedication(medId: number, minutes = 10): Promise<voi
   const med = meds.find((x) => x.id === medId);
   if (!med) return;
 
-  const emoji = med.emoji ?? '💊';
-  const baseBody = med.dosage?.trim()
-    ? `Hora de tomar: ${med.dosage.trim()}.`
-    : 'Hora de tomar o seu lembrete.';
+  const { title, pendingBody, category } = reminderCopy(med);
 
   const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: `${emoji} ${med.name}`,
-        body: `${baseBody}\n\nAinda pendente — toque em "Já tomei 💊" quando tomar.`,
+        title,
+        body: pendingBody,
         data: { type: `med:${med.id}`, medId: med.id, followup: true },
         sound,
-        categoryIdentifier: MED_CATEGORY,
+        categoryIdentifier: category,
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
