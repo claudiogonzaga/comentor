@@ -1,13 +1,23 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from './Card';
 import { Button } from './Button';
 import { GreekIcon, type GreekIconName } from './GreekIcon';
 import { colors, spacing, typography } from '../theme';
+import { useAppStore } from '../store/useAppStore';
 import {
   formatSleepDuration,
   getHealthSnapshot,
+  hasExtraHealthPermissions,
   hasHealthPermissions,
   isHealthConnectAvailable,
   openHealthSettings,
@@ -38,15 +48,20 @@ function MetricRow({ icon, label, value }: MetricRowProps) {
 }
 
 /**
- * Cartão de saúde (Android/Health Connect). Mostra um resumo de sono,
- * exercício e passos quando a permissão está concedida; senão oferece o
- * botão para conectar. Some por completo se o Health Connect não estiver
- * disponível (iOS, build sem o módulo, app não instalado).
+ * Cartão de saúde (Android/Health Connect). Mostra sono, exercício da SEMANA
+ * (zera segunda), passos, FC alta (>80% da máxima — precisa do ano de
+ * nascimento), massa magra e % de gordura. Sem permissão, oferece o botão para
+ * conectar; some por completo se o Health Connect não estiver disponível.
  */
 export function HealthCard() {
+  const { config, setConfig } = useAppStore();
   const [status, setStatus] = useState<Status>('loading');
   const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [hasExtras, setHasExtras] = useState(true);
+  const [yearDraft, setYearDraft] = useState('');
+
+  const birthYear = config?.birthYear ?? null;
 
   const load = useCallback(async () => {
     if (!(await isHealthConnectAvailable())) {
@@ -57,6 +72,7 @@ export function HealthCard() {
       setStatus('denied');
       return;
     }
+    setHasExtras(await hasExtraHealthPermissions());
     const snap = await getHealthSnapshot();
     setSnapshot(snap);
     setStatus('granted');
@@ -82,7 +98,7 @@ export function HealthCard() {
       // próprio Health Connect, onde dá pra liberar as permissões na mão.
       Alert.alert(
         'Conectar Health Connect',
-        'Não consegui abrir o pedido de permissão por aqui. Quer abrir o Health Connect para liberar o acesso (Sono, Exercício e Passos) manualmente?',
+        'Não consegui abrir o pedido de permissão por aqui. Quer abrir o Health Connect para liberar o acesso manualmente?',
         [
           { text: 'Agora não', style: 'cancel' },
           { text: 'Abrir Health Connect', onPress: () => openHealthSettings() },
@@ -91,6 +107,30 @@ export function HealthCard() {
     } finally {
       setConnecting(false);
     }
+  };
+
+  // Libera as permissões EXTRAS (FC + composição corporal) pra quem conectou
+  // antes — reaproveita o mesmo fluxo (pede todas; as já dadas não re-perguntam).
+  const handleGrantExtras = async () => {
+    setConnecting(true);
+    try {
+      await requestHealthPermissions();
+      await load();
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleSaveYear = async () => {
+    const y = parseInt(yearDraft, 10);
+    const nowYear = new Date().getFullYear();
+    if (!Number.isFinite(y) || y < nowYear - 110 || y > nowYear - 10) {
+      Alert.alert('Ano de nascimento', 'Digite um ano válido (ex.: 1975).');
+      return;
+    }
+    await setConfig({ birthYear: y });
+    setYearDraft('');
+    await load();
   };
 
   if (status === 'loading' || status === 'unavailable') return null;
@@ -130,15 +170,37 @@ export function HealthCard() {
           />
           <MetricRow
             icon="activity"
-            label="Exercício (7 dias)"
+            label="Exercício na semana (zera segunda)"
             value={
-              snapshot && snapshot.exerciseSessions7d > 0
-                ? `${snapshot.exerciseSessions7d} ${
-                    snapshot.exerciseSessions7d === 1 ? 'sessão' : 'sessões'
-                  } · ${snapshot.exerciseMinutes7d} min`
+              snapshot && snapshot.exerciseSessionsWeek > 0
+                ? `${snapshot.exerciseSessionsWeek} ${
+                    snapshot.exerciseSessionsWeek === 1 ? 'sessão' : 'sessões'
+                  } · ${snapshot.exerciseMinutesWeek} min`
                 : 'nenhum registro'
             }
           />
+          {birthYear != null && (
+            <MetricRow
+              icon="heart"
+              label="Zona 2 na semana (60–70% da máxima)"
+              value={
+                snapshot?.zone2MinutesWeek != null
+                  ? `${snapshot.zone2MinutesWeek} min`
+                  : 'sem registro'
+              }
+            />
+          )}
+          {birthYear != null && (
+            <MetricRow
+              icon="heart"
+              label="FC alta na semana (>80% da máxima)"
+              value={
+                snapshot?.hrHighMinutesWeek != null
+                  ? `${snapshot.hrHighMinutesWeek} min`
+                  : 'sem registro'
+              }
+            />
+          )}
           <MetricRow
             icon="footsteps"
             label="Passos (hoje)"
@@ -148,6 +210,55 @@ export function HealthCard() {
                 : 'sem registro'
             }
           />
+          <MetricRow
+            icon="activity"
+            label="Massa magra"
+            value={snapshot?.leanMassKg != null ? `${snapshot.leanMassKg} kg` : 'sem registro'}
+          />
+          <MetricRow
+            icon="activity"
+            label="Gordura corporal"
+            value={snapshot?.bodyFatPct != null ? `${snapshot.bodyFatPct}%` : 'sem registro'}
+          />
+
+          {birthYear == null && (
+            <View style={styles.yearRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.metricLabel}>
+                  Ano de nascimento (para a métrica de FC alta)
+                </Text>
+                <TextInput
+                  value={yearDraft}
+                  onChangeText={(t) => setYearDraft(t.replace(/[^0-9]/g, '').slice(0, 4))}
+                  placeholder="ex.: 1975"
+                  placeholderTextColor={colors.text.tertiary}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  style={styles.yearInput}
+                />
+              </View>
+              <Pressable
+                onPress={handleSaveYear}
+                disabled={yearDraft.length !== 4}
+                style={[styles.yearBtn, yearDraft.length !== 4 && { opacity: 0.4 }]}
+              >
+                <Text style={styles.yearBtnText}>Salvar</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {!hasExtras && (
+            <Pressable onPress={handleGrantExtras} hitSlop={6} style={styles.manageBtn}>
+              {connecting ? (
+                <ActivityIndicator size="small" color={colors.accent.gold} />
+              ) : (
+                <Text style={styles.manageText}>
+                  Liberar FC e composição corporal no Health Connect →
+                </Text>
+              )}
+            </Pressable>
+          )}
+
           <Pressable onPress={openHealthSettings} hitSlop={6} style={styles.manageBtn}>
             <Text style={styles.manageText}>Gerenciar no Health Connect →</Text>
           </Pressable>
@@ -195,6 +306,30 @@ const styles = StyleSheet.create({
   metricValue: {
     ...typography.bodyMedium,
     color: colors.text.primary,
+  },
+  yearRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  yearInput: {
+    ...typography.bodyMedium,
+    color: colors.text.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: 4,
+    marginTop: 2,
+  },
+  yearBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 8,
+    backgroundColor: colors.bg.surfaceStrong,
+  },
+  yearBtnText: {
+    ...typography.bodyMedium,
+    color: colors.accent.gold,
   },
   manageBtn: {
     marginTop: spacing.sm,

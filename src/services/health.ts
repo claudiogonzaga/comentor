@@ -1,9 +1,11 @@
 import { Platform } from 'react-native';
 import type { Permission } from 'react-native-health-connect';
+import { getUserConfig } from './database';
 
 /**
  * Acesso aos dados de saúde do Android via Health Connect (substituto oficial
- * do Google Fit). Só lê: sono, sessões de exercício e passos.
+ * do Google Fit). Só lê: sono, sessões de exercício, passos, frequência
+ * cardíaca e composição corporal (massa magra / % de gordura).
  *
  * Por que tudo é "lazy" e defensivo: o módulo nativo
  * (`react-native-health-connect`) usa `TurboModuleRegistry.getEnforcing`, que
@@ -35,12 +37,24 @@ function getModule(): HealthConnectModule | null {
   return cachedModule;
 }
 
-/** As 3 permissões de leitura que pedimos. */
-const READ_PERMISSIONS: Permission[] = [
+/**
+ * Permissões NÚCLEO (sono/exercício/passos): sem elas o card pede pra conectar.
+ * As EXTRAS (FC + composição corporal) são opcionais — quem conectou antes da
+ * v1.57 continua funcionando; os campos novos só aparecem ao liberá-las.
+ */
+const CORE_PERMISSIONS: Permission[] = [
   { accessType: 'read', recordType: 'SleepSession' },
   { accessType: 'read', recordType: 'ExerciseSession' },
   { accessType: 'read', recordType: 'Steps' },
 ];
+
+const EXTRA_PERMISSIONS: Permission[] = [
+  { accessType: 'read', recordType: 'HeartRate' },
+  { accessType: 'read', recordType: 'LeanBodyMass' },
+  { accessType: 'read', recordType: 'BodyFat' },
+];
+
+const ALL_PERMISSIONS: Permission[] = [...CORE_PERMISSIONS, ...EXTRA_PERMISSIONS];
 
 let initialized = false;
 async function ensureInit(m: HealthConnectModule): Promise<boolean> {
@@ -69,39 +83,49 @@ export async function isHealthConnectAvailable(): Promise<boolean> {
   }
 }
 
-function hasAll(
-  granted: { accessType?: string; recordType?: string }[],
-): boolean {
-  return READ_PERMISSIONS.every((p) =>
+type GrantedPerm = { accessType?: string; recordType?: string };
+
+function hasAll(granted: GrantedPerm[], wanted: Permission[]): boolean {
+  return wanted.every((p) =>
     granted.some(
       (g) => g.accessType === p.accessType && g.recordType === p.recordType,
     ),
   );
 }
 
-/** Já temos as 3 permissões de leitura concedidas? (não abre prompt) */
-export async function hasHealthPermissions(): Promise<boolean> {
-  const m = getModule();
-  if (!m || !(await ensureInit(m))) return false;
+async function getGranted(m: HealthConnectModule): Promise<GrantedPerm[]> {
   try {
-    const granted = await m.getGrantedPermissions();
-    return hasAll(granted as { accessType?: string; recordType?: string }[]);
+    return (await m.getGrantedPermissions()) as GrantedPerm[];
   } catch {
-    return false;
+    return [];
   }
 }
 
+/** Já temos as permissões NÚCLEO (sono/exercício/passos)? (não abre prompt) */
+export async function hasHealthPermissions(): Promise<boolean> {
+  const m = getModule();
+  if (!m || !(await ensureInit(m))) return false;
+  return hasAll(await getGranted(m), CORE_PERMISSIONS);
+}
+
+/** Já temos TAMBÉM as extras (FC + massa magra + gordura)? (não abre prompt) */
+export async function hasExtraHealthPermissions(): Promise<boolean> {
+  const m = getModule();
+  if (!m || !(await ensureInit(m))) return false;
+  return hasAll(await getGranted(m), EXTRA_PERMISSIONS);
+}
+
 /**
- * Abre o fluxo de permissão do Health Connect e devolve se TODAS as leituras
- * foram concedidas. Seguro chamar mesmo sem o app Health Connect — retorna
- * false em vez de lançar.
+ * Abre o fluxo de permissão do Health Connect (pede TODAS, núcleo + extras) e
+ * devolve se as leituras NÚCLEO foram concedidas. Seguro chamar mesmo sem o
+ * app Health Connect — retorna false em vez de lançar.
  */
 export async function requestHealthPermissions(): Promise<boolean> {
   const m = getModule();
   if (!m || !(await ensureInit(m))) return false;
   try {
-    const granted = await m.requestPermission(READ_PERMISSIONS);
-    return hasAll(granted as { accessType?: string; recordType?: string }[]);
+    const granted = await m.requestPermission(ALL_PERMISSIONS);
+    return hasAll(granted as GrantedPerm[], CORE_PERMISSIONS);
   } catch (err) {
     console.warn('[health] requestPermission() failed:', err);
     return false;
@@ -120,25 +144,74 @@ export async function openHealthSettings(): Promise<void> {
 }
 
 export interface HealthSnapshot {
-  /** Minutos dormidos na última noite (≈ últimas 18h), ou null se sem registro. */
+  /** Minutos dormidos na última noite (sessões terminadas nas últimas 24h), ou null. */
   sleepMinutesLastNight: number | null;
-  /** Nº de sessões de exercício nos últimos 7 dias. */
-  exerciseSessions7d: number;
-  /** Minutos totais de exercício nos últimos 7 dias. */
-  exerciseMinutes7d: number;
-  /** Passos somados nos últimos 7 dias. */
-  steps7d: number;
+  /** Nº de sessões de exercício NESTA SEMANA (zera segunda-feira 00:00). */
+  exerciseSessionsWeek: number;
+  /** Minutos totais de exercício nesta semana (segunda → agora). */
+  exerciseMinutesWeek: number;
+  /**
+   * Minutos NESTA SEMANA com FC acima de 80% da FC máxima estimada
+   * (220 − idade). null = sem ano de nascimento, sem permissão ou sem dados.
+   */
+  hrHighMinutesWeek: number | null;
+  /**
+   * Minutos NESTA SEMANA em ZONA 2 (~60–70% da FC máxima estimada) — a base
+   * aeróbica. Mesmas condições de null da métrica de FC alta.
+   */
+  zone2MinutesWeek: number | null;
+  /** Passos somados nesta semana (segunda → agora). */
+  stepsWeek: number;
   /** Passos de hoje (desde a meia-noite local). */
   stepsToday: number;
+  /** Massa magra mais recente, em kg (último ano). null = sem registro/permissão. */
+  leanMassKg: number | null;
+  /** % de gordura corporal mais recente (último ano). null = sem registro/permissão. */
+  bodyFatPct: number | null;
 }
 
 function durationMinutes(startTime: string, endTime: string): number {
   return Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000);
 }
 
+/** Meia-noite da SEGUNDA-FEIRA da semana atual (hora local). */
+function startOfWeekMonday(now: Date): Date {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const sinceMonday = (d.getDay() + 6) % 7; // 0=segunda … 6=domingo
+  d.setDate(d.getDate() - sinceMonday);
+  return d;
+}
+
+/**
+ * Lê TODAS as páginas de um tipo de registro na janela (o Health Connect
+ * pagina; sem isso, semanas cheias de amostras de FC viriam truncadas).
+ */
+async function readAllRecords(
+  m: HealthConnectModule,
+  recordType: never,
+  startTime: string,
+  endTime: string,
+): Promise<unknown[]> {
+  const out: unknown[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 20; page++) {
+    const res = (await m.readRecords(recordType, {
+      timeRangeFilter: { operator: 'between', startTime, endTime },
+      pageSize: 1000,
+      ...(pageToken ? { pageToken } : {}),
+    })) as { records: unknown[]; pageToken?: string };
+    out.push(...res.records);
+    pageToken = res.pageToken;
+    if (!pageToken || res.records.length === 0) break;
+  }
+  return out;
+}
+
 /**
  * Lê um retrato dos dados de saúde. Retorna null se Health Connect não estiver
- * disponível ou sem permissão — nunca lança.
+ * disponível ou sem permissão — nunca lança. Campos extras (FC/composição)
+ * voltam null quando a permissão deles não foi concedida.
  */
 export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
   const m = getModule();
@@ -149,19 +222,33 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
     const now = new Date();
     const nowISO = now.toISOString();
 
-    // Sono: janela das últimas 18h cobre a noite anterior para quem abre o app
-    // de dia. Soma a duração de todas as sessões na janela.
-    const sleepStart = new Date(now.getTime() - 18 * 3600_000).toISOString();
+    // SONO: o filtro do Health Connect corta sessões que COMEÇARAM fora da
+    // janela — uma janela curta perdia a noite anterior quando o app abria à
+    // tarde. Lemos 48h e consideramos "última noite" as sessões TERMINADAS nas
+    // últimas 24h (cobre cochilos + noite, ignora a noite retrasada).
+    const sleepWindowStart = new Date(now.getTime() - 48 * 3600_000).toISOString();
     const sleep = await m.readRecords('SleepSession', {
-      timeRangeFilter: { operator: 'between', startTime: sleepStart, endTime: nowISO },
+      timeRangeFilter: { operator: 'between', startTime: sleepWindowStart, endTime: nowISO },
     });
+    const dayAgo = now.getTime() - 24 * 3600_000;
     let sleepMin = 0;
-    for (const r of sleep.records) sleepMin += durationMinutes(r.startTime, r.endTime);
-    const sleepMinutesLastNight = sleep.records.length ? Math.round(sleepMin) : null;
+    let sleepCount = 0;
+    for (const r of sleep.records) {
+      if (new Date(r.endTime).getTime() < dayAgo) continue;
+      sleepMin += durationMinutes(r.startTime, r.endTime);
+      sleepCount++;
+    }
+    const sleepMinutesLastNight = sleepCount ? Math.round(sleepMin) : null;
 
-    // Exercício + passos: últimos 7 dias.
-    const weekStart = new Date(now.getTime() - 7 * 24 * 3600_000).toISOString();
-    const weekFilter = { operator: 'between' as const, startTime: weekStart, endTime: nowISO };
+    // EXERCÍCIO + PASSOS: semana civil — ZERA toda segunda-feira 00:00 e
+    // acumula até domingo (antes era janela móvel de 7 dias, que nunca zerava
+    // e parecia "cumulativa").
+    const weekStartISO = startOfWeekMonday(now).toISOString();
+    const weekFilter = {
+      operator: 'between' as const,
+      startTime: weekStartISO,
+      endTime: nowISO,
+    };
 
     const exercise = await m.readRecords('ExerciseSession', { timeRangeFilter: weekFilter });
     let exMin = 0;
@@ -184,12 +271,79 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
     let stepsToday = 0;
     for (const r of stepsTodayRec.records) stepsToday += r.count ?? 0;
 
+    // FC (semana): das MESMAS amostras saem DUAS métricas — minutos em ZONA 2
+    // (~60–70% da FC máxima; base aeróbica) e minutos de ALTA intensidade
+    // (>80%). Conta MINUTOS DISTINTOS com amostra na faixa — robusto a
+    // amostragem irregular de relógio/pulseira. Precisa do ano de nascimento
+    // para estimar a FC máxima (220 − idade).
+    let hrHighMinutesWeek: number | null = null;
+    let zone2MinutesWeek: number | null = null;
+    try {
+      const birthYear = (await getUserConfig()).birthYear;
+      if (birthYear != null) {
+        const age = Math.max(10, Math.min(110, now.getFullYear() - birthYear));
+        const maxHr = 220 - age;
+        const hrRecords = (await readAllRecords(
+          m,
+          'HeartRate' as never,
+          weekStartISO,
+          nowISO,
+        )) as { samples?: { time: string; beatsPerMinute: number }[] }[];
+        const highMinutes = new Set<number>();
+        const zone2Minutes = new Set<number>();
+        for (const rec of hrRecords) {
+          for (const s of rec.samples ?? []) {
+            const bpm = s.beatsPerMinute;
+            const minute = Math.floor(new Date(s.time).getTime() / 60000);
+            if (bpm > 0.8 * maxHr) highMinutes.add(minute);
+            else if (bpm >= 0.6 * maxHr && bpm <= 0.7 * maxHr) zone2Minutes.add(minute);
+          }
+        }
+        hrHighMinutesWeek = highMinutes.size;
+        zone2MinutesWeek = zone2Minutes.size;
+      }
+    } catch {
+      hrHighMinutesWeek = null; // sem permissão de FC — campos ficam ocultos
+      zone2MinutesWeek = null;
+    }
+
+    // COMPOSIÇÃO CORPORAL: registro mais recente do último ano.
+    const yearStart = new Date(now.getTime() - 365 * 24 * 3600_000).toISOString();
+    let leanMassKg: number | null = null;
+    try {
+      const lean = (await m.readRecords('LeanBodyMass' as never, {
+        timeRangeFilter: { operator: 'between', startTime: yearStart, endTime: nowISO },
+        ascendingOrder: false,
+        pageSize: 1,
+      } as never)) as { records: { mass?: { inKilograms?: number } }[] };
+      const kg = lean.records[0]?.mass?.inKilograms;
+      if (typeof kg === 'number' && kg > 0) leanMassKg = Math.round(kg * 10) / 10;
+    } catch {
+      /* sem permissão/registro */
+    }
+    let bodyFatPct: number | null = null;
+    try {
+      const fat = (await m.readRecords('BodyFat' as never, {
+        timeRangeFilter: { operator: 'between', startTime: yearStart, endTime: nowISO },
+        ascendingOrder: false,
+        pageSize: 1,
+      } as never)) as { records: { percentage?: number }[] };
+      const pct = fat.records[0]?.percentage;
+      if (typeof pct === 'number' && pct > 0) bodyFatPct = Math.round(pct * 10) / 10;
+    } catch {
+      /* sem permissão/registro */
+    }
+
     return {
       sleepMinutesLastNight,
-      exerciseSessions7d: exercise.records.length,
-      exerciseMinutes7d: Math.round(exMin),
-      steps7d: stepsTotal,
+      exerciseSessionsWeek: exercise.records.length,
+      exerciseMinutesWeek: Math.round(exMin),
+      hrHighMinutesWeek,
+      zone2MinutesWeek,
+      stepsWeek: stepsTotal,
       stepsToday,
+      leanMassKg,
+      bodyFatPct,
     };
   } catch {
     return null;
@@ -212,13 +366,21 @@ export function formatHealthForCoach(s: HealthSnapshot): string {
   if (s.sleepMinutesLastNight != null) {
     parts.push(`dormiu ${formatSleepDuration(s.sleepMinutesLastNight)} na última noite`);
   }
-  if (s.exerciseSessions7d > 0) {
+  if (s.exerciseSessionsWeek > 0) {
     parts.push(
-      `fez ${s.exerciseSessions7d} sessão(ões) de exercício (${s.exerciseMinutes7d} min) nos últimos 7 dias`,
+      `fez ${s.exerciseSessionsWeek} sessão(ões) de exercício (${s.exerciseMinutesWeek} min) nesta semana (desde segunda)`,
     );
   } else {
-    parts.push('não registrou exercício nos últimos 7 dias');
+    parts.push('não registrou exercício nesta semana (desde segunda)');
   }
-  if (s.steps7d > 0) parts.push(`${s.steps7d.toLocaleString('pt-BR')} passos na semana`);
+  if (s.zone2MinutesWeek != null && s.zone2MinutesWeek > 0) {
+    parts.push(`${s.zone2MinutesWeek} min na semana em zona 2 (60–70% da FC máxima)`);
+  }
+  if (s.hrHighMinutesWeek != null && s.hrHighMinutesWeek > 0) {
+    parts.push(`${s.hrHighMinutesWeek} min na semana com FC acima de 80% da máxima`);
+  }
+  if (s.stepsWeek > 0) parts.push(`${s.stepsWeek.toLocaleString('pt-BR')} passos na semana`);
+  if (s.leanMassKg != null) parts.push(`massa magra ${s.leanMassKg} kg`);
+  if (s.bodyFatPct != null) parts.push(`${s.bodyFatPct}% de gordura corporal`);
   return parts.join('; ');
 }

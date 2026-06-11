@@ -425,6 +425,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN spoken_quiet_days INTEGER NOT NULL DEFAULT 127`,
     );
   }
+  // v1.57: ano de nascimento (estimar FC máxima p/ minutos de FC alta na semana).
+  if (!colNames.includes('birth_year')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN birth_year INTEGER`);
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -647,6 +651,7 @@ interface UserConfigRow {
   sedentary_start: string | null;
   sedentary_end: string | null;
   sedentary_interval_min: number | null;
+  birth_year: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -699,6 +704,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   sedentaryStart: r.sedentary_start ?? '09:00',
   sedentaryEnd: r.sedentary_end ?? '17:00',
   sedentaryIntervalMin: r.sedentary_interval_min ?? 60,
+  birthYear: r.birth_year ?? null,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -763,6 +769,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     sedentaryStart: 'sedentary_start',
     sedentaryEnd: 'sedentary_end',
     sedentaryIntervalMin: 'sedentary_interval_min',
+    birthYear: 'birth_year',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

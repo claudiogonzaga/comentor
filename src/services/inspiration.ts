@@ -56,6 +56,7 @@ const INSPIRATION_MESSAGES: InspirationMessage[] = [
   { title: '⭐ Você importa', body: 'O mundo é um pouco melhor porque você está nele. Continue.' },
   { title: '🎈 Leveza', body: 'Nem tudo precisa ser resolvido hoje. Solta o peso que não é seu.' },
   { title: '🏔️ Determinação', body: 'A montanha se sobe olhando para o próximo passo, não para o topo.' },
+  { title: '🫀 Zona 2', body: 'Mire 150–200+ min de zona 2 por semana, em 3–4 sessões de 45–60 min. Ritmo leve e contínuo — dá pra conversar, mas não cantar. Sessões muito curtas rendem pouco: a adaptação das mitocôndrias pede constância e duração.' },
 ];
 
 function shuffled<T>(arr: T[]): T[] {

@@ -162,6 +162,12 @@ export interface UserConfig {
   sedentaryEnd: string;
   /** Intervalo entre os lembretes de levantar, em minutos. */
   sedentaryIntervalMin: number;
+  /**
+   * Ano de nascimento — usado SÓ para estimar a FC máxima (220 − idade) e
+   * contar os minutos semanais de exercício com FC > 80% dela. null = não
+   * informado (a métrica de FC alta fica oculta).
+   */
+  birthYear: number | null;
 }
 
 /** Texto salvo na tela "Leia para mim" (visualização, oração, hipnose…). */
