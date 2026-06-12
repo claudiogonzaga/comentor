@@ -10,6 +10,7 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 import { getBreathingSound, type BreathingSoundId } from '../constants/breathingSounds';
 
 let active: AudioPlayer | null = null;
+let activeStatusSub: { remove: () => void } | null = null;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let backgroundReady = false;
 
@@ -47,6 +48,14 @@ export function stopBreathingSound(): void {
     clearTimeout(previewTimer);
     previewTimer = null;
   }
+  if (activeStatusSub) {
+    try {
+      activeStatusSub.remove();
+    } catch {
+      /* já removido */
+    }
+    activeStatusSub = null;
+  }
   if (active) {
     try {
       active.pause();
@@ -80,6 +89,15 @@ export async function playBreathingSound(opts: {
   id: string;
   customUri?: string | null;
   loop?: boolean;
+  /**
+   * Para SOZINHO depois de N ms e chama `onAutoStop`. IMPORTANTE: o relógio é
+   * dirigido pelos eventos de status do PLAYER NATIVO (e não por setTimeout),
+   * porque com a tela apagada o Android congela os timers JS do React Native —
+   * os eventos do áudio continuam chegando (o som segue no foreground service).
+   * É o que permite encadear respiração → "Leia para mim" no escuro.
+   */
+  stopAfterMs?: number | null;
+  onAutoStop?: () => void;
 }): Promise<boolean> {
   const source = resolveSource(opts.id, opts.customUri ?? null);
   if (source == null) return false;
@@ -89,6 +107,15 @@ export async function playBreathingSound(opts: {
     const player = createAudioPlayer(source);
     active = player;
     player.loop = opts.loop !== false;
+    if (opts.stopAfterMs != null && opts.stopAfterMs > 0) {
+      const endAt = Date.now() + opts.stopAfterMs;
+      const onAutoStop = opts.onAutoStop;
+      activeStatusSub = player.addListener('playbackStatusUpdate', () => {
+        if (Date.now() < endAt) return;
+        stopBreathingSound(); // remove o listener e libera o player
+        onAutoStop?.();
+      });
+    }
     player.play();
     return true;
   } catch (err) {

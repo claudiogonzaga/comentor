@@ -203,9 +203,11 @@ export function ReadAloudScreen() {
     prevFinishRef.current = finishedTick;
     if (breathingRef.current) {
       // PARA a leitura antes de ir pra respiração — senão o player global
-      // continuaria tocando junto com o som da respiração.
+      // continuaria tocando junto com o som da respiração. Navegação DIRETA
+      // (sem setTimeout): timers JS congelam com a tela apagada e o
+      // encadeamento precisa funcionar no escuro.
       useReadAloud.getState().stop();
-      setTimeout(() => navigation.navigate('Breathing'), 400);
+      navigation.navigate('Breathing');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedTick]);
@@ -412,11 +414,9 @@ export function ReadAloudScreen() {
     autostartedRef.current = true;
     // Encadeado da respiração: toca o áudio JÁ SALVO (o do texto da caixinha ou,
     // se não houver, o salvo mais recente) — não regera quando já existe arquivo.
-    const t = setTimeout(
-      () => void playPreferSaved(textRef.current, { fallbackMostRecent: true }),
-      400,
-    );
-    return () => clearTimeout(t);
+    // DIRETO, sem setTimeout: timers JS congelam com a tela apagada e o
+    // autostart precisa rodar no escuro.
+    void playPreferSaved(textRef.current, { fallbackMostRecent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autostart, draftLoaded, text]);
 

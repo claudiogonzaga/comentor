@@ -67,6 +67,7 @@ export function BreathingScreen() {
   };
 
   const finish = async () => {
+    if (stoppedRef.current) return; // já finalizado/parado (evita disparo duplo)
     setRunning(false);
     stoppedRef.current = true;
     clearTick();
@@ -74,7 +75,9 @@ export function BreathingScreen() {
     stopBreathingSound();
     if (thenReadRef.current) {
       // Encadeamento: ao terminar a respiração, abre a leitura e já toca.
-      setTimeout(() => navigation.navigate('ReadAloud', { autostart: true }), 600);
+      // SEM setTimeout: com a tela apagada o Android congela os timers JS — a
+      // navegação direta funciona porque chegamos aqui via evento do player.
+      navigation.navigate('ReadAloud', { autostart: true });
     } else if (config?.voiceModeEnabled) {
       await speak('Bom trabalho. Agora bora pra cama.');
     }
@@ -88,22 +91,23 @@ export function BreathingScreen() {
     const startedAt = Date.now();
     setRemainingMs(totalMs);
     clearTick();
+    // O intervalo abaixo é SÓ o cronômetro visual (congela com a tela apagada
+    // e tudo bem — ninguém está olhando). Quem encerra o exercício de verdade
+    // é o stopAfterMs do player, dirigido por eventos nativos do áudio, que
+    // continuam chegando no escuro.
     tickRef.current = setInterval(() => {
       if (stoppedRef.current) {
         clearTick();
         return;
       }
-      const left = Math.max(0, totalMs - (Date.now() - startedAt));
-      setRemainingMs(left);
-      if (left <= 0) {
-        clearTick();
-        void finish();
-      }
+      setRemainingMs(Math.max(0, totalMs - (Date.now() - startedAt)));
     }, 500);
     // Trilha de fundo escolhida nas configurações (em loop durante o exercício).
     void playBreathingSound({
       id: config?.breathingSoundId ?? 'cello',
       customUri: resolveCustomUri(),
+      stopAfterMs: totalMs,
+      onAutoStop: () => void finish(),
     });
   };
 
@@ -121,8 +125,9 @@ export function BreathingScreen() {
   useEffect(() => {
     if (autoStartedRef.current || !config || !soundsReady) return;
     autoStartedRef.current = true;
-    const t = setTimeout(() => start(), 350);
-    return () => clearTimeout(t);
+    // Direto, sem setTimeout: timers JS congelam com a tela apagada e travariam
+    // o encadeamento leitura → respiração no escuro.
+    start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, soundsReady]);
 
