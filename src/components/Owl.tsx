@@ -1,26 +1,26 @@
-import { useEffect, useRef } from 'react';
-import { Animated, Easing, Image, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing } from 'react-native';
 import type { OwlMood } from '../types';
+import { useAppStore } from '../store/useAppStore';
+import { OwlVector } from './OwlVector';
 
-// A Comentora é representada pela coruja de Atena num medalhão de vaso grego
-// (figura negra sobre terracota, cercada por louro e meandro). A imagem é um
-// emblema fixo; a vida vem de animações por cima: flutuação suave e PISCADAS
-// raras e aleatórias (pálpebras desenhadas sobre os olhos) — raras de
-// propósito, pra deixar a dúvida se ela pisca ou não. Dormindo, fica de olhos
-// fechados. (Girar só a cabeça não dá: a arte é uma imagem única.)
+// A Comentora é a coruja de Atena num medalhão de vaso grego — agora DESENHADA
+// EM PARTES (OwlVector, SVG): a cabeça gira de verdade, as asas levantam, os
+// olhos piscam (~3×/min) e as pupilas olham de lado. Este wrapper cuida da
+// flutuação suave e do estado de SONO: depois do horário de dormir (config) e
+// até as 6h — ou quando o mood é 'sleeping' — ela fica de olhos fechados.
 
-const MASCOT = require('../../assets/owl-mascot.png');
-
-// Geometria dos olhos MEDIDA no owl-mascot.png (943×943): centros das pupilas
-// em (418,319) e (526,319); pupila r≈24, íris clara r≈26–40, anel externo
-// escuro r≈42–48. As frações abaixo posicionam as pálpebras em qualquer size.
-const EYE_LEFT_X = 0.4433;
-const EYE_RIGHT_X = 0.5578;
-const EYE_Y = 0.3383;
-/** Raio da pálpebra (cobre pupila + íris + borda do anel): 49/943. */
-const LID_R = 0.052;
-/** Cor da pálpebra — plumagem da cabeça amostrada entre os olhos. */
-const LID_COLOR = '#4C2812';
+/** Estamos na janela de sono? (horário de dormir → 6h da manhã, hora local) */
+function isSleepWindowNow(bedtime: string | null | undefined): boolean {
+  if (!bedtime) return false;
+  const [h, m] = bedtime.split(':').map((n) => parseInt(n, 10));
+  if (!Number.isFinite(h)) return false;
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const start = h * 60 + (Number.isFinite(m) ? m : 0);
+  const end = 6 * 60; // acorda às 6h
+  return start <= end ? cur >= start && cur < end : cur >= start || cur < end;
+}
 
 interface OwlProps {
   mood?: OwlMood;
@@ -29,10 +29,17 @@ interface OwlProps {
 }
 
 export function Owl({ mood = 'calm', size = 160, animated = true }: OwlProps) {
+  const { config } = useAppStore();
   const float = useRef(new Animated.Value(0)).current;
-  /** 0 = olhos abertos, 1 = fechados (escala Y das pálpebras). */
-  const lid = useRef(new Animated.Value(0)).current;
-  const asleep = mood === 'sleeping';
+
+  // Re-avalia a janela de sono a cada minuto (com a tela ligada).
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClockTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const asleep = mood === 'sleeping' || isSleepWindowNow(config?.bedtime);
   const lively = animated && !asleep;
 
   useEffect(() => {
@@ -57,91 +64,11 @@ export function Owl({ mood = 'calm', size = 160, animated = true }: OwlProps) {
     return () => loop.stop();
   }, [lively, float]);
 
-  // Vida da coruja: piscadas em intervalos aleatórios (às vezes dupla) e, mais
-  // raramente, uma inclinação curiosa de cabeça acompanhada de uma piscada.
-  // Dormindo: pálpebras fechadas, sem timers.
-  useEffect(() => {
-    if (asleep) {
-      lid.setValue(1);
-      return;
-    }
-    lid.setValue(0);
-    if (!lively) return;
-
-    let alive = true;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const after = (ms: number, fn: () => void) => {
-      if (alive) timers.push(setTimeout(() => alive && fn(), ms));
-    };
-
-    const blinkOnce = (done?: () => void) => {
-      Animated.sequence([
-        Animated.timing(lid, {
-          toValue: 1,
-          duration: 90,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.delay(40),
-        Animated.timing(lid, {
-          toValue: 0,
-          duration: 130,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]).start(() => done?.());
-    };
-
-    // Piscar RARO, pra deixar a dúvida se ela pisca ou não: cada piscada cai
-    // num segundo sorteado (≈4–60s; média ~2 por minuto), às vezes dupla.
-    const scheduleBlink = () => {
-      after(4000 + Math.random() * 56000, () => {
-        blinkOnce(() => {
-          if (Math.random() < 0.35) after(170, () => blinkOnce(scheduleBlink));
-          else scheduleBlink();
-        });
-      });
-    };
-
-    scheduleBlink();
-    return () => {
-      alive = false;
-      timers.forEach(clearTimeout);
-      lid.stopAnimation();
-      lid.setValue(0);
-    };
-  }, [lively, asleep, lid]);
-
   const translateY = float.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
-
-  const lidR = size * LID_R;
-  const eyelid = (cxFrac: number) => (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        left: size * cxFrac - lidR,
-        top: size * EYE_Y - lidR,
-        width: lidR * 2,
-        height: lidR * 2,
-        borderRadius: lidR,
-        backgroundColor: LID_COLOR,
-        transform: [{ scaleY: lid }],
-      }}
-    />
-  );
 
   return (
     <Animated.View style={{ width: size, height: size, transform: [{ translateY }] }}>
-      <Image
-        source={MASCOT}
-        resizeMode="contain"
-        style={{ width: size, height: size, opacity: asleep ? 0.78 : 1 }}
-      />
-      <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0 }}>
-        {eyelid(EYE_LEFT_X)}
-        {eyelid(EYE_RIGHT_X)}
-      </View>
+      <OwlVector size={size} asleep={asleep} animated={animated} />
     </Animated.View>
   );
 }
