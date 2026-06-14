@@ -18,6 +18,7 @@ import { RemindersScreen } from '../screens/RemindersScreen';
 import { SoundsVoiceScreen } from '../screens/SoundsVoiceScreen';
 import { AboutYouScreen } from '../screens/AboutYouScreen';
 import { BrainVoiceScreen } from '../screens/BrainVoiceScreen';
+import { InspirationLibraryScreen } from '../screens/InspirationLibraryScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import {
@@ -54,6 +55,7 @@ export type RootStackParamList = {
   SonsVozes: undefined;
   AboutYou: undefined;
   BrainVoice: undefined;
+  InspirationLibrary: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -322,6 +324,11 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen
           name="BrainVoice"
           component={BrainVoiceScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="InspirationLibrary"
+          component={InspirationLibraryScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
       </Stack.Navigator>

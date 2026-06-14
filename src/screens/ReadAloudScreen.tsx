@@ -13,6 +13,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
 import { AudioScrubber } from '../components/AudioScrubber';
@@ -90,12 +91,16 @@ function PlayerBar() {
   const toggle = useReadAloud((s) => s.toggle);
   const seek = useReadAloud((s) => s.seek);
   const stop = useReadAloud((s) => s.stop);
+  const skipBack = useReadAloud((s) => s.skipBack);
   const progress = duration > 0 ? currentTime / duration : 0;
   return (
     <View style={styles.player}>
       <View style={styles.playerControls}>
         <Pressable onPress={stop} hitSlop={8} style={styles.ctrlBtn}>
           <Text style={styles.ctrlIcon}>■</Text>
+        </Pressable>
+        <Pressable onPress={() => skipBack(30)} hitSlop={8} style={styles.ctrlBtn}>
+          <Text style={styles.ctrlIcon}>⟲30</Text>
         </Pressable>
         <Pressable onPress={toggle} hitSlop={8} style={[styles.ctrlBtn, styles.ctrlMain]}>
           <Text style={styles.ctrlMainIcon}>{playing ? '❚❚' : '▶'}</Text>
@@ -314,6 +319,35 @@ export function ReadAloudScreen() {
     }
   };
 
+  // Exporta/compartilha o áudio gerado. O arquivo é um WAV (o formato que a voz
+  // Gemini produz); o share sheet do Android deixa salvar no Drive, mandar por
+  // app, etc. Copia para um nome amigável antes de compartilhar.
+  const handleExportAudio = async (item: ReadAloudText) => {
+    if (!item.audioUri) return;
+    try {
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Exportar', 'Compartilhamento não disponível neste aparelho.');
+        return;
+      }
+      const safe =
+        (item.title || 'leitura').replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 40) || 'leitura';
+      const dest = `${FileSystem.cacheDirectory}${safe}.wav`;
+      try {
+        await FileSystem.copyAsync({ from: item.audioUri, to: dest });
+      } catch {
+        /* se a cópia falhar, compartilha o original mesmo */
+      }
+      const uri = (await FileSystem.getInfoAsync(dest)).exists ? dest : item.audioUri;
+      await Sharing.shareAsync(uri, {
+        mimeType: 'audio/wav',
+        dialogTitle: 'Exportar áudio',
+        UTI: 'com.microsoft.waveform-audio',
+      });
+    } catch (e) {
+      Alert.alert('Não consegui exportar', errMsg(e));
+    }
+  };
+
   const handleDeleteSaved = (item: ReadAloudText) => {
     Alert.alert('Excluir texto', `Remover "${item.title}"?`, [
       { text: 'Cancelar', style: 'cancel' },
@@ -502,6 +536,11 @@ export function ReadAloudScreen() {
                       : 'toque para ouvir (gera na 1ª vez)'}
                   </Text>
                 </Pressable>
+                {item.audioUri && (
+                  <Pressable onPress={() => handleExportAudio(item)} hitSlop={8}>
+                    <Text style={styles.savedExport}>Exportar</Text>
+                  </Pressable>
+                )}
                 <Pressable onPress={() => handleDeleteSaved(item)} hitSlop={8}>
                   <Text style={styles.savedDelete}>Excluir</Text>
                 </Pressable>
@@ -708,6 +747,11 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.text.tertiary,
     marginTop: 2,
+  },
+  savedExport: {
+    ...typography.small,
+    color: colors.accent.gold,
+    marginRight: spacing.md,
   },
   savedDelete: {
     ...typography.small,

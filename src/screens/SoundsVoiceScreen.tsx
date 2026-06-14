@@ -345,6 +345,24 @@ export function SoundsVoiceScreen() {
           </View>
 
           {inspirationMode && (
+            <Pressable
+              onPress={() => navigation.navigate('InspirationLibrary')}
+              style={styles.libraryRow}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                  Frases inspiradoras (biblioteca)
+                </Text>
+                <Text style={[typography.small, { color: colors.text.secondary }]}>
+                  Escolha os pacotes, exclua/restaure cards, importe planilhas e
+                  exporte o seu baralho.
+                </Text>
+              </View>
+              <Text style={{ color: colors.accent.gold, fontSize: 20 }}>›</Text>
+            </Pressable>
+          )}
+
+          {inspirationMode && (
             <View style={styles.toggleRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
@@ -687,6 +705,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     marginTop: spacing.md,
+  },
+  libraryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
   },
   stepBtn: {
     width: 36,

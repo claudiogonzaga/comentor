@@ -12,6 +12,8 @@ import type {
   InterviewSummary,
   LocalModelId,
   BreathingCustomSound,
+  InspirationPack,
+  InspirationCard,
   Medication,
   Nudge,
   NudgeType,
@@ -24,6 +26,12 @@ import type {
   ChatRole,
 } from '../types';
 import { DEFAULT_SYSTEM_PROMPT, LEGACY_DEFAULT_PROMPT_MARKER } from '../constants/promptTemplate';
+import {
+  COMENTORA_MESSAGES,
+  PACK_COMENTORA,
+  PACK_CITACOES,
+} from '../constants/inspirationDefaults';
+import { INSPIRATION_PACK_365 } from '../constants/inspirationPack365';
 
 const DB_NAME = 'comentor.db';
 // Cacheia a Promise (não a instância) — chamadas concorrentes durante o boot
@@ -487,6 +495,32 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   } catch {
     /* migração best-effort */
   }
+  // v1.63: biblioteca de inspiração — packs (baralhos) + cards (citações/fatos).
+  // O usuário usa os packs embutidos e pode importar outros (planilha). Cards
+  // têm soft-delete (deleted=1) restaurável; cards/packs embutidos (builtin=1)
+  // são re-semeados/restaurados em "restaurar padrão".
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS inspiration_packs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      builtin INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS inspiration_cards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pack_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      text TEXT NOT NULL,
+      author TEXT,
+      ref_date TEXT,
+      deleted INTEGER NOT NULL DEFAULT 0,
+      builtin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  await seedInspirationBuiltins(database);
+
   // v1.34: cada texto salvo guarda o seu próprio áudio (não regera nem gasta
   // token). Migração defensiva para instalações que já tinham a tabela.
   const raCols = await database.getAllAsync<{ name: string }>(
@@ -1621,6 +1655,175 @@ export async function setKV(key: string, value: string): Promise<void> {
   );
 }
 
+// ————————————————————————— Biblioteca de inspiração —————————————————————————
+
+/**
+ * Semeia os DOIS packs embutidos uma única vez (marcado em app_kv). Idempotente:
+ * se já semeou, sai. Cria "Frases da Comentora" (motivacionais) e "Citações e
+ * fatos inspiradores" (372 cards do anexo) com builtin=1, dentro de uma
+ * transação para inserir centenas de linhas rápido.
+ */
+async function seedInspirationBuiltins(database: SQLite.SQLiteDatabase): Promise<void> {
+  const flag = await database.getFirstAsync<{ value: string }>(
+    "SELECT value FROM app_kv WHERE key = 'inspiration_seeded'",
+  );
+  if (flag?.value === '1') return;
+
+  await database.withTransactionAsync(async () => {
+    const p1 = await database.runAsync(
+      'INSERT INTO inspiration_packs (name, builtin, enabled) VALUES (?, 1, 1)',
+      [PACK_COMENTORA],
+    );
+    const pack1 = p1.lastInsertRowId as number;
+    for (const m of COMENTORA_MESSAGES) {
+      await database.runAsync(
+        'INSERT INTO inspiration_cards (pack_id, type, text, author, ref_date, builtin) VALUES (?, ?, ?, NULL, NULL, 1)',
+        [pack1, 'quote', m.body],
+      );
+    }
+    const p2 = await database.runAsync(
+      'INSERT INTO inspiration_packs (name, builtin, enabled) VALUES (?, 1, 1)',
+      [PACK_CITACOES],
+    );
+    const pack2 = p2.lastInsertRowId as number;
+    for (const c of INSPIRATION_PACK_365) {
+      await database.runAsync(
+        'INSERT INTO inspiration_cards (pack_id, type, text, author, ref_date, builtin) VALUES (?, ?, ?, ?, ?, 1)',
+        [pack2, c.type, c.text, c.author, c.refDate],
+      );
+    }
+  });
+  await database.runAsync(
+    "INSERT OR REPLACE INTO app_kv (key, value) VALUES ('inspiration_seeded', '1')",
+  );
+}
+
+interface InspirationPackRow {
+  id: number;
+  name: string;
+  builtin: number;
+  enabled: number;
+  card_count: number;
+}
+
+export async function listInspirationPacks(): Promise<InspirationPack[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<InspirationPackRow>(`
+    SELECT p.id, p.name, p.builtin, p.enabled,
+      (SELECT COUNT(*) FROM inspiration_cards c WHERE c.pack_id = p.id AND c.deleted = 0) AS card_count
+    FROM inspiration_packs p
+    ORDER BY p.builtin DESC, p.id ASC
+  `);
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    builtin: r.builtin === 1,
+    enabled: r.enabled === 1,
+    cardCount: r.card_count,
+  }));
+}
+
+export async function setInspirationPackEnabled(packId: number, enabled: boolean): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE inspiration_packs SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, packId]);
+}
+
+interface InspirationCardRow {
+  id: number;
+  pack_id: number;
+  type: string;
+  text: string;
+  author: string | null;
+  ref_date: string | null;
+  deleted: number;
+  builtin: number;
+}
+
+const rowToCard = (r: InspirationCardRow): InspirationCard => ({
+  id: r.id,
+  packId: r.pack_id,
+  type: r.type === 'fact' ? 'fact' : 'quote',
+  text: r.text,
+  author: r.author,
+  refDate: r.ref_date,
+  deleted: r.deleted === 1,
+  builtin: r.builtin === 1,
+});
+
+/** Cards de um pack (inclui os excluídos, para a UI mostrar/ restaurar). */
+export async function listInspirationCards(packId: number): Promise<InspirationCard[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<InspirationCardRow>(
+    'SELECT * FROM inspiration_cards WHERE pack_id = ? ORDER BY id ASC',
+    [packId],
+  );
+  return rows.map(rowToCard);
+}
+
+/**
+ * Todos os cards ATIVOS (não excluídos) dos packs HABILITADOS — alimenta o
+ * agendamento do modo inspiração e a exportação do baralho.
+ */
+export async function listActiveInspirationCards(): Promise<InspirationCard[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<InspirationCardRow>(`
+    SELECT c.* FROM inspiration_cards c
+    JOIN inspiration_packs p ON p.id = c.pack_id
+    WHERE c.deleted = 0 AND p.enabled = 1
+    ORDER BY c.id ASC
+  `);
+  return rows.map(rowToCard);
+}
+
+export async function setInspirationCardDeleted(cardId: number, deleted: boolean): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE inspiration_cards SET deleted = ? WHERE id = ?', [deleted ? 1 : 0, cardId]);
+}
+
+/** Restaura os padrões: re-habilita packs embutidos e "des-exclui" cards builtin. */
+export async function restoreInspirationDefaults(): Promise<void> {
+  const d = await getDb();
+  await d.execAsync(`
+    UPDATE inspiration_packs SET enabled = 1 WHERE builtin = 1;
+    UPDATE inspiration_cards SET deleted = 0 WHERE builtin = 1;
+  `);
+}
+
+/** Cria um pack importado e insere seus cards. Retorna o pack criado. */
+export async function createImportedInspirationPack(
+  name: string,
+  cards: { type: 'quote' | 'fact'; text: string; author: string | null; refDate: string | null }[],
+): Promise<InspirationPack> {
+  const d = await getDb();
+  let packId = 0;
+  await d.withTransactionAsync(async () => {
+    const p = await d.runAsync(
+      'INSERT INTO inspiration_packs (name, builtin, enabled) VALUES (?, 0, 1)',
+      [name],
+    );
+    packId = p.lastInsertRowId as number;
+    for (const c of cards) {
+      await d.runAsync(
+        'INSERT INTO inspiration_cards (pack_id, type, text, author, ref_date, builtin) VALUES (?, ?, ?, ?, ?, 0)',
+        [packId, c.type, c.text, c.author, c.refDate],
+      );
+    }
+  });
+  return { id: packId, name, builtin: false, enabled: true, cardCount: cards.length };
+}
+
+/** Exclui um pack IMPORTADO inteiro (embutido não pode ser excluído). */
+export async function deleteImportedInspirationPack(packId: number): Promise<void> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ builtin: number }>(
+    'SELECT builtin FROM inspiration_packs WHERE id = ?',
+    [packId],
+  );
+  if (!row || row.builtin === 1) return; // não apaga embutidos
+  await d.runAsync('DELETE FROM inspiration_cards WHERE pack_id = ?', [packId]);
+  await d.runAsync('DELETE FROM inspiration_packs WHERE id = ?', [packId]);
+}
+
 export async function resetAllUserData(): Promise<void> {
   const d = await getDb();
   await d.execAsync(`
@@ -1632,6 +1835,8 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM daily_log;
     DELETE FROM nudge_completions;
     DELETE FROM medications;
+    DELETE FROM inspiration_cards;
+    DELETE FROM inspiration_packs;
     DELETE FROM app_kv;
     DELETE FROM habits;
     DELETE FROM user_config WHERE id = 1;

@@ -172,6 +172,29 @@ export interface UserConfig {
   sex: 'feminino' | 'masculino' | null;
 }
 
+/** Pacote (baralho) de cards de inspiração — embutido ou importado. */
+export interface InspirationPack {
+  id: number;
+  name: string;
+  /** true = pack embutido (restaurável); false = importado pelo usuário. */
+  builtin: boolean;
+  enabled: boolean;
+  /** Nº de cards NÃO excluídos no pack. */
+  cardCount: number;
+}
+
+/** Um card de inspiração: citação ou fato histórico. */
+export interface InspirationCard {
+  id: number;
+  packId: number;
+  type: 'quote' | 'fact';
+  text: string;
+  author: string | null;
+  refDate: string | null;
+  deleted: boolean;
+  builtin: boolean;
+}
+
 /** Texto salvo na tela "Leia para mim" (visualização, oração, hipnose…). */
 export interface ReadAloudText {
   id: number;

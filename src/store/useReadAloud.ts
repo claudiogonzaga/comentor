@@ -34,6 +34,8 @@ interface ReadAloudState {
   toggle: () => void;
   stop: () => void;
   seek: (fraction: number) => void;
+  /** Volta `seconds` no áudio (ex.: 30s). Não passa de 0. */
+  skipBack: (seconds: number) => void;
   setRate: (rate: number) => void;
   clearError: () => void;
 }
@@ -282,6 +284,19 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       if (!p || duration <= 0) return;
       try {
         p.seekTo(Math.max(0, Math.min(1, fraction)) * duration);
+      } catch {
+        /* ignore */
+      }
+    },
+
+    skipBack: (seconds) => {
+      const p = player;
+      const { currentTime } = get();
+      if (!p) return;
+      try {
+        const target = Math.max(0, currentTime - Math.abs(seconds));
+        p.seekTo(target);
+        set({ currentTime: target });
       } catch {
         /* ignore */
       }
