@@ -140,8 +140,18 @@ export async function ensureNotificationCategories() {
   ]);
 }
 
-function channelIdFor(species: OwlSpeciesId, dnd: boolean): string {
+function channelIdFor(species: OwlSpeciesId, dnd: boolean, silent: boolean): string {
+  if (silent) return `comentor-silent-v${CHANNEL_VERSION}`;
   return `comentor-owl-${species}-v${CHANNEL_VERSION}${dnd ? '-dnd' : ''}`;
+}
+
+/** Modo silencioso (botão da Home): notificações sem som/voz, só texto. */
+async function resolveSilent(): Promise<boolean> {
+  try {
+    return !!(await getUserConfig()).silentMode;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveSpecies(species?: OwlSpeciesId): Promise<OwlSpeciesId> {
@@ -183,8 +193,25 @@ export async function ensureChannel(
 ): Promise<string> {
   const sp = await resolveSpecies(species);
   const dnd = dndOverride ?? (await resolveDndBypass());
-  const id = channelIdFor(sp, dnd);
+  const silent = await resolveSilent();
+  const id = channelIdFor(sp, dnd, silent);
   if (Platform.OS !== 'android') return id;
+  // Modo silencioso: canal SEM som e SEM vibração — a notificação ainda aparece
+  // (importância alta = texto visível), mas sem piado. "Só texto".
+  if (silent) {
+    await Notifications.setNotificationChannelAsync(id, {
+      name: 'Comentora — silencioso',
+      description: 'Notificações sem som nem vibração (modo silencioso).',
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: null,
+      vibrationPattern: undefined,
+      enableVibrate: false,
+      lightColor: '#F4C553',
+      bypassDnd: false,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
+    return id;
+  }
   const spec = getOwlSpecies(sp);
   await Notifications.setNotificationChannelAsync(id, {
     name: dnd

@@ -8,7 +8,8 @@ import { HealthCard } from '../components/HealthCard';
 import { GreekIcon } from '../components/GreekIcon';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
-import { getDashboardData, markSleepDone } from '../services/coach';
+import { getDashboardData, markSleepDone, rescheduleAllNotifications } from '../services/coach';
+import { useAppStore } from '../store/useAppStore';
 import { getTodayTodos, toggleTodo, type TodoItem } from '../services/todos';
 import {
   getLastNotification,
@@ -69,6 +70,9 @@ function moodForState(d: Dashboard | null): OwlMood {
 
 export function HomeScreen() {
   const navigation = useNavigation<any>();
+  const { config: storeConfig, setConfig } = useAppStore();
+  const silent = storeConfig?.silentMode ?? false;
+  const [togglingSilent, setTogglingSilent] = useState(false);
   const [data, setData] = useState<Dashboard | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [lastNotif, setLastNotif] = useState<LastNotification | null>(null);
@@ -182,10 +186,43 @@ export function HomeScreen() {
           <Text style={[typography.body, { color: colors.text.secondary }]}>
             {greeting}{data?.config.name ? `, ${data.config.name}` : ''}
           </Text>
-          <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
-            <GreekIcon name="settings" size={24} color={colors.text.secondary} />
-          </Pressable>
+          <View style={styles.headerIcons}>
+            {/* Silenciar: notificações/nudges continuam, mas sem som nem voz. */}
+            <Pressable
+              onPress={async () => {
+                if (togglingSilent) return;
+                setTogglingSilent(true);
+                const next = !silent;
+                try {
+                  await setConfig({ silentMode: next });
+                  // reagenda tudo para cair no canal (silencioso/com som) certo
+                  await rescheduleAllNotifications();
+                } catch (err) {
+                  console.warn('toggle silent failed:', err);
+                } finally {
+                  setTogglingSilent(false);
+                }
+              }}
+              hitSlop={10}
+              style={[styles.muteBtn, silent && styles.muteBtnOn]}
+            >
+              <GreekIcon
+                name={silent ? 'mute' : 'sound'}
+                size={22}
+                color={silent ? colors.accent.gold : colors.text.secondary}
+              />
+            </Pressable>
+            <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
+              <GreekIcon name="settings" size={24} color={colors.text.secondary} />
+            </Pressable>
+          </View>
         </View>
+        {silent && (
+          <Text style={styles.silentHint}>
+            🔕 Silencioso: avisos só em texto (sem piado nem voz). Toque no ícone
+            para reativar o som.
+          </Text>
+        )}
 
         <View style={styles.owlWrap}>
           <Owl mood={mood} size={180} />
@@ -345,6 +382,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingTop: spacing.md,
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  muteBtn: {
+    padding: 6,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  muteBtnOn: {
+    borderColor: colors.accent.gold,
+    backgroundColor: 'rgba(244,197,83,0.12)',
+  },
+  silentHint: {
+    ...typography.small,
+    color: colors.accent.gold,
+    marginTop: spacing.sm,
+    lineHeight: 17,
   },
   owlWrap: {
     alignItems: 'center',

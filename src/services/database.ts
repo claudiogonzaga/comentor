@@ -441,6 +441,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('sex')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN sex TEXT`);
   }
+  // v1.64: modo silencioso (botão da Home) — notificações só texto, sem som/voz.
+  if (!colNames.includes('silent_mode')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN silent_mode INTEGER NOT NULL DEFAULT 0`);
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -691,6 +695,7 @@ interface UserConfigRow {
   sedentary_interval_min: number | null;
   birth_year: number | null;
   sex: string | null;
+  silent_mode: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -745,6 +750,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   sedentaryIntervalMin: r.sedentary_interval_min ?? 60,
   birthYear: r.birth_year ?? null,
   sex: (r.sex ?? null) as UserConfig['sex'],
+  silentMode: (r.silent_mode ?? 0) === 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -811,6 +817,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     sedentaryIntervalMin: 'sedentary_interval_min',
     birthYear: 'birth_year',
     sex: 'sex',
+    silentMode: 'silent_mode',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

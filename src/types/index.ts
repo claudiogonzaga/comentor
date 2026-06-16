@@ -170,6 +170,12 @@ export interface UserConfig {
   birthYear: number | null;
   /** Sexo (contexto p/ a Comentora e futuras faixas de saúde). */
   sex: 'feminino' | 'masculino' | null;
+  /**
+   * Modo silencioso (botão da Home): notificações e nudges continuam, mas SEM
+   * som nem voz — só texto. Usa um canal de notificação silencioso e suprime
+   * toda a fala (TTS em primeiro plano e os alarmes falados em background).
+   */
+  silentMode: boolean;
 }
 
 /** Pacote (baralho) de cards de inspiração — embutido ou importado. */

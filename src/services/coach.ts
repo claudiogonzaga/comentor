@@ -29,6 +29,8 @@ import {
 import { scheduleAllNudges } from './nudges';
 import { scheduleSleepAwarenessNotifications } from './sleepAwareness';
 import { scheduleInspirationNotifications } from './inspiration';
+import { scheduleAllMedications } from './medications';
+import { scheduleSedentaryNudges } from './sedentary';
 import { getHealthSnapshot, formatHealthForCoach } from './health';
 import { summaryToCoachContext } from './interview';
 import { pickFallback } from './fallbackMessages';
@@ -569,6 +571,10 @@ export async function rescheduleAllNotifications(): Promise<void> {
   await scheduleAllNudges();
   await scheduleSleepAwarenessNotifications();
   await scheduleInspirationNotifications();
+  // Remédios/hábitos e o nudge de sedentário também são reagendados para que,
+  // ao alternar o modo silencioso, todos caiam no canal certo (silencioso/com som).
+  await scheduleAllMedications();
+  await scheduleSedentaryNudges();
 }
 
 export async function getDashboardData() {

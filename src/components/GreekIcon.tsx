@@ -18,6 +18,7 @@ export type GreekIconName =
   | 'pill'
   | 'leaf'
   | 'sound'
+  | 'mute'
   | 'voice'
   | 'stats'
   | 'sparkle'
@@ -133,6 +134,14 @@ function renderPaths(
         <>
           <Path d="M4 9.5h3l4-3.5v12l-4-3.5H4Z" {...common} />
           <Path d="M15 8.5a4.5 4.5 0 0 1 0 7M17.5 6a8 8 0 0 1 0 12" {...common} />
+        </>
+      );
+    case 'mute':
+      return (
+        <>
+          <Path d="M4 9.5h3l4-3.5v12l-4-3.5H4Z" {...common} />
+          <Line x1={15} y1={9} x2={21} y2={15} {...common} />
+          <Line x1={21} y1={9} x2={15} y2={15} {...common} />
         </>
       );
     case 'voice':

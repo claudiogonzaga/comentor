@@ -240,7 +240,7 @@ export async function syncSpokenInspirations(
   let voiceName = DEFAULT_GEMINI_VOICE;
   try {
     const c = await getUserConfig();
-    enabled = !!c.spokenNudgesEnabled && !!c.inspirationModeEnabled;
+    enabled = !!c.spokenNudgesEnabled && !!c.inspirationModeEnabled && !c.silentMode;
     useGemini = c.voiceProvider === 'gemini';
     voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
   } catch {
@@ -349,7 +349,7 @@ export async function syncSpokenMedications(
   let voiceName = DEFAULT_GEMINI_VOICE;
   try {
     const c = await getUserConfig();
-    enabled = !!c.spokenNudgesEnabled; // só o master toggle (independe da inspiração)
+    enabled = !!c.spokenNudgesEnabled && !c.silentMode; // master toggle; silencioso suprime
     useGemini = c.voiceProvider === 'gemini';
     voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
   } catch {

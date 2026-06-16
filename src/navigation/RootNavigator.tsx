@@ -212,6 +212,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         if (AppState.currentState !== 'active') return;
         const cfg = useAppStore.getState().config;
         if (!cfg?.voiceNudgesEnabled) return;
+        // Modo silencioso (botão da Home): nada de voz — só o texto da notificação.
+        if (cfg?.silentMode) return;
         // "Só falar com fone de ouvido": vale para TODAS as falas/avisos — não só
         // os alarmes em background, mas TAMBÉM esta fala em primeiro plano. Sem
         // fone conectado, NÃO fala (evita constrangimento em reunião/audiência).
