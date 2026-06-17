@@ -445,6 +445,10 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('silent_mode')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN silent_mode INTEGER NOT NULL DEFAULT 0`);
   }
+  // v1.65: volume da voz dos nudges (0–1), barra da Home. 0 = mudo (silent_mode).
+  if (!colNames.includes('nudge_volume')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN nudge_volume REAL NOT NULL DEFAULT 1`);
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -696,6 +700,7 @@ interface UserConfigRow {
   birth_year: number | null;
   sex: string | null;
   silent_mode: number | null;
+  nudge_volume: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -751,6 +756,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   birthYear: r.birth_year ?? null,
   sex: (r.sex ?? null) as UserConfig['sex'],
   silentMode: (r.silent_mode ?? 0) === 1,
+  nudgeVolume: r.nudge_volume ?? 1,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -818,6 +824,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     birthYear: 'birth_year',
     sex: 'sex',
     silentMode: 'silent_mode',
+    nudgeVolume: 'nudge_volume',
   };
 
   Object.entries(patch).forEach(([k, v]) => {

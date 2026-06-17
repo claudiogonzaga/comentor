@@ -10,6 +10,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
 import { getDashboardData, markSleepDone, rescheduleAllNotifications } from '../services/coach';
 import { useAppStore } from '../store/useAppStore';
+import { setSpokenVolume } from '../services/spokenNudges';
+import { VerticalVolume } from '../components/VerticalVolume';
 import { getTodayTodos, toggleTodo, type TodoItem } from '../services/todos';
 import {
   getLastNotification,
@@ -71,8 +73,29 @@ function moodForState(d: Dashboard | null): OwlMood {
 export function HomeScreen() {
   const navigation = useNavigation<any>();
   const { config: storeConfig, setConfig } = useAppStore();
-  const silent = storeConfig?.silentMode ?? false;
-  const [togglingSilent, setTogglingSilent] = useState(false);
+  // Volume dos avisos/nudges (0–1). `volLive` reflete o arraste em tempo real.
+  const [volLive, setVolLive] = useState<number | null>(null);
+  const liveVol = volLive ?? storeConfig?.nudgeVolume ?? 1;
+
+  // Persiste o volume ao soltar a barra: salva, espelha no nativo e — só quando
+  // cruza a fronteira do mudo — reagenda tudo p/ trocar o canal (silencioso/com som).
+  const commitVolume = useCallback(
+    async (v: number) => {
+      const silentNext = v <= 0;
+      const silentPrev = storeConfig?.silentMode ?? false;
+      try {
+        await setConfig({ nudgeVolume: v, silentMode: silentNext });
+        setSpokenVolume(v);
+        if (silentNext !== silentPrev) await rescheduleAllNotifications();
+      } catch (err) {
+        console.warn('commitVolume failed:', err);
+      } finally {
+        setVolLive(null);
+      }
+    },
+    [storeConfig?.silentMode, setConfig],
+  );
+
   const [data, setData] = useState<Dashboard | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [lastNotif, setLastNotif] = useState<LastNotification | null>(null);
@@ -186,41 +209,33 @@ export function HomeScreen() {
           <Text style={[typography.body, { color: colors.text.secondary }]}>
             {greeting}{data?.config.name ? `, ${data.config.name}` : ''}
           </Text>
-          <View style={styles.headerIcons}>
-            {/* Silenciar: notificações/nudges continuam, mas sem som nem voz. */}
-            <Pressable
-              onPress={async () => {
-                if (togglingSilent) return;
-                setTogglingSilent(true);
-                const next = !silent;
-                try {
-                  await setConfig({ silentMode: next });
-                  // reagenda tudo para cair no canal (silencioso/com som) certo
-                  await rescheduleAllNotifications();
-                } catch (err) {
-                  console.warn('toggle silent failed:', err);
-                } finally {
-                  setTogglingSilent(false);
-                }
-              }}
-              hitSlop={10}
-              style={[styles.muteBtn, silent && styles.muteBtnOn]}
-            >
-              <GreekIcon
-                name={silent ? 'mute' : 'sound'}
-                size={22}
-                color={silent ? colors.accent.gold : colors.text.secondary}
-              />
-            </Pressable>
+          <View style={styles.headerRight}>
             <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
               <GreekIcon name="settings" size={24} color={colors.text.secondary} />
             </Pressable>
+            {/* Barra de volume dos avisos/nudges — desce até mudo. */}
+            <View style={styles.volWrap}>
+              <GreekIcon
+                name={liveVol <= 0 ? 'mute' : 'sound'}
+                size={16}
+                color={liveVol <= 0 ? colors.text.tertiary : colors.text.secondary}
+              />
+              <VerticalVolume
+                value={liveVol}
+                height={84}
+                onChange={(v) => {
+                  setVolLive(v);
+                  setSpokenVolume(v); // nativo já passa a usar no próximo aviso
+                }}
+                onCommit={commitVolume}
+              />
+            </View>
           </View>
         </View>
-        {silent && (
+        {liveVol <= 0 && (
           <Text style={styles.silentHint}>
-            🔕 Silencioso: avisos só em texto (sem piado nem voz). Toque no ícone
-            para reativar o som.
+            Silencioso: avisos só em texto (sem piado nem voz). Arraste a barrinha
+            para cima para reativar o som.
           </Text>
         )}
 
@@ -383,20 +398,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: spacing.md,
   },
-  headerIcons: {
-    flexDirection: 'row',
+  headerRight: {
     alignItems: 'center',
-    gap: spacing.lg,
+    gap: spacing.sm,
   },
-  muteBtn: {
-    padding: 6,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  muteBtnOn: {
-    borderColor: colors.accent.gold,
-    backgroundColor: 'rgba(244,197,83,0.12)',
+  volWrap: {
+    alignItems: 'center',
+    gap: 4,
   },
   silentHint: {
     ...typography.small,

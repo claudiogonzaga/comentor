@@ -34,6 +34,7 @@ interface SpokenNudgesNative {
   scheduledIds(): string[];
   rearmAll(): Promise<void>;
   setHeadphonesOnly(enabled: boolean): void;
+  setNudgeVolume(volume: number): void;
   isHeadphonesConnected(): boolean;
   setQuietHours(enabled: boolean, startMin: number, endMin: number, daysMask: number): void;
 }
@@ -99,6 +100,15 @@ export function requestIgnoreBatteryOptimizations(): void {
 export function setSpokenHeadphonesOnly(enabled: boolean): void {
   try {
     native?.setHeadphonesOnly(enabled);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Mirror do volume da voz dos nudges (0–1) para o nativo (aplica no WAV). */
+export function setSpokenVolume(volume: number): void {
+  try {
+    native?.setNudgeVolume(Math.max(0, Math.min(1, volume)));
   } catch {
     /* ignore */
   }

@@ -174,8 +174,16 @@ export interface UserConfig {
    * Modo silencioso (botão da Home): notificações e nudges continuam, mas SEM
    * som nem voz — só texto. Usa um canal de notificação silencioso e suprime
    * toda a fala (TTS em primeiro plano e os alarmes falados em background).
+   * Derivado de `nudgeVolume === 0`.
    */
   silentMode: boolean;
+  /**
+   * Volume da VOZ dos avisos/nudges (0–1), controlado pela barra da Home. 0 =
+   * mudo total (liga o silentMode). O piado da coruja é volume do sistema
+   * (Android não deixa o app escalá-lo) — em 0 ele também é mutado pelo canal
+   * silencioso.
+   */
+  nudgeVolume: number;
 }
 
 /** Pacote (baralho) de cards de inspiração — embutido ou importado. */

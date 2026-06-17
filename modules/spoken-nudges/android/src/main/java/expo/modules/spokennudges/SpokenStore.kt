@@ -27,6 +27,7 @@ object SpokenStore {
   private const val KEY_QUIET_START = "quiet_start" // minutos do dia
   private const val KEY_QUIET_END = "quiet_end" // minutos do dia
   private const val KEY_QUIET_DAYS = "quiet_days" // bitmask (bit d = dia d, 0=dom)
+  private const val KEY_NUDGE_VOLUME = "nudge_volume" // 0–1
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -57,6 +58,12 @@ object SpokenStore {
   fun getQuietStart(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_START, 9 * 60)
   fun getQuietEnd(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_END, 18 * 60)
   fun getQuietDays(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_DAYS, 127)
+
+  /** Volume da voz dos nudges (0–1), barra da Home. Lido no disparo do WAV. */
+  fun getNudgeVolume(ctx: Context): Float = prefs(ctx).getFloat(KEY_NUDGE_VOLUME, 1f)
+  fun setNudgeVolume(ctx: Context, value: Float) {
+    prefs(ctx).edit().putFloat(KEY_NUDGE_VOLUME, value.coerceIn(0f, 1f)).apply()
+  }
 
   fun all(ctx: Context): List<SpokenAlarm> {
     val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"

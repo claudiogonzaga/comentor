@@ -91,5 +91,10 @@ class SpokenNudgesModule : Module() {
     Function("setQuietHours") { enabled: Boolean, startMin: Int, endMin: Int, daysMask: Int ->
       SpokenStore.setQuiet(context, enabled, startMin, endMin, daysMask)
     }
+
+    // Volume da voz dos nudges (0–1), barra da Home. O serviço aplica no WAV.
+    Function("setNudgeVolume") { volume: Double ->
+      SpokenStore.setNudgeVolume(context, volume.toFloat())
+    }
   }
 }

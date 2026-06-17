@@ -242,7 +242,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           .replace(/\s+/g, ' ')
           .trim();
         if (!text) return;
-        await speak(text);
+        await speak(text, { volume: cfg?.nudgeVolume ?? 1 });
       } catch {
         /* speaking is best-effort */
       }

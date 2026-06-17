@@ -36,6 +36,8 @@ interface SpeakOptions {
   onError?: (e: unknown) => void;
   voiceId?: string | null;
   language?: string | null;
+  /** Volume 0–1 (avisos/nudges escalam pela barra da Home). Padrão 1. */
+  volume?: number;
 }
 
 let currentlySpeaking = false;
@@ -282,6 +284,7 @@ export async function speak(
     voice: resolved.id ?? undefined,
     rate: 1.0,
     pitch: 1.0,
+    volume: opts.volume == null ? 1 : Math.max(0, Math.min(1, opts.volume)),
     onDone: () => {
       if (myToken !== speakToken) return;
       currentlySpeaking = false;

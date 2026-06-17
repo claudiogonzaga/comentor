@@ -106,7 +106,11 @@ class SpokenSpeechService : Service() {
         } catch (_: Exception) {}
       }
       mp.setDataSource(path)
-      mp.setOnPreparedListener { it.start() }
+      val vol = SpokenStore.getNudgeVolume(this)
+      mp.setOnPreparedListener {
+        try { it.setVolume(vol, vol) } catch (_: Exception) {}
+        it.start()
+      }
       mp.setOnCompletionListener { stopEverything() }
       mp.setOnErrorListener { _, what, extra ->
         Log.e(SpokenScheduler.TAG, "MediaPlayer error what=$what extra=$extra")
