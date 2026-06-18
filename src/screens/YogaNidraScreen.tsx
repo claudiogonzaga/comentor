@@ -63,22 +63,41 @@ export function YogaNidraScreen() {
       const res = await DocumentPicker.getDocumentAsync({
         type: 'audio/*',
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true, // permite escolher vários áudios de uma vez
       });
-      if (res.canceled || !res.assets?.[0]) return;
-      const picked = res.assets[0];
-      const ext =
-        (picked.name?.split('.').pop() ?? 'mp3').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'mp3';
-      const dest = new File(Paths.document, `yoga_nidra_${Date.now()}.${ext}`);
-      new File(picked.uri).copy(dest);
-      const base = (picked.name ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40) || 'Ioga Nidra';
-      const created = await createYogaNidraSound({ name: base, uri: dest.uri });
-      await setConfig({ yogaNidraSoundId: created.id });
+      if (res.canceled || !res.assets?.length) return;
+      let lastId: number | null = null;
+      let failures = 0;
+      // índice no nome do arquivo evita colisão quando vários são copiados no mesmo ms
+      for (let i = 0; i < res.assets.length; i++) {
+        const picked = res.assets[i];
+        try {
+          const ext =
+            (picked.name?.split('.').pop() ?? 'mp3').replace(/[^a-z0-9]/gi, '').toLowerCase() ||
+            'mp3';
+          const dest = new File(Paths.document, `yoga_nidra_${Date.now()}_${i}.${ext}`);
+          new File(picked.uri).copy(dest);
+          const base =
+            (picked.name ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40) || 'Ioga Nidra';
+          const created = await createYogaNidraSound({ name: base, uri: dest.uri });
+          lastId = created.id;
+        } catch {
+          failures++;
+        }
+      }
+      // seleciona o último adicionado com sucesso
+      if (lastId != null) await setConfig({ yogaNidraSoundId: lastId });
       await reload();
+      if (failures > 0) {
+        Alert.alert(
+          'Alguns arquivos falharam',
+          `${failures} arquivo(s) não puderam ser adicionados. Use áudios (mp3, m4a, wav…).`,
+        );
+      }
     } catch {
       Alert.alert(
-        'Não consegui usar esse arquivo',
-        'Tente outro arquivo de áudio (mp3, m4a, wav…).',
+        'Não consegui usar esse(s) arquivo(s)',
+        'Tente outro(s) arquivo(s) de áudio (mp3, m4a, wav…).',
       );
     } finally {
       setUploading(false);
@@ -181,14 +200,15 @@ export function YogaNidraScreen() {
 
         <View style={{ height: spacing.lg }} />
         <Button
-          label="Enviar áudio de Ioga Nidra"
+          label="Enviar áudios de Ioga Nidra"
           variant="secondary"
           onPress={handleUpload}
           loading={uploading}
         />
         <Text style={styles.hint}>
-          No seletor do Android dá para escolher um arquivo do aparelho ou do
-          Google Drive (menu ☰ → Drive). Formatos: mp3, m4a, wav…
+          Dá para escolher VÁRIOS arquivos de uma vez (segure para selecionar
+          mais de um). Do aparelho ou do Google Drive (menu ☰ → Drive).
+          Formatos: mp3, m4a, wav…
         </Text>
       </ScrollView>
     </ScreenContainer>
