@@ -12,6 +12,7 @@ import { getDashboardData, markSleepDone, rescheduleAllNotifications } from '../
 import { useAppStore } from '../store/useAppStore';
 import { setSpokenVolume } from '../services/spokenNudges';
 import { VerticalVolume } from '../components/VerticalVolume';
+import { SequenceCard } from '../components/SequenceCard';
 import { getTodayTodos, toggleTodo, type TodoItem } from '../services/todos';
 import {
   getLastNotification,
@@ -375,7 +376,16 @@ export function HomeScreen() {
             variant="secondary"
             onPress={() => navigation.navigate('ReadAloud')}
           />
+          <View style={{ height: spacing.sm }} />
+          <Button
+            label="Ioga Nidra"
+            variant="secondary"
+            onPress={() => navigation.navigate('YogaNidra')}
+          />
         </View>
+
+        {/* Playlist: tocar respiração + ioga nidra + leia para mim em sequência. */}
+        <SequenceCard />
 
         <Pressable onPress={() => navigation.navigate('History')} style={styles.historyLink}>
           <Text style={[typography.bodyMedium, { color: colors.accent.gold }]}>

@@ -184,6 +184,15 @@ export interface UserConfig {
    * silencioso.
    */
   nudgeVolume: number;
+  /** Áudio de Ioga Nidra selecionado (id em yoga_nidra_sounds), ou null. */
+  yogaNidraSoundId: number | null;
+}
+
+/** Áudio de Ioga Nidra que o usuário subiu (nomeado). */
+export interface YogaNidraSound {
+  id: number;
+  name: string;
+  uri: string;
 }
 
 /** Pacote (baralho) de cards de inspiração — embutido ou importado. */

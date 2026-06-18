@@ -12,6 +12,7 @@ import type {
   InterviewSummary,
   LocalModelId,
   BreathingCustomSound,
+  YogaNidraSound,
   InspirationPack,
   InspirationCard,
   Medication,
@@ -449,6 +450,18 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('nudge_volume')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN nudge_volume REAL NOT NULL DEFAULT 1`);
   }
+  // v1.66: Ioga Nidra — tabela de áudios próprios + áudio selecionado na config.
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS yoga_nidra_sounds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  if (!colNames.includes('yoga_nidra_sound_id')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN yoga_nidra_sound_id INTEGER`);
+  }
 
   // v1.28: textos salvos da tela "Leia para mim".
   await database.execAsync(`
@@ -701,6 +714,7 @@ interface UserConfigRow {
   sex: string | null;
   silent_mode: number | null;
   nudge_volume: number | null;
+  yoga_nidra_sound_id: number | null;
 }
 
 const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
@@ -757,6 +771,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   sex: (r.sex ?? null) as UserConfig['sex'],
   silentMode: (r.silent_mode ?? 0) === 1,
   nudgeVolume: r.nudge_volume ?? 1,
+  yogaNidraSoundId: r.yoga_nidra_sound_id ?? null,
 });
 
 export async function getUserConfig(): Promise<UserConfig> {
@@ -825,6 +840,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     sex: 'sex',
     silentMode: 'silent_mode',
     nudgeVolume: 'nudge_volume',
+    yogaNidraSoundId: 'yoga_nidra_sound_id',
   };
 
   Object.entries(patch).forEach(([k, v]) => {
@@ -1637,6 +1653,61 @@ export async function deleteBreathingCustomSound(id: number): Promise<void> {
     [id],
   );
   await d.runAsync('DELETE FROM breathing_custom_sounds WHERE id = ?', [id]);
+  const uri = row?.uri;
+  if (uri) {
+    try {
+      new File(uri).delete();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// --------- Áudios de Ioga Nidra (vários, nomeados) ---------
+
+interface YogaNidraSoundRow {
+  id: number;
+  name: string;
+  uri: string;
+  created_at: string;
+}
+
+export async function listYogaNidraSounds(): Promise<YogaNidraSound[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<YogaNidraSoundRow>(
+    'SELECT * FROM yoga_nidra_sounds ORDER BY id ASC',
+  );
+  return rows.map((r) => ({ id: r.id, name: r.name, uri: r.uri }));
+}
+
+export async function createYogaNidraSound(input: {
+  name: string;
+  uri: string;
+}): Promise<YogaNidraSound> {
+  const d = await getDb();
+  const name = input.name.trim() || 'Ioga Nidra';
+  const res = await d.runAsync('INSERT INTO yoga_nidra_sounds (name, uri) VALUES (?, ?)', [
+    name,
+    input.uri,
+  ]);
+  return { id: res.lastInsertRowId as number, name, uri: input.uri };
+}
+
+export async function renameYogaNidraSound(id: number, name: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE yoga_nidra_sounds SET name = ? WHERE id = ?', [
+    name.trim() || 'Ioga Nidra',
+    id,
+  ]);
+}
+
+export async function deleteYogaNidraSound(id: number): Promise<void> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ uri: string }>(
+    'SELECT uri FROM yoga_nidra_sounds WHERE id = ?',
+    [id],
+  );
+  await d.runAsync('DELETE FROM yoga_nidra_sounds WHERE id = ?', [id]);
   const uri = row?.uri;
   if (uri) {
     try {
