@@ -81,14 +81,19 @@ class SpokenSpeechService : Service() {
 
     acquireWake()
 
-    if (!audioPath.isNullOrEmpty()) {
-      playWav(audioPath)
-    } else if (body.isNotEmpty()) {
-      speakWithSystemTts(body)
-    } else {
-      Log.w(SpokenScheduler.TAG, "service: sem áudio nem texto")
-      stopEverything()
-    }
+    // Toca o PIADO DA CORUJA ~1,5s ANTES da voz: a notificação paralela já emite
+    // o canto da coruja no instante do disparo; atrasando a fala, o piado passa
+    // a anteceder o aviso (chama a atenção antes de a Comentora falar).
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+      if (!audioPath.isNullOrEmpty()) {
+        playWav(audioPath)
+      } else if (body.isNotEmpty()) {
+        speakWithSystemTts(body)
+      } else {
+        Log.w(SpokenScheduler.TAG, "service: sem áudio nem texto")
+        stopEverything()
+      }
+    }, 1500)
     return START_NOT_STICKY
   }
 

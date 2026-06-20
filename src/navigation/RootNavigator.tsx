@@ -37,6 +37,7 @@ import { saveLastNotification } from '../services/lastNotification';
 import { isHeadphonesConnected, isSpokenQuietNow } from '../services/spokenNudges';
 import { markSleepDone } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
+import { playOwlCall } from '../services/owlSound';
 import { colors } from '../theme';
 
 export type RootStackParamList = {
@@ -244,6 +245,12 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           .replace(/\s+/g, ' ')
           .trim();
         if (!text) return;
+        // Toca o PIADO DA CORUJA ~1,5s ANTES da fala — chama a atenção antes de
+        // a Comentora começar a falar o aviso (não no modo silencioso).
+        if (!cfg?.silentMode) {
+          playOwlCall(cfg?.owlSpecies);
+          await new Promise((r) => setTimeout(r, 1500));
+        }
         await speak(text, { volume: cfg?.nudgeVolume ?? 1 });
       } catch {
         /* speaking is best-effort */
