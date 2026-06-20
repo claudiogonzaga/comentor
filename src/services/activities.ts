@@ -4,13 +4,18 @@ import {
   listReadAloudTexts,
   listYogaNidraSounds,
 } from './database';
-import { getBreathingSound, type BreathingSoundId } from '../constants/breathingSounds';
+import {
+  BREATHING_SOUNDS,
+  getBreathingSound,
+  type BreathingSoundId,
+} from '../constants/breathingSounds';
 import type { QueueItem } from '../store/useMediaQueue';
 
-// Resolve as ATIVIDADES da Home (respiração, ioga nidra, leia para mim) em
-// fontes de áudio prontas para a fila (useMediaQueue). Cada atividade vira UM
-// item; se faltar o áudio necessário (ex.: nenhum Ioga Nidra subido), entra um
-// aviso e a atividade é pulada.
+// Resolve as ATIVIDADES da sequência (respiração, ioga nidra, leia para mim) em
+// fontes de áudio prontas para a fila (useMediaQueue). Cada passo aponta para
+// UM arquivo específico (ref): o usuário escolhe QUAL áudio/texto salvo tocar, e
+// pode repetir (ex.: vários "Leia para mim"). Se o arquivo não existir mais,
+// entra um aviso e o passo é pulado.
 
 export type ActivityKind = 'breathing' | 'yoganidra' | 'readaloud';
 
@@ -20,64 +25,89 @@ export const ACTIVITY_LABEL: Record<ActivityKind, string> = {
   readaloud: 'Leia para mim',
 };
 
+/** Um passo da sequência: tipo + referência ao arquivo escolhido + rótulo. */
+export interface SeqStep {
+  kind: ActivityKind;
+  /** breathing: id do som ('cello' | 'custom:<id>'); yoga/leia: id numérico. */
+  ref: string | number;
+  label: string;
+}
+
+/** Opção escolhível no seletor de um tipo de atividade. */
+export interface ActivityOption {
+  ref: string | number;
+  label: string;
+}
+
 const DEFAULT_BREATHING_MINUTES = 16;
 
-/** Fonte de áudio da RESPIRAÇÃO (asset embutido ou arquivo próprio do usuário). */
-async function breathingItem(): Promise<{ item?: QueueItem; warning?: string }> {
-  const config = await getUserConfig();
-  const id = config.breathingSoundId ?? 'cello';
-  const minutes = Math.max(1, config.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES);
-  const stopAfterMs = minutes * 60000;
-  let source: number | { uri: string } | null = null;
-  if (id.startsWith('custom:')) {
-    const cid = parseInt(id.slice('custom:'.length), 10);
-    const list = await listBreathingCustomSounds();
-    const uri = list.find((s) => s.id === cid)?.uri ?? null;
-    source = uri ? { uri } : null;
-  } else {
-    source = getBreathingSound(id as BreathingSoundId).asset ?? null;
+/** Opções disponíveis para um tipo (sons/áudios/textos salvos). */
+export async function listActivityOptions(kind: ActivityKind): Promise<ActivityOption[]> {
+  if (kind === 'breathing') {
+    const embedded: ActivityOption[] = BREATHING_SOUNDS.filter((s) => s.asset != null).map((s) => ({
+      ref: s.id,
+      label: s.name,
+    }));
+    const custom = await listBreathingCustomSounds();
+    return [...embedded, ...custom.map((c) => ({ ref: `custom:${c.id}`, label: c.name }))];
   }
-  if (source == null) return { warning: 'Respiração: som indisponível.' };
-  return { item: { label: ACTIVITY_LABEL.breathing, source, loop: true, stopAfterMs } };
+  if (kind === 'yoganidra') {
+    const list = await listYogaNidraSounds();
+    return list.map((s) => ({ ref: s.id, label: s.name }));
+  }
+  // readaloud: só textos que JÁ têm áudio gerado (toca na hora).
+  const texts = await listReadAloudTexts();
+  return texts.filter((t) => t.audioUri).map((t) => ({ ref: t.id, label: t.title }));
 }
 
-/** Fonte de áudio da IOGA NIDRA (selecionada na config, ou a mais recente). */
-async function yogaNidraItem(): Promise<{ item?: QueueItem; warning?: string }> {
-  const config = await getUserConfig();
-  const list = await listYogaNidraSounds();
-  if (!list.length) {
-    return { warning: 'Ioga Nidra: nenhum áudio enviado — suba um arquivo na tela de Ioga Nidra.' };
-  }
-  const chosen =
-    list.find((s) => s.id === config.yogaNidraSoundId) ?? list[list.length - 1];
-  return { item: { label: ACTIVITY_LABEL.yoganidra, source: { uri: chosen.uri } } };
-}
-
-/** Fonte de áudio do LEIA PARA MIM (texto salvo mais recente que já tem áudio). */
-async function readAloudItem(): Promise<{ item?: QueueItem; warning?: string }> {
-  const texts = await listReadAloudTexts(); // já vem ordenado por mais recente
-  const withAudio = texts.find((t) => t.audioUri);
-  if (!withAudio?.audioUri) {
+async function resolveStep(step: SeqStep): Promise<{ item?: QueueItem; warning?: string }> {
+  if (step.kind === 'breathing') {
+    const config = await getUserConfig();
+    const minutes = Math.max(1, config.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES);
+    const id = String(step.ref);
+    let source: number | { uri: string } | null = null;
+    let name = step.label;
+    if (id.startsWith('custom:')) {
+      const cid = parseInt(id.slice('custom:'.length), 10);
+      const list = await listBreathingCustomSounds();
+      const s = list.find((x) => x.id === cid);
+      source = s ? { uri: s.uri } : null;
+      name = s?.name ?? name;
+    } else {
+      source = getBreathingSound(id as BreathingSoundId).asset ?? null;
+    }
+    if (source == null) return { warning: `Respiração: som "${name}" indisponível.` };
     return {
-      warning:
-        'Leia para mim: nenhum áudio salvo — gere e salve um áudio em "Leia para mim" antes.',
+      item: {
+        label: `${ACTIVITY_LABEL.breathing}: ${name}`,
+        source,
+        loop: true,
+        stopAfterMs: minutes * 60000,
+      },
     };
   }
-  return { item: { label: `${ACTIVITY_LABEL.readaloud}: ${withAudio.title}`, source: { uri: withAudio.audioUri } } };
+  if (step.kind === 'yoganidra') {
+    const list = await listYogaNidraSounds();
+    const s = list.find((x) => x.id === step.ref);
+    if (!s) return { warning: `Ioga Nidra: "${step.label}" não encontrado.` };
+    return { item: { label: `${ACTIVITY_LABEL.yoganidra}: ${s.name}`, source: { uri: s.uri } } };
+  }
+  // readaloud
+  const texts = await listReadAloudTexts();
+  const t = texts.find((x) => x.id === step.ref);
+  if (!t?.audioUri) return { warning: `Leia para mim: "${step.label}" sem áudio salvo.` };
+  return {
+    item: { label: `${ACTIVITY_LABEL.readaloud}: ${t.title}`, source: { uri: t.audioUri } },
+  };
 }
 
-export async function resolveActivities(
-  kinds: ActivityKind[],
+export async function resolveSteps(
+  steps: SeqStep[],
 ): Promise<{ items: QueueItem[]; warnings: string[] }> {
   const items: QueueItem[] = [];
   const warnings: string[] = [];
-  for (const k of kinds) {
-    const r =
-      k === 'breathing'
-        ? await breathingItem()
-        : k === 'yoganidra'
-          ? await yogaNidraItem()
-          : await readAloudItem();
+  for (const s of steps) {
+    const r = await resolveStep(s);
     if (r.item) items.push(r.item);
     if (r.warning) warnings.push(r.warning);
   }

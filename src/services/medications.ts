@@ -35,6 +35,8 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
   emoji: string;
   title: string;
   baseBody: string;
+  /** Instrução do botão a tocar (sem o "Ainda pendente"). */
+  actionLine: string;
   pendingBody: string;
   category: string;
 } {
@@ -43,22 +45,40 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
   const detail = med.dosage?.trim();
   if (ingest) {
     const baseBody = detail ? `Hora de tomar: ${detail}.` : 'Hora de tomar o seu lembrete.';
+    const actionLine = 'Toque em "Já tomei 💊" quando tomar.';
     return {
       emoji,
       title: `${emoji} ${med.name}`,
       baseBody,
-      pendingBody: `${baseBody}\n\nAinda pendente — toque em "Já tomei 💊" quando tomar.`,
+      actionLine,
+      pendingBody: `${baseBody}\n\nAinda pendente — ${actionLine}`,
       category: MED_CATEGORY,
     };
   }
   const baseBody = detail ? `Está na hora: ${detail}.` : 'Está na hora deste hábito.';
+  const actionLine = 'Toque em "Já fiz ✅" quando concluir.';
   return {
     emoji,
     title: `${emoji} ${med.name}`,
     baseBody,
-    pendingBody: `${baseBody}\n\nAinda pendente — toque em "Já fiz ✅" quando concluir.`,
+    actionLine,
+    pendingBody: `${baseBody}\n\nAinda pendente — ${actionLine}`,
     category: MED_DO_CATEGORY,
   };
+}
+
+/**
+ * Mensagem ESCALADA da k-ésima insistência (k = 1, 2, 3…): a coruja vai
+ * aumentando o tom — do lembrete gentil ao apelo direto — até o usuário marcar.
+ */
+function escalatedBody(name: string, actionLine: string, k: number): string {
+  const openers = [
+    `Ainda pendente: "${name}". ${actionLine}`,
+    `Vamos lá, me responde por favor 🙏 — "${name}" ainda não foi marcado. ${actionLine}`,
+    `Ô! Não vou desistir de você: "${name}" continua te esperando. ${actionLine}`,
+    `Última cobrança por agora… "${name}" segue pendente. É rapidinho — ${actionLine.charAt(0).toLowerCase()}${actionLine.slice(1)}`,
+  ];
+  return openers[Math.min(Math.max(1, k) - 1, openers.length - 1)];
 }
 
 /**
@@ -152,7 +172,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
     const safeMinute = Math.min(59, Math.max(0, m));
 
     const key = completionKey(med.id);
-    const { title, baseBody, pendingBody, category } = reminderCopy(med);
+    const { title, baseBody, actionLine, pendingBody, category } = reminderCopy(med);
 
     // Dias da semana em que o lembrete vale (0=domingo … 6=sábado, igual a
     // Date.getDay()). Os 7 dias = diário; um subconjunto = semanal em dias
@@ -288,14 +308,20 @@ export async function scheduleAllMedications(): Promise<string[]> {
     const todayDow = new Date().getDay();
     if (activeDays.includes(todayDow) && !doneKeys.includes(key)) {
       const base = buildTodayAt(safeHour, safeMinute);
+      // Âncora da corrente: o horário do lembrete OU agora (o que for MAIOR).
+      // Assim, se o app reabre depois do horário e a tarefa segue pendente, a
+      // coruja volta a insistir A PARTIR DE AGORA — em vez de pular tudo que já
+      // passou e ficar muda (era por isso que "não insistia").
+      const anchor = base.getTime() > Date.now() ? base.getTime() : Date.now();
       for (let k = 1; k <= MED_MAX_REPEATS; k++) {
-        const fireAt = new Date(base.getTime() + k * intervalMin * 60_000);
+        const fireAt = new Date(anchor + k * intervalMin * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
         try {
           const id = await Notifications.scheduleNotificationAsync({
             content: {
               title,
-              body: pendingBody,
+              // Tom crescente a cada insistência (≥3 vezes).
+              body: `${baseBody}\n\n${escalatedBody(med.name, actionLine, k)}`,
               data: { type: `med:${med.id}`, medId: med.id, followup: true },
               sound,
               categoryIdentifier: category,
