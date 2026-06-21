@@ -29,10 +29,11 @@ import {
   NUDGE_SNOOZE_ACTION,
   MED_DONE_ACTION,
   MED_SNOOZE_ACTION,
+  MED_SKIP_ACTION,
   cancelSleepEscalationReminders,
 } from '../services/notifications';
 import { confirmNudge, snoozeNudge } from '../services/nudges';
-import { confirmMedication, snoozeMedication } from '../services/medications';
+import { confirmMedication, snoozeMedication, skipMedicationToday } from '../services/medications';
 import { saveLastNotification } from '../services/lastNotification';
 import { isHeadphonesConnected, isSpokenQuietNow } from '../services/spokenNudges';
 import { markSleepDone } from '../services/coach';
@@ -169,7 +170,13 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           }
         } else if (action === MED_SNOOZE_ACTION && typeof data.medId === 'number') {
           try {
-            await snoozeMedication(data.medId);
+            await snoozeMedication(data.medId, 30);
+          } catch {
+            /* still navigate even if it fails */
+          }
+        } else if (action === MED_SKIP_ACTION && typeof data.medId === 'number') {
+          try {
+            await skipMedicationToday(data.medId);
           } catch {
             /* still navigate even if it fails */
           }

@@ -100,6 +100,15 @@ function completionKey(medId: number): string {
   return `med:${medId}`;
 }
 
+/**
+ * Chave de "pulei hoje" ("Não vou fazer"): encerra a corrente de insistências
+ * do dia SEM contar como feito (separada de completionKey p/ não inflar
+ * estatísticas/streaks). Reseta no dia seguinte como qualquer marca diária.
+ */
+function skipKey(medId: number): string {
+  return `med:${medId}:skip`;
+}
+
 function todayISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
@@ -306,7 +315,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
     // Corrente de insistências de hoje — só se HOJE for um dia ativo e o
     // lembrete ainda não tiver sido marcado como feito.
     const todayDow = new Date().getDay();
-    if (activeDays.includes(todayDow) && !doneKeys.includes(key)) {
+    if (activeDays.includes(todayDow) && !doneKeys.includes(key) && !doneKeys.includes(skipKey(med.id))) {
       const base = buildTodayAt(safeHour, safeMinute);
       // Âncora da corrente: o horário do lembrete OU agora (o que for MAIOR).
       // Assim, se o app reabre depois do horário e a tarefa segue pendente, a
@@ -375,15 +384,11 @@ export async function scheduleAllMedications(): Promise<string[]> {
  * de hoje e dispensa as notificações já visíveis daquele lembrete. A âncora
  * diária permanece para o dia seguinte.
  */
-export async function confirmMedication(medId: number): Promise<void> {
-  const today = todayISO();
-  try {
-    await markNudgeDone(completionKey(medId), today);
-  } catch (err) {
-    console.warn(`failed to mark medication done ${medId}:`, err);
-  }
-
-  // Cancela as insistências futuras (follow-ups) deste medicamento.
+/**
+ * Cancela as insistências futuras (follow-ups) deste lembrete e dispensa as
+ * notificações dele já visíveis na bandeja. Usado ao confirmar, adiar ou pular.
+ */
+async function clearMedNotifications(medId: number): Promise<void> {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
     const data = s.content.data as { medId?: number; followup?: boolean };
@@ -391,8 +396,6 @@ export async function confirmMedication(medId: number): Promise<void> {
       await Notifications.cancelScheduledNotificationAsync(s.identifier);
     }
   }
-
-  // Dispensa as notificações deste medicamento que já estão na bandeja.
   try {
     const presented = await Notifications.getPresentedNotificationsAsync();
     for (const p of presented) {
@@ -404,6 +407,31 @@ export async function confirmMedication(medId: number): Promise<void> {
   } catch {
     /* dismissal is best-effort */
   }
+}
+
+export async function confirmMedication(medId: number): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeDone(completionKey(medId), today);
+  } catch (err) {
+    console.warn(`failed to mark medication done ${medId}:`, err);
+  }
+  await clearMedNotifications(medId);
+}
+
+/**
+ * "Não vou fazer/tomar": encerra a insistência de HOJE sem marcar como feito.
+ * Grava skipKey (separado de "feito" p/ estatísticas honestas), cancela os
+ * follow-ups e dispensa a notificação atual. Volta a lembrar normalmente amanhã.
+ */
+export async function skipMedicationToday(medId: number): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeDone(skipKey(medId), today);
+  } catch (err) {
+    console.warn(`failed to mark medication skipped ${medId}:`, err);
+  }
+  await clearMedNotifications(medId);
 }
 
 /**
@@ -427,7 +455,7 @@ export async function unconfirmMedication(medId: number): Promise<void> {
  * `minutes` minutos (não marca como tomado). A âncora diária e a corrente
  * normal seguem intactas.
  */
-export async function snoozeMedication(medId: number, minutes = 10): Promise<void> {
+export async function snoozeMedication(medId: number, minutes = 30): Promise<void> {
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
 
@@ -444,6 +472,10 @@ export async function snoozeMedication(medId: number, minutes = 10): Promise<voi
   if (!med) return;
 
   const { title, pendingBody, category } = reminderCopy(med);
+
+  // Pausa a corrente atual (cancela os follow-ups pendentes e dispensa o aviso
+  // visível) — assim "me dê mais tempo" silencia agora e só volta daqui a 30min.
+  await clearMedNotifications(medId);
 
   const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
   try {

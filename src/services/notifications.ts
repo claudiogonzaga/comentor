@@ -51,6 +51,7 @@ export const NUDGE_SNOOZE_ACTION = 'nudge-snooze';
 export const MED_CATEGORY = 'comentor-med-actions';
 export const MED_DONE_ACTION = 'med-done';
 export const MED_SNOOZE_ACTION = 'med-snooze';
+export const MED_SKIP_ACTION = 'med-skip';
 
 /**
  * Variante da MED_CATEGORY para hábitos de FAZER (ver sol, respiração, beber
@@ -121,7 +122,12 @@ export async function ensureNotificationCategories() {
     },
     {
       identifier: MED_SNOOZE_ACTION,
-      buttonTitle: 'Lembrar depois',
+      buttonTitle: 'Me dê mais tempo (30 min)',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: MED_SKIP_ACTION,
+      buttonTitle: 'Não vou tomar',
       options: { opensAppToForeground: true },
     },
   ]);
@@ -134,7 +140,12 @@ export async function ensureNotificationCategories() {
     },
     {
       identifier: MED_SNOOZE_ACTION,
-      buttonTitle: 'Lembrar depois',
+      buttonTitle: 'Me dê mais tempo (30 min)',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: MED_SKIP_ACTION,
+      buttonTitle: 'Não vou fazer',
       options: { opensAppToForeground: true },
     },
   ]);
