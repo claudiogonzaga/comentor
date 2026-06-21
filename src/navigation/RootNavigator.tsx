@@ -247,9 +247,10 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         if (!text) return;
         // Toca o PIADO DA CORUJA ~1,5s ANTES da fala — chama a atenção antes de
         // a Comentora começar a falar o aviso (não no modo silencioso).
+        // Som composto: piado da coruja (~3s) + 1,5s de pausa + a voz.
         if (!cfg?.silentMode) {
           playOwlCall(cfg?.owlSpecies);
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 3000 + 1500));
         }
         await speak(text, { volume: cfg?.nudgeVolume ?? 1 });
       } catch {

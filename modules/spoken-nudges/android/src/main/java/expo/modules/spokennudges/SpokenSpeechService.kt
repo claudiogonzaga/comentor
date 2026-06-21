@@ -81,20 +81,51 @@ class SpokenSpeechService : Service() {
 
     acquireWake()
 
-    // Toca o PIADO DA CORUJA ~1,5s ANTES da voz: a notificação paralela já emite
-    // o canto da coruja no instante do disparo; atrasando a fala, o piado passa
-    // a anteceder o aviso (chama a atenção antes de a Comentora falar).
-    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-      if (!audioPath.isNullOrEmpty()) {
-        playWav(audioPath)
-      } else if (body.isNotEmpty()) {
-        speakWithSystemTts(body)
-      } else {
-        Log.w(SpokenScheduler.TAG, "service: sem áudio nem texto")
-        stopEverything()
-      }
-    }, 1500)
+    // SOM COMPOSTO: o próprio serviço toca o PIADO DA CORUJA, espera 1,5s e só
+    // então fala o aviso/nudge (coruja → pausa → voz). Não depende mais do piado
+    // da notificação (que podia não soar). Se o piado falhar, fala direto.
+    playOwlThenVoice(audioPath, body)
     return START_NOT_STICKY
+  }
+
+  /** Toca o canto da coruja (res/raw) e, ao terminar, espera 1,5s e fala. */
+  private fun playOwlThenVoice(audioPath: String?, body: String) {
+    try {
+      val owl = MediaPlayer.create(this, R.raw.owl_call) ?: run {
+        playVoiceNow(audioPath, body)
+        return
+      }
+      try {
+        owl.setAudioAttributes(speechAttrs())
+      } catch (_: Exception) {}
+      if (routeToHeadphones && preferredDevice != null &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+      ) {
+        try { owl.setPreferredDevice(preferredDevice) } catch (_: Exception) {}
+      }
+      val vol = SpokenStore.getNudgeVolume(this)
+      try { owl.setVolume(vol, vol) } catch (_: Exception) {}
+      owl.setOnCompletionListener {
+        try { it.release() } catch (_: Exception) {}
+        android.os.Handler(android.os.Looper.getMainLooper())
+          .postDelayed({ playVoiceNow(audioPath, body) }, 1500)
+      }
+      owl.start()
+    } catch (e: Exception) {
+      Log.w(SpokenScheduler.TAG, "service: piado falhou ${e.message}; fala direto")
+      playVoiceNow(audioPath, body)
+    }
+  }
+
+  private fun playVoiceNow(audioPath: String?, body: String) {
+    if (!audioPath.isNullOrEmpty()) {
+      playWav(audioPath)
+    } else if (body.isNotEmpty()) {
+      speakWithSystemTts(body)
+    } else {
+      Log.w(SpokenScheduler.TAG, "service: sem áudio nem texto")
+      stopEverything()
+    }
   }
 
   private fun playWav(audioPath: String) {
