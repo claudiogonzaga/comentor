@@ -21,12 +21,16 @@ const DAY_LINE = '#33200F';
 const NIGHT_LINE = '#D29A6E';
 
 const INSET = 5;
-const BAND = 15;
-const UNIT = 22;
-// Unidade do meandro: [ao-longo, atravessado] numa faixa UNIT x BAND.
-const KEY: ReadonlyArray<readonly [number, number]> = [
-  [2.5, 12], [2.5, 3], [19, 3], [19, 9.5], [7.5, 9.5], [7.5, 6], [12.5, 6],
+// Espiral grega (chave): a MESMA glifa é usada nos cantos E repetida ao longo
+// das retas — assim a borda fica consistente, sem os "ganchos soltos" da versão
+// antiga. [ao-longo (a), atravessado (c)] numa caixa 4u × 4u; c=0 = borda externa.
+const U = 3.6;
+const GLYPH: ReadonlyArray<readonly [number, number]> = [
+  [0, 4 * U], [0, 0], [4 * U, 0], [4 * U, 3 * U], [U, 3 * U], [U, U], [3 * U, U], [3 * U, 2 * U],
 ];
+const GLEN = 4 * U; // comprimento da glifa ao longo da fileira
+const GAP = 5; // espaço entre chaves
+const STEP = GLEN + GAP;
 
 function mix(a: string, b: string, t: number): string {
   const ch = (s: string, i: number) => parseInt(s.slice(i, i + 2), 16);
@@ -69,38 +73,39 @@ export function VaseBackground({ meander = true }: VaseBackgroundProps) {
     const seg = (pts: [number, number][]) =>
       'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
 
-    const innerW = R - L - 2 * BAND;
-    const innerH = B - T - 2 * BAND;
-    const nx = Math.max(0, Math.floor(innerW / UNIT));
-    const ny = Math.max(0, Math.floor(innerH / UNIT));
-    const ox = L + BAND + (innerW - nx * UNIT) / 2;
-    const oy = T + BAND + (innerH - ny * UNIT) / 2;
-
     const paths: string[] = [];
-    for (let i = 0; i < nx; i++) {
-      const s = ox + i * UNIT;
-      paths.push(seg(KEY.map(([a, c]) => [s + a, T + c])));
-      paths.push(seg(KEY.map(([a, c]) => [s + a, B - c])));
+
+    // Coloca a glifa mapeando (a=ao-longo, c=atravessado) → ponto de tela.
+    const place = (mapPt: (a: number, c: number) => [number, number]) =>
+      seg(GLYPH.map(([a, c]) => mapPt(a, c)));
+
+    // RETAS: tila a glifa entre os cantos (deixando GLEN de folga p/ o canto).
+    const hStart = L + GLEN;
+    const hEnd = R - GLEN;
+    const nH = Math.max(0, Math.floor((hEnd - hStart) / STEP));
+    const offH = hStart + ((hEnd - hStart) - nH * STEP) / 2;
+    for (let i = 0; i < nH; i++) {
+      const s = offH + i * STEP;
+      paths.push(place((a, c) => [s + a, T + c])); // topo
+      paths.push(place((a, c) => [s + a, B - c])); // base
     }
-    for (let i = 0; i < ny; i++) {
-      const s = oy + i * UNIT;
-      paths.push(seg(KEY.map(([a, c]) => [L + c, s + a])));
-      paths.push(seg(KEY.map(([a, c]) => [R - c, s + a])));
+    const vStart = T + GLEN;
+    const vEnd = B - GLEN;
+    const nV = Math.max(0, Math.floor((vEnd - vStart) / STEP));
+    const offV = vStart + ((vEnd - vStart) - nV * STEP) / 2;
+    for (let i = 0; i < nV; i++) {
+      const s = offV + i * STEP;
+      paths.push(place((a, c) => [L + c, s + a])); // esquerda
+      paths.push(place((a, c) => [R - c, s + a])); // direita
     }
 
-    // Motivo de CANTO (espiral grega) — fecha o meandro nos 4 cantos, que antes
-    // ficavam vazios (as fileiras retas são centralizadas). Cada espiral é
-    // desenhada a partir do ponto do canto, espelhada por sinais (sx, sy).
-    const u = 3.6; // ~BAND/4 → caixa do canto ≈ 14px
-    const CORNER: ReadonlyArray<readonly [number, number]> = [
-      [0, 4 * u], [0, 0], [4 * u, 0], [4 * u, 3 * u], [u, 3 * u], [u, u], [3 * u, u], [3 * u, 2 * u],
-    ];
+    // CANTOS: a MESMA glifa, espelhada por sinais (sx, sy) — fecha as 4 quinas.
     const corner = (cx: number, cy: number, sx: number, sy: number) =>
-      seg(CORNER.map(([x, y]) => [cx + sx * x, cy + sy * y]));
-    paths.push(corner(L, T, 1, 1)); // superior-esquerdo
-    paths.push(corner(R, T, -1, 1)); // superior-direito
-    paths.push(corner(L, B, 1, -1)); // inferior-esquerdo
-    paths.push(corner(R, B, -1, -1)); // inferior-direito
+      seg(GLYPH.map(([x, y]) => [cx + sx * x, cy + sy * y]));
+    paths.push(corner(L, T, 1, 1));
+    paths.push(corner(R, T, -1, 1));
+    paths.push(corner(L, B, 1, -1));
+    paths.push(corner(R, B, -1, -1));
 
     return { L, T, R, B, paths };
   }, [insets.left, insets.top, insets.right, insets.bottom]);
