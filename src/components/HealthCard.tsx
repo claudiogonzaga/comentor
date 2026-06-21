@@ -16,6 +16,7 @@ import { colors, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import {
   formatSleepDuration,
+  getHealthDiagnostics,
   getHealthSnapshot,
   hasExtraHealthPermissions,
   hasHealthPermissions,
@@ -137,10 +138,17 @@ export function HealthCard() {
 
   return (
     <Card style={styles.card}>
-      <View style={styles.sectionRow}>
+      <Pressable
+        style={styles.sectionRow}
+        onLongPress={async () => {
+          const diag = await getHealthDiagnostics();
+          Alert.alert('Diagnóstico do Health Connect', diag);
+        }}
+        delayLongPress={600}
+      >
         <GreekIcon name="heart" size={20} />
         <Text style={styles.section}>Saúde</Text>
-      </View>
+      </Pressable>
 
       {status === 'denied' && (
         <>

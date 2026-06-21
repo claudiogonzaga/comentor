@@ -174,6 +174,32 @@ function durationMinutes(startTime: string, endTime: string): number {
   return Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000);
 }
 
+/**
+ * Lê todos os registros de um tipo na janela e devolve o MAIS RECENTE por
+ * `time` (registros instantâneos: Weight, BodyFat…). Não usa `pageSize`/
+ * `ascendingOrder` (algumas versões do Health Connect ignoram ou esvaziam a
+ * consulta com essas opções — era por isso que o PESO vinha vazio mesmo com a
+ * gordura corporal funcionando). Retorna null se não houver registro.
+ */
+async function latestInstant(
+  m: HealthConnectModule,
+  recordType: string,
+  startISO: string,
+  endISO: string,
+): Promise<({ time?: string } & Record<string, unknown>) | null> {
+  try {
+    const res = (await m.readRecords(recordType as never, {
+      timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+    })) as { records: ({ time?: string } & Record<string, unknown>)[] };
+    if (!res.records.length) return null;
+    return res.records.reduce((a, b) =>
+      new Date(a.time ?? 0).getTime() >= new Date(b.time ?? 0).getTime() ? a : b,
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Meia-noite da SEGUNDA-FEIRA da semana atual (hora local). */
 function startOfWeekMonday(now: Date): Date {
   const d = new Date(now);
@@ -237,6 +263,16 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
       if (new Date(r.endTime).getTime() < dayAgo) continue;
       sleepMin += durationMinutes(r.startTime, r.endTime);
       sleepCount++;
+    }
+    // Fallback: se nada terminou nas últimas 24h (ex.: app aberto à noite, antes
+    // de dormir), pega a sessão de sono MAIS LONGA das últimas 48h — evita
+    // mostrar "sem registro" quando há, sim, sono recente.
+    if (!sleepCount && sleep.records.length) {
+      const longest = sleep.records.reduce((a, b) =>
+        durationMinutes(a.startTime, a.endTime) >= durationMinutes(b.startTime, b.endTime) ? a : b,
+      );
+      sleepMin = durationMinutes(longest.startTime, longest.endTime);
+      sleepCount = 1;
     }
     const sleepMinutesLastNight = sleepCount ? Math.round(sleepMin) : null;
 
@@ -311,29 +347,15 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
     // magra, mas o Health Connect do usuário não a expõe — peso é universal.)
     const yearStart = new Date(now.getTime() - 365 * 24 * 3600_000).toISOString();
     let weightKg: number | null = null;
-    try {
-      const weight = (await m.readRecords('Weight' as never, {
-        timeRangeFilter: { operator: 'between', startTime: yearStart, endTime: nowISO },
-        ascendingOrder: false,
-        pageSize: 1,
-      } as never)) as { records: { weight?: { inKilograms?: number } }[] };
-      const kg = weight.records[0]?.weight?.inKilograms;
-      if (typeof kg === 'number' && kg > 0) weightKg = Math.round(kg * 10) / 10;
-    } catch {
-      /* sem permissão/registro */
-    }
+    const wRec = await latestInstant(m, 'Weight', yearStart, nowISO);
+    const wMass = wRec?.weight as { inKilograms?: number } | undefined;
+    const kg = wMass?.inKilograms;
+    if (typeof kg === 'number' && kg > 0) weightKg = Math.round(kg * 10) / 10;
+
     let bodyFatPct: number | null = null;
-    try {
-      const fat = (await m.readRecords('BodyFat' as never, {
-        timeRangeFilter: { operator: 'between', startTime: yearStart, endTime: nowISO },
-        ascendingOrder: false,
-        pageSize: 1,
-      } as never)) as { records: { percentage?: number }[] };
-      const pct = fat.records[0]?.percentage;
-      if (typeof pct === 'number' && pct > 0) bodyFatPct = Math.round(pct * 10) / 10;
-    } catch {
-      /* sem permissão/registro */
-    }
+    const fRec = await latestInstant(m, 'BodyFat', yearStart, nowISO);
+    const pct = fRec?.percentage as number | undefined;
+    if (typeof pct === 'number' && pct > 0) bodyFatPct = Math.round(pct * 10) / 10;
 
     return {
       sleepMinutesLastNight,
@@ -349,6 +371,49 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Diagnóstico (long-press no título "Saúde"): para cada tipo, quantos registros
+ * o Health Connect devolveu, se a permissão foi concedida e eventual erro.
+ * Ajuda a entender, no aparelho, por que peso/sono não aparecem.
+ */
+export async function getHealthDiagnostics(): Promise<string> {
+  const m = getModule();
+  if (!m || !(await ensureInit(m))) return 'Health Connect indisponível neste aparelho.';
+  const now = new Date();
+  const nowISO = now.toISOString();
+  const yearStart = new Date(now.getTime() - 365 * 24 * 3600_000).toISOString();
+  const d2 = new Date(now.getTime() - 48 * 3600_000).toISOString();
+
+  let granted: GrantedPerm[] = [];
+  try {
+    granted = await getGranted(m);
+  } catch {
+    /* ignore */
+  }
+  const has = (rt: string) => granted.some((g) => g.recordType === rt);
+
+  const probe = async (rt: string, since: string): Promise<string> => {
+    try {
+      const res = (await m.readRecords(rt as never, {
+        timeRangeFilter: { operator: 'between', startTime: since, endTime: nowISO },
+      })) as { records: unknown[] };
+      return `${rt}: perm=${has(rt) ? 'sim' : 'NÃO'} · ${res.records.length} registro(s)`;
+    } catch (e) {
+      return `${rt}: perm=${has(rt) ? 'sim' : 'NÃO'} · ERRO ${e instanceof Error ? e.message : e}`;
+    }
+  };
+
+  const lines = await Promise.all([
+    probe('SleepSession', d2),
+    probe('Weight', yearStart),
+    probe('BodyFat', yearStart),
+    probe('Steps', yearStart),
+    probe('HeartRate', d2),
+    probe('ExerciseSession', d2),
+  ]);
+  return lines.join('\n');
 }
 
 /** Formata "6h30" a partir de minutos. */
