@@ -87,6 +87,21 @@ export function VaseBackground({ meander = true }: VaseBackgroundProps) {
       paths.push(seg(KEY.map(([a, c]) => [L + c, s + a])));
       paths.push(seg(KEY.map(([a, c]) => [R - c, s + a])));
     }
+
+    // Motivo de CANTO (espiral grega) — fecha o meandro nos 4 cantos, que antes
+    // ficavam vazios (as fileiras retas são centralizadas). Cada espiral é
+    // desenhada a partir do ponto do canto, espelhada por sinais (sx, sy).
+    const u = 3.6; // ~BAND/4 → caixa do canto ≈ 14px
+    const CORNER: ReadonlyArray<readonly [number, number]> = [
+      [0, 4 * u], [0, 0], [4 * u, 0], [4 * u, 3 * u], [u, 3 * u], [u, u], [3 * u, u], [3 * u, 2 * u],
+    ];
+    const corner = (cx: number, cy: number, sx: number, sy: number) =>
+      seg(CORNER.map(([x, y]) => [cx + sx * x, cy + sy * y]));
+    paths.push(corner(L, T, 1, 1)); // superior-esquerdo
+    paths.push(corner(R, T, -1, 1)); // superior-direito
+    paths.push(corner(L, B, 1, -1)); // inferior-esquerdo
+    paths.push(corner(R, B, -1, -1)); // inferior-direito
+
     return { L, T, R, B, paths };
   }, [insets.left, insets.top, insets.right, insets.bottom]);
 
