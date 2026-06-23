@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { getUserConfig } from './database';
-import { ensureChannel } from './notifications';
+import { ensureChannel, gatedSchedule } from './notifications';
 
 /**
  * Nudge de "trabalho sentado": durante a janela de expediente que a pessoa
@@ -82,7 +82,7 @@ export async function scheduleSedentaryNudges(): Promise<void> {
       const body = MOVE_MESSAGES[msgIdx % MOVE_MESSAGES.length];
       msgIdx++;
       try {
-        await Notifications.scheduleNotificationAsync({
+        await gatedSchedule({
           content: {
             title: 'Hora de levantar',
             body,

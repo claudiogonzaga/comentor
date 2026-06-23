@@ -30,6 +30,7 @@ import {
   deleteReadAloudText,
   getKV,
   listReadAloudTexts,
+  renameReadAloudText,
   setKV,
   updateReadAloudTextAudio,
 } from '../services/database';
@@ -131,6 +132,9 @@ export function ReadAloudScreen() {
   const { config, setConfig } = useAppStore();
   const [text, setText] = useState('');
   const [saved, setSaved] = useState<ReadAloudText[]>([]);
+  // Renomear um texto salvo inline (toque no nome → vira campo de edição).
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   // "Em seguida, fazer o exercício de respiração" — encadeia as atividades.
   const [thenBreathing, setThenBreathing] = useState(false);
   const [savingAudio, setSavingAudio] = useState(false);
@@ -167,6 +171,21 @@ export function ReadAloudScreen() {
       /* lista opcional */
     }
   }, []);
+
+  const startRename = useCallback((item: ReadAloudText) => {
+    setRenamingId(item.id);
+    setRenameValue(item.title);
+  }, []);
+
+  const commitRename = useCallback(async () => {
+    if (renamingId == null) return;
+    const v = renameValue.trim();
+    if (v) {
+      await renameReadAloudText(renamingId, v);
+      await reloadSaved();
+    }
+    setRenamingId(null);
+  }, [renamingId, renameValue, reloadSaved]);
 
   // Carrega o rascunho salvo e persiste ao sair. NÃO para a leitura ao sair —
   // ela é global e deve continuar tocando em outra tela.
@@ -517,35 +536,65 @@ export function ReadAloudScreen() {
         {saved.length > 0 && (
           <View style={styles.savedWrap}>
             <Text style={styles.savedTitle}>SALVOS</Text>
-            {saved.map((item) => (
-              <View key={item.id} style={styles.savedRow}>
-                <Pressable
-                  style={styles.savedPlay}
-                  onPress={() => handlePlaySaved(item)}
-                  hitSlop={6}
-                >
-                  <Text style={styles.savedPlayIcon}>▶</Text>
-                </Pressable>
-                <Pressable style={styles.savedMain} onPress={() => handlePlaySaved(item)}>
-                  <Text style={styles.savedName} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.savedSub} numberOfLines={1}>
-                    {item.audioUri
-                      ? 'áudio salvo · toque para ouvir'
-                      : 'toque para ouvir (gera na 1ª vez)'}
-                  </Text>
-                </Pressable>
-                {item.audioUri && (
-                  <Pressable onPress={() => handleExportAudio(item)} hitSlop={8}>
-                    <Text style={styles.savedExport}>Exportar</Text>
+            {saved.map((item) => {
+              const editing = renamingId === item.id;
+              return (
+                <View key={item.id} style={styles.savedRow}>
+                  <Pressable
+                    style={styles.savedPlay}
+                    onPress={() => handlePlaySaved(item)}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.savedPlayIcon}>▶</Text>
                   </Pressable>
-                )}
-                <Pressable onPress={() => handleDeleteSaved(item)} hitSlop={8}>
-                  <Text style={styles.savedDelete}>Excluir</Text>
-                </Pressable>
-              </View>
-            ))}
+                  <View style={styles.savedMain}>
+                    {editing ? (
+                      <View style={styles.renameRow}>
+                        <TextInput
+                          style={styles.renameInput}
+                          value={renameValue}
+                          onChangeText={setRenameValue}
+                          autoFocus
+                          onSubmitEditing={commitRename}
+                          returnKeyType="done"
+                          placeholder="Novo nome"
+                          placeholderTextColor={colors.text.tertiary}
+                        />
+                        <Pressable onPress={commitRename} hitSlop={8}>
+                          <Text style={styles.renameOk}>✓</Text>
+                        </Pressable>
+                        <Pressable onPress={() => setRenamingId(null)} hitSlop={8}>
+                          <Text style={styles.renameCancel}>✕</Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <>
+                        <Pressable onPress={() => startRename(item)}>
+                          <Text style={styles.savedName} numberOfLines={1}>
+                            {item.title}
+                          </Text>
+                        </Pressable>
+                        <Text style={styles.savedSub} numberOfLines={1}>
+                          {item.audioUri
+                            ? '▶ ouvir · toque no nome para renomear'
+                            : '▶ ouvir (gera na 1ª vez) · toque no nome p/ renomear'}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                  {!editing && item.audioUri && (
+                    <Pressable onPress={() => handleExportAudio(item)} hitSlop={8}>
+                      <Text style={styles.savedExport}>Exportar</Text>
+                    </Pressable>
+                  )}
+                  {!editing && (
+                    <Pressable onPress={() => handleDeleteSaved(item)} hitSlop={8}>
+                      <Text style={styles.savedDelete}>Excluir</Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -747,6 +796,27 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.text.tertiary,
     marginTop: 2,
+  },
+  renameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  renameInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.text.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.accent.gold,
+    paddingVertical: 2,
+  },
+  renameOk: {
+    ...typography.subtitle,
+    color: colors.accent.gold,
+  },
+  renameCancel: {
+    ...typography.subtitle,
+    color: colors.text.tertiary,
   },
   savedExport: {
     ...typography.small,

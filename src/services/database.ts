@@ -1584,6 +1584,15 @@ export async function createReadAloudText(input: {
   return rowToReadAloudText(row);
 }
 
+/** Renomeia um texto salvo do "Leia para mim" (não mexe no áudio gerado). */
+export async function renameReadAloudText(id: number, title: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    "UPDATE read_aloud_texts SET title = ?, updated_at = datetime('now') WHERE id = ?",
+    [title.trim() || 'Sem título', id],
+  );
+}
+
 export async function deleteReadAloudText(id: number): Promise<void> {
   const d = await getDb();
   const row = await d.getFirstAsync<{ audio_uri: string | null }>(

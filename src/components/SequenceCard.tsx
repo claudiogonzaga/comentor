@@ -80,6 +80,15 @@ export function SequenceCard() {
   const removeAt = (i: number) => persist(seq.filter((_, idx) => idx !== i));
   const clear = () => persist([]);
 
+  // Reordena a playlist: sobe/desce o item (troca com o vizinho).
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= seq.length) return;
+    const next = seq.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    persist(next);
+  };
+
   const play = async () => {
     if (!seq.length) return;
     const { items: resolved, warnings } = await resolveSteps(seq);
@@ -176,9 +185,27 @@ export function SequenceCard() {
                   </Text>
                 </View>
                 {!playing && (
-                  <Pressable onPress={() => removeAt(i)} hitSlop={8}>
-                    <Text style={styles.remove}>✕</Text>
-                  </Pressable>
+                  <View style={styles.rowActions}>
+                    <Pressable
+                      onPress={() => move(i, -1)}
+                      disabled={i === 0}
+                      hitSlop={6}
+                    >
+                      <Text style={[styles.reorder, i === 0 && styles.reorderOff]}>▲</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => move(i, 1)}
+                      disabled={i === seq.length - 1}
+                      hitSlop={6}
+                    >
+                      <Text style={[styles.reorder, i === seq.length - 1 && styles.reorderOff]}>
+                        ▼
+                      </Text>
+                    </Pressable>
+                    <Pressable onPress={() => removeAt(i)} hitSlop={8}>
+                      <Text style={styles.remove}>✕</Text>
+                    </Pressable>
+                  </View>
                 )}
               </View>
             );
@@ -289,6 +316,9 @@ const styles = StyleSheet.create({
   stepFile: { ...typography.small, color: colors.text.secondary },
   stepLabelCurrent: { color: colors.accent.gold },
   remove: { ...typography.bodyMedium, color: colors.text.tertiary },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  reorder: { ...typography.bodyMedium, color: colors.accent.gold, paddingHorizontal: 2 },
+  reorderOff: { color: colors.text.tertiary, opacity: 0.35 },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',

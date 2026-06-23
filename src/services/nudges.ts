@@ -7,7 +7,7 @@ import {
   markNudgeUndone,
   updateNudge,
 } from './database';
-import { NUDGE_CATEGORY, ensureChannel, ensureNotificationCategories } from './notifications';
+import { NUDGE_CATEGORY, ensureChannel, ensureNotificationCategories, gatedSchedule } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import type { Nudge } from '../types';
 
@@ -99,7 +99,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
 
     // Lembrete diário (âncora) — sempre presente, dispara todo dia no horário.
     try {
-      const id = await Notifications.scheduleNotificationAsync({
+      const id = await gatedSchedule({
         content: {
           title,
           body: n.body,
@@ -114,7 +114,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
           channelId,
         },
       });
-      ids.push(id);
+      if (id) ids.push(id);
     } catch (err) {
       console.warn(`failed to schedule nudge anchor ${n.type}:`, err);
     }
@@ -127,7 +127,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
         const fireAt = new Date(base.getTime() + k * intervalMin * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
         try {
-          const id = await Notifications.scheduleNotificationAsync({
+          const id = await gatedSchedule({
             content: {
               title,
               body: `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,
@@ -147,7 +147,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
               channelId,
             },
           });
-          ids.push(id);
+          if (id) ids.push(id);
         } catch (err) {
           console.warn(`failed to schedule nudge follow-up ${n.type}:`, err);
         }
@@ -233,7 +233,7 @@ export async function snoozeNudge(nudgeType: string, minutes = 10): Promise<void
 
   const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
   try {
-    await Notifications.scheduleNotificationAsync({
+    await gatedSchedule({
       content: {
         title: `${n.emoji ?? '🦉'} ${n.title}`,
         body: `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,

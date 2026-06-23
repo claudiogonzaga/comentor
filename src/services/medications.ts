@@ -11,6 +11,7 @@ import {
   MED_DO_CATEGORY,
   ensureChannel,
   ensureNotificationCategories,
+  gatedSchedule,
 } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenMedications } from './spokenNudges';
@@ -224,7 +225,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
         const nm = n.atMin % 60;
         if (isDaily) {
           try {
-            const id = await Notifications.scheduleNotificationAsync({
+            const id = await gatedSchedule({
               content,
               trigger: {
                 type: Notifications.SchedulableTriggerInputTypes.DAILY,
@@ -233,14 +234,14 @@ export async function scheduleAllMedications(): Promise<string[]> {
                 channelId,
               },
             });
-            ids.push(id);
+            if (id) ids.push(id);
           } catch (err) {
             console.warn(`failed to schedule fasting notif ${med.id}:`, err);
           }
         } else {
           for (const dow of activeDays) {
             try {
-              const id = await Notifications.scheduleNotificationAsync({
+              const id = await gatedSchedule({
                 content,
                 trigger: {
                   type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
@@ -250,7 +251,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
                   channelId,
                 },
               });
-              ids.push(id);
+              if (id) ids.push(id);
             } catch (err) {
               console.warn(
                 `failed to schedule weekly fasting notif ${med.id} (dow ${dow}):`,
@@ -276,7 +277,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
     // somamos 1 ao índice 0–6).
     if (isDaily) {
       try {
-        const id = await Notifications.scheduleNotificationAsync({
+        const id = await gatedSchedule({
           content: anchorContent,
           trigger: {
             type: Notifications.SchedulableTriggerInputTypes.DAILY,
@@ -285,14 +286,14 @@ export async function scheduleAllMedications(): Promise<string[]> {
             channelId,
           },
         });
-        ids.push(id);
+        if (id) ids.push(id);
       } catch (err) {
         console.warn(`failed to schedule medication anchor ${med.id}:`, err);
       }
     } else {
       for (const dow of activeDays) {
         try {
-          const id = await Notifications.scheduleNotificationAsync({
+          const id = await gatedSchedule({
             content: anchorContent,
             trigger: {
               type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
@@ -302,7 +303,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
               channelId,
             },
           });
-          ids.push(id);
+          if (id) ids.push(id);
         } catch (err) {
           console.warn(
             `failed to schedule weekly medication anchor ${med.id} (dow ${dow}):`,
@@ -326,7 +327,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
         const fireAt = new Date(anchor + k * intervalMin * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
         try {
-          const id = await Notifications.scheduleNotificationAsync({
+          const id = await gatedSchedule({
             content: {
               title,
               // Tom crescente a cada insistência (≥3 vezes).
@@ -341,7 +342,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
               channelId,
             },
           });
-          ids.push(id);
+          if (id) ids.push(id);
         } catch (err) {
           console.warn(`failed to schedule medication follow-up ${med.id}:`, err);
         }
@@ -479,7 +480,7 @@ export async function snoozeMedication(medId: number, minutes = 30): Promise<voi
 
   const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
   try {
-    await Notifications.scheduleNotificationAsync({
+    await gatedSchedule({
       content: {
         title,
         body: pendingBody,

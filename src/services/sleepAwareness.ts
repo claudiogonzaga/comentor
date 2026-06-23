@@ -11,7 +11,7 @@
 
 import * as Notifications from 'expo-notifications';
 import { getUserConfig } from './database';
-import { ensureChannel } from './notifications';
+import { ensureChannel, gatedSchedule } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { SLEEP_AWARENESS_CARDS } from '../constants/sleepAwarenessCards';
 
@@ -164,7 +164,7 @@ export async function scheduleSleepAwarenessNotifications(): Promise<void> {
       if (fireAt <= now + 60_000) continue; // horário já passou
 
       try {
-        await Notifications.scheduleNotificationAsync({
+        await gatedSchedule({
           content: {
             title,
             body: card.text,

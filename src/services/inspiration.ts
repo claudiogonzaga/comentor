@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { getUserConfig, listActiveInspirationCards } from './database';
-import { ensureChannel } from './notifications';
+import { ensureChannel, gatedSchedule } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenInspirations } from './spokenNudges';
 import { COMENTORA_MESSAGES } from '../constants/inspirationDefaults';
@@ -135,7 +135,7 @@ export async function scheduleInspirationNotifications(): Promise<void> {
     // a versão falada lê o texto limpo (sem aspas; o título é decorativo)
     spokenItems.push({ text: msg.speak, hour, minute });
     try {
-      await Notifications.scheduleNotificationAsync({
+      await gatedSchedule({
         content: {
           title: msg.title,
           body: msg.body,

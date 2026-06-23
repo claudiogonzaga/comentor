@@ -251,6 +251,77 @@ async function soundFor(species?: OwlSpeciesId): Promise<string> {
   return getOwlSpecies(sp).soundFile ?? 'default';
 }
 
+// ── Silêncio após o horário de dormir ───────────────────────────────────────
+// Regra: depois do horário de dormir (até a manhã), a ÚNICA notificação que o
+// app emite é a CONFIRMAÇÃO DE CAMA ("você já foi dormir?"). Avisos ambientes
+// (inspiração, sedentarismo, consciência de sono) e INSISTÊNCIAS (follow-ups)
+// que cairiam nesse período são suprimidos. Os lembretes que o usuário marcou
+// para um horário fixo (âncoras de remédio/hábito) seguem tocando — só as
+// cobranças espontâneas é que silenciam à noite.
+const NIGHT_END_HOUR = 6; // a partir das 6h o app volta a poder avisar
+const AMBIENT_TYPES = new Set(['inspiration', 'sedentary', 'awareness']);
+
+let _bedtimeCache: { mins: number; at: number } | null = null;
+async function bedtimeMinutesCached(): Promise<number> {
+  if (_bedtimeCache && Date.now() - _bedtimeCache.at < 3000) return _bedtimeCache.mins;
+  let mins = 23 * 60;
+  try {
+    const c = await getUserConfig();
+    const [h, m] = (c.bedtime || '23:00').split(':').map((x) => parseInt(x, 10));
+    if (Number.isFinite(h)) mins = (((h || 0) * 60 + (m || 0)) % 1440 + 1440) % 1440;
+  } catch {
+    /* mantém 23:00 */
+  }
+  _bedtimeCache = { mins, at: Date.now() };
+  return mins;
+}
+
+function inNightWindow(minuteOfDay: number, bed: number, morn: number): boolean {
+  if (bed === morn) return false;
+  return bed < morn
+    ? minuteOfDay >= bed && minuteOfDay < morn
+    : minuteOfDay >= bed || minuteOfDay < morn;
+}
+
+/**
+ * Agenda uma notificação, mas SUPRIME avisos ambientes e insistências cujo
+ * horário cai depois de dormir (até a manhã). A confirmação de cama
+ * ('sleep-reminder') e os lembretes de horário fixo do usuário sempre passam.
+ * Retorna o id agendado, ou null se foi suprimida.
+ */
+export async function gatedSchedule(
+  input: Notifications.NotificationRequestInput,
+): Promise<string | null> {
+  try {
+    const data = input.content?.data as { type?: string; followup?: boolean } | undefined;
+    const type = data?.type ?? '';
+    if (type !== 'sleep-reminder') {
+      const isAmbient = AMBIENT_TYPES.has(type) || data?.followup === true;
+      if (isAmbient) {
+        // descobre o minuto-do-dia do disparo (DATE, DAILY ou WEEKLY)
+        const trig = input.trigger as
+          | { date?: number | Date; hour?: number; minute?: number }
+          | null
+          | undefined;
+        let mod: number | null = null;
+        if (trig?.date != null) {
+          const w = new Date(trig.date as number);
+          mod = w.getHours() * 60 + w.getMinutes();
+        } else if (typeof trig?.hour === 'number') {
+          mod = trig.hour * 60 + (trig.minute ?? 0);
+        }
+        if (mod != null) {
+          const bed = await bedtimeMinutesCached();
+          if (inNightWindow(mod, bed, NIGHT_END_HOUR * 60)) return null;
+        }
+      }
+    }
+  } catch {
+    /* em qualquer erro, agenda normalmente */
+  }
+  return Notifications.scheduleNotificationAsync(input);
+}
+
 interface ScheduleParams {
   bedtime: string;
   intervalMinutes: number;
