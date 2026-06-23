@@ -60,6 +60,13 @@ jobs:
             echo "::notice::Versao nova (v$VERSION) — iniciando o build."
           fi
 
+      - name: Configurar Java 17 (necessário para o build local)
+        if: steps.ver.outputs.build == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Instalar dependências
         if: steps.ver.outputs.build == 'true'
         run: npm install --no-audit --no-fund
@@ -71,21 +78,17 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Buildar o APK na EAS (aguarda terminar)
+      # Build LOCAL no próprio runner do GitHub (Ubuntu, ~14 GB livres, Android
+      # SDK pré-instalado). NÃO consome a cota mensal de builds na nuvem da EAS
+      # — só busca as credenciais remotas (keystore), o que é gratuito. Resolve
+      # tanto a cota esgotada quanto o disco cheio do Mac local.
+      - name: Buildar o APK localmente no runner
         if: steps.ver.outputs.build == 'true'
-        run: eas build --platform android --profile preview --non-interactive --wait --json > build-output.json
-
-      - name: Descobrir o link do APK
-        id: apk
-        if: steps.ver.outputs.build == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          URL=$(node -p "const a=JSON.parse(require('fs').readFileSync('build-output.json','utf8'))[0].artifacts; a.applicationArchiveUrl || a.buildUrl")
-          echo "Link do APK: $URL"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: Baixar o APK gerado
-        if: steps.ver.outputs.build == 'true'
-        run: curl -fL -o "comentor-${{ steps.ver.outputs.version }}.apk" "${{ steps.apk.outputs.url }}"
+          eas build --platform android --profile preview --local --non-interactive \
+            --output "${{ github.workspace }}/comentor-${{ steps.ver.outputs.version }}.apk"
 
       - name: Publicar release no GitHub
         if: steps.ver.outputs.build == 'true'
