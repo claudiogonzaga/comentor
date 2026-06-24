@@ -55,6 +55,14 @@ function teardownPlayer() {
     /* ignore */
   }
   sub = null;
+  // PAUSAR antes de remover: no expo-audio, `remove()` libera o objeto mas NÃO
+  // garante que o som pare na hora — sem o pause, tocar outro arquivo deixava os
+  // dois soando juntos e o botão ■ "não parava" nada. Pausa silencia já.
+  try {
+    player?.pause();
+  } catch {
+    /* ignore */
+  }
   try {
     player?.remove();
   } catch {
