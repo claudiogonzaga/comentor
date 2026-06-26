@@ -61,6 +61,49 @@ export function anyQuietAtMinute(periods: QuietPeriod[], min: number): boolean {
   });
 }
 
+// ── Período de SONO (derivado do horário de dormir) ─────────────────────────
+// Em vez de início/fim fixos, o usuário escolhe silenciar do horário de dormir
+// por X horas (6–9…). A janela acompanha o bedtime automaticamente.
+export interface SleepQuiet {
+  enabled: boolean;
+  hours: number; // duração em horas a partir do bedtime
+}
+const SLEEP_KEY = 'sleep_quiet_v1';
+const DEFAULT_SLEEP: SleepQuiet = { enabled: false, hours: 8 };
+
+function minToHhmm(min: number): string {
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/** A janela de sono derivada do bedtime + duração (days = todos os dias). */
+export function deriveSleepPeriod(bedtime: string, hours: number): QuietPeriod {
+  const startMin = hhmmToMin(bedtime, 23 * 60);
+  const h = Math.min(14, Math.max(1, Math.round(hours)));
+  return { start: minToHhmm(startMin), end: minToHhmm(startMin + h * 60), days: 127 };
+}
+
+export async function loadSleepQuiet(): Promise<SleepQuiet> {
+  try {
+    const raw = await getKV(SLEEP_KEY);
+    if (raw != null) {
+      const o = JSON.parse(raw);
+      return {
+        enabled: !!o?.enabled,
+        hours: Number.isFinite(o?.hours) ? Math.min(14, Math.max(1, o.hours)) : 8,
+      };
+    }
+  } catch {
+    /* default */
+  }
+  return { ...DEFAULT_SLEEP };
+}
+
+export async function saveSleepQuiet(s: SleepQuiet): Promise<void> {
+  await setKV(SLEEP_KEY, JSON.stringify({ enabled: !!s.enabled, hours: s.hours }));
+  cache = null;
+}
+
 let cache: { list: QuietPeriod[]; at: number } | null = null;
 
 export async function loadQuietPeriods(): Promise<QuietPeriod[]> {
@@ -100,10 +143,26 @@ export async function saveQuietPeriods(list: QuietPeriod[]): Promise<void> {
   cache = { list: clean, at: Date.now() };
 }
 
+/** Lista EFETIVA = períodos manuais + janela de sono derivada (se ativa). */
+export async function getEffectiveQuietPeriods(): Promise<QuietPeriod[]> {
+  const manual = await loadQuietPeriods();
+  const out = [...manual];
+  try {
+    const sleep = await loadSleepQuiet();
+    if (sleep.enabled) {
+      const cfg = await getUserConfig();
+      out.push(deriveSleepPeriod(cfg.bedtime || '23:00', sleep.hours));
+    }
+  } catch {
+    /* sem sono derivado */
+  }
+  return out;
+}
+
 /** Versão com cache curto (3s) para os caminhos quentes (agendamento). */
 export async function getQuietPeriodsCached(): Promise<QuietPeriod[]> {
   if (cache && Date.now() - cache.at < 3000) return cache.list;
-  const list = await loadQuietPeriods();
+  const list = await getEffectiveQuietPeriods();
   cache = { list, at: Date.now() };
   return list;
 }

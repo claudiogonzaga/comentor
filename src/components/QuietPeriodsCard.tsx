@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Card } from './Card';
 import { TimePickerInput } from './TimePickerInput';
 import { colors, radius, spacing, typography } from '../theme';
+import { useAppStore } from '../store/useAppStore';
 import {
   loadQuietPeriods,
   saveQuietPeriods,
   invalidateQuietCache,
+  loadSleepQuiet,
+  saveSleepQuiet,
+  deriveSleepPeriod,
   type QuietPeriod,
+  type SleepQuiet,
 } from '../services/quietHours';
 import { setSpokenQuietHours } from '../services/spokenNudges';
 import { rescheduleAllNotifications } from '../services/coach';
+
+const SLEEP_HOURS = [6, 7, 8, 9, 10];
 
 // Vários períodos de "não perturbe" para os AVISOS SONOROS. Em qualquer janela:
 // as notificações aparecem SEM som/vibração e a voz não fala. Ex.: sono
@@ -27,12 +34,29 @@ function describeDays(mask: number): string {
 }
 
 export function QuietPeriodsCard() {
+  const { config } = useAppStore();
+  const bedtime = config?.bedtime || '23:00';
   const [periods, setPeriods] = useState<QuietPeriod[] | null>(null);
+  const [sleep, setSleep] = useState<SleepQuiet | null>(null);
 
   useEffect(() => {
     loadQuietPeriods()
       .then(setPeriods)
       .catch(() => setPeriods([]));
+    loadSleepQuiet()
+      .then(setSleep)
+      .catch(() => setSleep({ enabled: false, hours: 8 }));
+  }, []);
+
+  const persistSleep = useCallback(async (next: SleepQuiet) => {
+    setSleep(next);
+    try {
+      await saveSleepQuiet(next);
+      invalidateQuietCache();
+      rescheduleAllNotifications().catch(() => {});
+    } catch {
+      /* best-effort */
+    }
   }, []);
 
   const persist = useCallback(async (next: QuietPeriod[]) => {
@@ -75,8 +99,50 @@ export function QuietPeriodsCard() {
       <Text style={styles.section}>Períodos sem som (não perturbe)</Text>
       <Text style={styles.subtitle}>
         Nos horários e dias escolhidos, os avisos não tocam som nem voz — só
-        aparecem em silêncio. Ex.: sono 22:00–07:00 e o horário de trabalho.
+        aparecem em silêncio. A confirmação de cama continua soando.
       </Text>
+
+      {/* Sono: janela derivada do horário de dormir (acompanha o bedtime). */}
+      {sleep && (
+        <View style={styles.sleepBox}>
+          <View style={styles.periodHead}>
+            <Text style={styles.periodTitle}>Silenciar durante o sono</Text>
+            <Switch
+              value={sleep.enabled}
+              onValueChange={(v) => persistSleep({ ...sleep, enabled: v })}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={sleep.enabled ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+          {sleep.enabled && (
+            <>
+              <Text style={styles.sleepHint}>
+                A partir do horário de dormir ({bedtime}) por:
+              </Text>
+              <View style={styles.daysRow}>
+                {SLEEP_HOURS.map((h) => {
+                  const on = sleep.hours === h;
+                  return (
+                    <Pressable
+                      key={h}
+                      onPress={() => persistSleep({ ...sleep, hours: h })}
+                      style={[styles.dayChip, on && styles.dayChipOn]}
+                    >
+                      <Text style={[styles.dayText, on && styles.dayTextOn]}>{h}h</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.sleepWindow}>
+                Sem som das {deriveSleepPeriod(bedtime, sleep.hours).start} às{' '}
+                {deriveSleepPeriod(bedtime, sleep.hours).end}, todos os dias.
+              </Text>
+            </>
+          )}
+        </View>
+      )}
+
+      <Text style={styles.groupLabel}>Outros períodos (trabalho, escola…)</Text>
 
       {list.length === 0 && (
         <Text style={styles.empty}>
@@ -149,6 +215,28 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   empty: { ...typography.small, color: colors.text.tertiary, marginBottom: spacing.sm },
+  sleepBox: {
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: 'rgba(244,197,83,0.08)',
+  },
+  sleepHint: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  sleepWindow: { ...typography.small, color: colors.accent.gold, marginTop: spacing.sm },
+  groupLabel: {
+    ...typography.small,
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.sm,
+  },
   period: {
     borderWidth: 1,
     borderColor: colors.border,
