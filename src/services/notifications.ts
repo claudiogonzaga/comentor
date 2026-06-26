@@ -4,6 +4,7 @@ import type { IntensityLevel, OwlSpeciesId } from '../types';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { DEFAULT_OWL_SPECIES, getOwlSpecies } from '../constants/owlSpecies';
 import { getUserConfig } from './database';
+import { getQuietPeriodsCached, anyQuietAt, anyQuietAtMinute } from './quietHours';
 
 // Android notification channels are immutable once created — changing a
 // channel's sound (or vibration pattern) has no effect on an existing channel.
@@ -283,10 +284,48 @@ function inNightWindow(minuteOfDay: number, bed: number, morn: number): boolean 
     : minuteOfDay >= bed || minuteOfDay < morn;
 }
 
+/** Minuto-do-dia e dia-da-semana do disparo (DATE, DIÁRIO ou SEMANAL). */
+function triggerFireInfo(
+  trig: { date?: number | Date; hour?: number; minute?: number; weekday?: number } | null | undefined,
+): { min: number; dow: number | null } | null {
+  if (!trig) return null;
+  if (trig.date != null) {
+    const w = new Date(trig.date as number);
+    return { min: w.getHours() * 60 + w.getMinutes(), dow: w.getDay() };
+  }
+  if (typeof trig.hour === 'number') {
+    const min = trig.hour * 60 + (trig.minute ?? 0);
+    // SEMANAL traz weekday (expo: 1=domingo … 7=sábado); DIÁRIO não traz (dow=null).
+    const dow = typeof trig.weekday === 'number' ? (trig.weekday - 1 + 7) % 7 : null;
+    return { min, dow };
+  }
+  return null;
+}
+
+/** Canal SEM som/vibração — usado nos períodos de não-perturbe. */
+export async function ensureSilentChannel(): Promise<string> {
+  const id = `comentor-silent-v${CHANNEL_VERSION}`;
+  if (Platform.OS !== 'android') return id;
+  await Notifications.setNotificationChannelAsync(id, {
+    name: 'Comentora — sem som (não perturbe)',
+    description: 'Notificações sem som nem vibração durante os períodos de não-perturbe.',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: null,
+    vibrationPattern: undefined,
+    enableVibrate: false,
+    lightColor: '#F4C553',
+    bypassDnd: false,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+  return id;
+}
+
 /**
- * Agenda uma notificação, mas SUPRIME avisos ambientes e insistências cujo
- * horário cai depois de dormir (até a manhã). A confirmação de cama
- * ('sleep-reminder') e os lembretes de horário fixo do usuário sempre passam.
+ * Agenda uma notificação aplicando duas regras (exceto à confirmação de cama):
+ *  1) Pós-dormir: avisos ambientes/insistências na janela da noite são SUPRIMIDOS.
+ *  2) Não-perturbe: se o disparo cai em algum período sem som, a notificação vai
+ *     ao canal SILENCIOSO (aparece, mas sem piado/vibração).
+ * Os lembretes de horário fixo passam — só não tocam som dentro dos períodos.
  * Retorna o id agendado, ou null se foi suprimida.
  */
 export async function gatedSchedule(
@@ -296,23 +335,31 @@ export async function gatedSchedule(
     const data = input.content?.data as { type?: string; followup?: boolean } | undefined;
     const type = data?.type ?? '';
     if (type !== 'sleep-reminder') {
+      const fire = triggerFireInfo(
+        input.trigger as { date?: number | Date; hour?: number; minute?: number; weekday?: number } | null,
+      );
+      // 1) supressão pós-dormir (só ambiente/insistência)
       const isAmbient = AMBIENT_TYPES.has(type) || data?.followup === true;
-      if (isAmbient) {
-        // descobre o minuto-do-dia do disparo (DATE, DAILY ou WEEKLY)
-        const trig = input.trigger as
-          | { date?: number | Date; hour?: number; minute?: number }
-          | null
-          | undefined;
-        let mod: number | null = null;
-        if (trig?.date != null) {
-          const w = new Date(trig.date as number);
-          mod = w.getHours() * 60 + w.getMinutes();
-        } else if (typeof trig?.hour === 'number') {
-          mod = trig.hour * 60 + (trig.minute ?? 0);
-        }
-        if (mod != null) {
-          const bed = await bedtimeMinutesCached();
-          if (inNightWindow(mod, bed, NIGHT_END_HOUR * 60)) return null;
+      if (isAmbient && fire) {
+        const bed = await bedtimeMinutesCached();
+        if (inNightWindow(fire.min, bed, NIGHT_END_HOUR * 60)) return null;
+      }
+      // 2) não-perturbe: silencia o som dentro de qualquer período
+      if (fire) {
+        const periods = await getQuietPeriodsCached();
+        if (periods.length) {
+          const quiet =
+            fire.dow != null
+              ? anyQuietAt(periods, fire.min, fire.dow)
+              : anyQuietAtMinute(periods, fire.min);
+          if (quiet) {
+            const silentId = await ensureSilentChannel();
+            return Notifications.scheduleNotificationAsync({
+              ...input,
+              content: { ...input.content, sound: undefined },
+              trigger: { ...(input.trigger as object), channelId: silentId },
+            });
+          }
         }
       }
     }

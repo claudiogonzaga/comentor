@@ -12,10 +12,10 @@ import { useNavigation } from '@react-navigation/native';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { TimePickerInput } from '../components/TimePickerInput';
 import { OwlSoundPicker } from '../components/OwlSoundPicker';
 import { BreathingSoundPicker } from '../components/BreathingSoundPicker';
 import { BreathingDurationPicker } from '../components/BreathingDurationPicker';
+import { QuietPeriodsCard } from '../components/QuietPeriodsCard';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { rescheduleAllNotifications } from '../services/coach';
@@ -37,7 +37,6 @@ import {
   cancelAllSpoken,
   setSpokenHeadphonesOnly,
   isHeadphonesConnected,
-  setSpokenQuietHours,
 } from '../services/spokenNudges';
 import {
   listBreathingCustomSounds,
@@ -475,109 +474,6 @@ export function SoundsVoiceScreen() {
                 </View>
               )}
 
-              {spokenNudges && (
-                <View style={{ marginTop: spacing.md }}>
-                  <View style={styles.toggleRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                        Horário silencioso (sem voz)
-                      </Text>
-                      <Text style={[typography.small, { color: colors.text.secondary }]}>
-                        Nos horários e dias escolhidos, os avisos NÃO falam em voz
-                        alta — só notificam. Ex.: trabalho, audiências, academia.
-                        Com FONE conectado a voz toca normalmente (sai pelo fone).
-                      </Text>
-                    </View>
-                    <Switch
-                      value={config?.spokenQuietEnabled ?? false}
-                      onValueChange={async (next) => {
-                        await setConfig({ spokenQuietEnabled: next });
-                        setSpokenQuietHours({
-                          spokenQuietEnabled: next,
-                          spokenQuietStart: config?.spokenQuietStart ?? '09:00',
-                          spokenQuietEnd: config?.spokenQuietEnd ?? '18:00',
-                          spokenQuietDays: config?.spokenQuietDays ?? 127,
-                        });
-                      }}
-                      trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-                      thumbColor={
-                        (config?.spokenQuietEnabled ?? false)
-                          ? colors.text.onGold
-                          : colors.text.tertiary
-                      }
-                    />
-                  </View>
-
-                  {(config?.spokenQuietEnabled ?? false) && (
-                    <View style={{ marginTop: spacing.sm }}>
-                      <View style={styles.quietTimesRow}>
-                        <View style={{ flex: 1 }}>
-                          <TimePickerInput
-                            label="Início"
-                            value={config?.spokenQuietStart ?? '09:00'}
-                            onChange={async (hhmm) => {
-                              await setConfig({ spokenQuietStart: hhmm });
-                              setSpokenQuietHours({
-                                spokenQuietEnabled: true,
-                                spokenQuietStart: hhmm,
-                                spokenQuietEnd: config?.spokenQuietEnd ?? '18:00',
-                                spokenQuietDays: config?.spokenQuietDays ?? 127,
-                              });
-                            }}
-                          />
-                        </View>
-                        <View style={{ width: spacing.md }} />
-                        <View style={{ flex: 1 }}>
-                          <TimePickerInput
-                            label="Fim"
-                            value={config?.spokenQuietEnd ?? '18:00'}
-                            onChange={async (hhmm) => {
-                              await setConfig({ spokenQuietEnd: hhmm });
-                              setSpokenQuietHours({
-                                spokenQuietEnabled: true,
-                                spokenQuietStart: config?.spokenQuietStart ?? '09:00',
-                                spokenQuietEnd: hhmm,
-                                spokenQuietDays: config?.spokenQuietDays ?? 127,
-                              });
-                            }}
-                          />
-                        </View>
-                      </View>
-
-                      <Text style={styles.quietDaysLabel}>Dias</Text>
-                      <View style={styles.quietDaysRow}>
-                        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((lbl, idx) => {
-                          const mask = config?.spokenQuietDays ?? 127;
-                          const on = ((mask >> idx) & 1) === 1;
-                          return (
-                            <Pressable
-                              key={lbl}
-                              onPress={async () => {
-                                const nextMask = mask ^ (1 << idx);
-                                await setConfig({ spokenQuietDays: nextMask });
-                                setSpokenQuietHours({
-                                  spokenQuietEnabled: true,
-                                  spokenQuietStart: config?.spokenQuietStart ?? '09:00',
-                                  spokenQuietEnd: config?.spokenQuietEnd ?? '18:00',
-                                  spokenQuietDays: nextMask,
-                                });
-                              }}
-                              style={[styles.quietDayChip, on && styles.quietDayChipOn]}
-                            >
-                              <Text style={[styles.quietDayText, on && styles.quietDayTextOn]}>
-                                {lbl}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                      <Text style={styles.quietHint}>
-                        Dica: para o horário de trabalho, deixe Seg–Sex marcados.
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
 
               {spokenNudges && (
                 <Pressable
@@ -668,6 +564,8 @@ export function SoundsVoiceScreen() {
             volume, som e importância da coruja.
           </Text>
         </Card>
+
+        <QuietPeriodsCard />
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>

@@ -15,6 +15,7 @@ import { requireNativeModule } from 'expo-modules-core';
 import { getUserConfig } from './database';
 import { getApiKey } from './secureStore';
 import { prepareNudgeAudio, cleanupNudgeAudio, DEFAULT_GEMINI_VOICE } from './geminiTTS';
+import { getQuietPeriodsCached, anyQuietAt } from './quietHours';
 
 interface SpokenNudgesNative {
   isExactAlarmAllowed(): boolean;
@@ -187,6 +188,22 @@ async function scheduleSpokenOneShot(
   if (!native) return { ok: false, usedGemini: false };
   const trimmed = (text || '').trim();
   if (!trimmed) return { ok: false, usedGemini: false };
+
+  // Não-perturbe: não agenda voz cujo horário cai num período sem som (o TESTE
+  // sempre passa). Cobre TODOS os períodos — o nativo só guarda uma janela.
+  if (id !== TEST_ID) {
+    try {
+      const periods = await getQuietPeriodsCached();
+      if (periods.length) {
+        const d = new Date(atEpochMs);
+        if (anyQuietAt(periods, d.getHours() * 60 + d.getMinutes(), d.getDay())) {
+          return { ok: false, usedGemini: false };
+        }
+      }
+    } catch {
+      /* sem períodos / erro → segue agendando */
+    }
+  }
 
   let audioPath = '';
   let usedGemini = false;

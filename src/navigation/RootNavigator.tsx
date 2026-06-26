@@ -35,7 +35,8 @@ import {
 import { confirmNudge, snoozeNudge } from '../services/nudges';
 import { confirmMedication, snoozeMedication, skipMedicationToday } from '../services/medications';
 import { saveLastNotification } from '../services/lastNotification';
-import { isHeadphonesConnected, isSpokenQuietNow } from '../services/spokenNudges';
+import { isHeadphonesConnected } from '../services/spokenNudges';
+import { isQuietNow } from '../services/quietHours';
 import { markSleepDone } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
 import { playOwlCall } from '../services/owlSound';
@@ -231,7 +232,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         // Horário silencioso (janela + dias sem voz) — não fala em primeiro
         // plano, EXCETO com fone conectado: aí a voz sai pelo fone, sem
         // constranger ninguém (o silencioso existe pra não tocar no falante).
-        if (isSpokenQuietNow(cfg) && !isHeadphonesConnected()) return;
+        if ((await isQuietNow()) && !isHeadphonesConnected()) return;
         // Don't talk over the owl's own voice (chat reading / preview).
         if (isSpeaking()) return;
         const d = (notification.request.content.data ?? {}) as { type?: string };
