@@ -354,6 +354,52 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   return { message: result.text, level, offline: result.offline, habitId: habit.id };
 }
 
+// Prompt do ABRIR-CHAT: a Comentora puxa conversa comentando o progresso e
+// apontando, com gentileza, onde dá pra melhorar — terminando com uma pergunta.
+const CHAT_OPENER_PROMPT = `Você é a Comentora, uma coruja-coach calorosa, humana e direta. A pessoa ACABOU de abrir o chat com você. NÃO espere ela falar — INICIE a conversa.
+
+Em 2 a 4 frases curtas: comente o PROGRESSO recente dela usando os dados abaixo (sono, exercício, passos, peso, hábitos), elogie sinceramente o que foi bem e aponte com gentileza UM ponto onde ela pode melhorar. Termine com UMA pergunta aberta e específica para engajar a conversa.
+
+Histórico recente: {recentLogsSummary}
+
+Tom: {tone}. Seja breve, natural e acolhedora. NÃO cite números crus nem soe robótica. NUNCA use saudações genéricas tipo "Olá, como posso ajudar?".`;
+
+/**
+ * Mensagem de ABERTURA do chat (quando o usuário toca "Chat com Comentora"):
+ * a coruja conduz, comentando o progresso e onde melhorar. Persiste a fala e a
+ * devolve. Independente do fluxo de "convencer a dormir".
+ */
+export async function getChatOpenerForNow(): Promise<CoachInvocationResult> {
+  const config = await getUserConfig();
+  const habit = await ensureSleepHabit(config.bedtime);
+  const minutesLate = minutesPast(config.bedtime);
+  const level = getIntensityForMinutesLate(minutesLate, config.reminderIntervalMinutes);
+  const streak = await getStreak(habit.id);
+  const recentLogs = await getRecentLogs(habit.id, 14);
+  const history = await getRecentChat(habit.id, 6);
+  const healthContext = await getHealthContext();
+
+  const result = await runCoachGeneration(
+    config,
+    {
+      userName: config.name,
+      bedtime: config.bedtime,
+      currentTime: nowHHMM(),
+      minutesLate,
+      level,
+      streak: streak.currentStreak,
+      tone: config.tone,
+      recentLogsSummary: summarizeRecentLogs(recentLogs),
+      systemPrompt: CHAT_OPENER_PROMPT,
+      healthContext,
+    },
+    history,
+  );
+
+  await addChatMessage(habit.id, 'corujinha', result.text, level);
+  return { message: result.text, level, offline: result.offline, habitId: habit.id };
+}
+
 export interface ConvinceFocus {
   emoji: string;
   title: string;

@@ -21,7 +21,7 @@ import { GreekIcon } from '../components/GreekIcon';
 import { iconForEmoji } from '../services/todos';
 import { colors, radius, spacing, typography } from '../theme';
 import {
-  getCoachMessageForNow,
+  getChatOpenerForNow,
   getConvinceMessageForNow,
   getSleepHabitId,
   markSleepDone,
@@ -58,6 +58,8 @@ export function ChatScreen() {
   const [speechEnabled, setSpeechEnabled] = useState(config?.voiceModeEnabled ?? false);
 
   const scrollRef = useRef<ScrollView>(null);
+  // Só exibe mensagens criadas DEPOIS de abrir o chat (conversa nova por sessão).
+  const sessionStartIdRef = useRef(0);
   const lastSpokenIdRef = useRef<number | null>(null);
   const stopListenerRef = useRef<(() => void) | null>(null);
   const finalTranscriptRef = useRef<string>('');
@@ -96,6 +98,14 @@ export function ChatScreen() {
         const hid = await getSleepHabitId();
         if (!mounted) return;
         setHabitId(hid);
+        // Conversa NOVA a cada abertura: guarda o id da última mensagem ANTES
+        // do opener; só exibimos o que vier a partir daqui (sem o histórico velho).
+        try {
+          const prev = await getRecentChat(hid, 1);
+          sessionStartIdRef.current = prev[0]?.id ?? 0;
+        } catch {
+          sessionStartIdRef.current = 0;
+        }
         try {
           if (convinceMode) {
             const r = await getConvinceMessageForNow();
@@ -105,7 +115,8 @@ export function ChatScreen() {
               setOffline(r.offline);
             }
           } else {
-            const r = await getCoachMessageForNow();
+            // A Comentora conduz: abre comentando o progresso e onde melhorar.
+            const r = await getChatOpenerForNow();
             if (mounted) {
               setLevel(r.level);
               setOffline(r.offline);
@@ -117,7 +128,7 @@ export function ChatScreen() {
         // A coruja "fala" ao abrir o chat — som tocado dentro do app.
         playOwlCall(config?.owlSpecies);
         const recent = await getRecentChat(hid, 20);
-        if (mounted) setMessages(recent);
+        if (mounted) setMessages(recent.filter((m) => m.id > sessionStartIdRef.current));
       } finally {
         if (mounted) setBusy(false);
       }
@@ -163,7 +174,7 @@ export function ChatScreen() {
       const result = await sendUserMessage(habitId, text, level);
       setOffline(result.offline);
       const recent = await getRecentChat(habitId, 20);
-      setMessages(recent);
+      setMessages(recent.filter((m) => m.id > sessionStartIdRef.current));
     } finally {
       setSending(false);
     }
@@ -253,7 +264,7 @@ export function ChatScreen() {
       let cancelled = false;
       (async () => {
         const recent = await getRecentChat(habitId, 20);
-        if (!cancelled) setMessages(recent);
+        if (!cancelled) setMessages(recent.filter((m) => m.id > sessionStartIdRef.current));
       })();
       return () => {
         cancelled = true;
