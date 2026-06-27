@@ -273,10 +273,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
+    // Padding maior (= ao dos cards) para o "Voltar" não encostar na faixa
+    // lateral do meandro; marginTop desce abaixo da faixa do topo.
+    paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
-    // Desce abaixo da faixa do meandro (desenhada full-screen atrás), senão
-    // "Voltar"/"Configurações" sobrepõem a borda grega do topo.
     marginTop: spacing.xl,
   },
   back: {

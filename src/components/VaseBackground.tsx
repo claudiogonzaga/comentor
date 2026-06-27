@@ -25,8 +25,10 @@ const INSET = 5;
 // das retas — assim a borda fica consistente, sem os "ganchos soltos" da versão
 // antiga. [ao-longo (a), atravessado (c)] numa caixa 4u × 4u; c=0 = borda externa.
 const U = 3.6;
+// Espelhada no eixo ATRAVESSADO (c → 4u−c): as "pontinhas" das espirais apontam
+// para FORA (junto da linha principal da borda), não para dentro.
 const GLYPH: ReadonlyArray<readonly [number, number]> = [
-  [0, 4 * U], [0, 0], [4 * U, 0], [4 * U, 3 * U], [U, 3 * U], [U, U], [3 * U, U], [3 * U, 2 * U],
+  [0, 0], [0, 4 * U], [4 * U, 4 * U], [4 * U, U], [U, U], [U, 3 * U], [3 * U, 3 * U], [3 * U, 2 * U],
 ];
 const GLEN = 4 * U; // comprimento da glifa ao longo da fileira
 const GAP = 5; // espaço entre chaves
