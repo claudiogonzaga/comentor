@@ -45,8 +45,9 @@ try {
   if (Platform.OS === 'android') {
     native = requireNativeModule<SpokenNudgesNative>('SpokenNudges');
   }
-} catch {
+} catch (error) {
   // Módulo nativo ausente (Expo Go / web / build sem o módulo) → recurso indisponível.
+  console.warn('[SpokenNudges] módulo nativo não carregou:', error instanceof Error ? error.message : error);
   native = null;
 }
 

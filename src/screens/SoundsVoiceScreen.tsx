@@ -271,6 +271,21 @@ export function SoundsVoiceScreen() {
             />
           </View>
 
+          {/* Diagnóstico SEMPRE visível (não depende do módulo nativo): explica
+              por que a voz não fala — toggles, modo silencioso, fone, período sem
+              som, alarme, bateria. */}
+          <Pressable
+            onPress={async () => {
+              const diag = await getVoiceDiagnostics();
+              Alert.alert('Por que a voz não fala?', diag);
+            }}
+            style={styles.diagBtn}
+          >
+            <Text style={[typography.small, { color: colors.accent.gold }]}>
+              🔎 Por que a voz não fala? (diagnóstico)
+            </Text>
+          </Pressable>
+
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
@@ -502,18 +517,6 @@ export function SoundsVoiceScreen() {
                   </Text>
                 </Pressable>
               )}
-
-              <Pressable
-                onPress={async () => {
-                  const diag = await getVoiceDiagnostics();
-                  Alert.alert('Por que a voz não fala?', diag);
-                }}
-                style={styles.testSpokenBtn}
-              >
-                <Text style={[typography.small, { color: colors.text.secondary }]}>
-                  Por que a voz não fala? (diagnóstico)
-                </Text>
-              </Pressable>
             </>
           )}
 
@@ -644,6 +647,15 @@ const styles = StyleSheet.create({
   },
   testSpokenBtn: {
     marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.accent.gold,
+  },
+  diagBtn: {
+    marginTop: spacing.md,
     alignSelf: 'flex-start',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
