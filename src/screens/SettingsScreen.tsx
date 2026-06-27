@@ -275,6 +275,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+    // Desce abaixo da faixa do meandro (desenhada full-screen atrás), senão
+    // "Voltar"/"Configurações" sobrepõem a borda grega do topo.
+    marginTop: spacing.xl,
   },
   back: {
     ...typography.bodyMedium,
