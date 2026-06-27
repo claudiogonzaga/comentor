@@ -244,6 +244,21 @@ export async function unconfirmNudge(nudgeType: string): Promise<void> {
 }
 
 /**
+ * Volta o hábito de hoje para PENDENTE — desfaz "Já fiz" e "Não vou fazer hoje".
+ * Re-agenda (re-arma a insistência). Deixa o usuário CORRIGIR a marcação.
+ */
+export async function resetNudgeToday(nudgeType: string): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeUndone(nudgeType, today);
+    await markNudgeUndone(`${nudgeType}:skip`, today);
+  } catch (err) {
+    console.warn(`failed to reset nudge ${nudgeType}:`, err);
+  }
+  await scheduleAllNudges();
+}
+
+/**
  * "Lembrar depois": agenda uma única insistência deste nudge daqui a
  * `minutes` minutos (não marca como feito). A âncora diária e a corrente
  * normal seguem intactas.

@@ -456,6 +456,22 @@ export async function unconfirmMedication(medId: number): Promise<void> {
 }
 
 /**
+ * Volta o lembrete de hoje para PENDENTE — desfaz tanto o "Já tomei" quanto o
+ * "Não vou tomar". Re-agenda (re-arma a insistência se ainda estiver na janela).
+ * Permite ao usuário CORRIGIR a marcação a qualquer momento.
+ */
+export async function resetMedicationToday(medId: number): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeUndone(completionKey(medId), today);
+    await markNudgeUndone(skipKey(medId), today);
+  } catch (err) {
+    console.warn(`failed to reset medication ${medId}:`, err);
+  }
+  await scheduleAllMedications();
+}
+
+/**
  * "Lembrar depois": agenda uma única insistência deste medicamento daqui a
  * `minutes` minutos (não marca como tomado). A âncora diária e a corrente
  * normal seguem intactas.

@@ -15,8 +15,13 @@ import { VerticalVolume } from '../components/VerticalVolume';
 import { SequenceCard } from '../components/SequenceCard';
 import { InspirationHomeCard } from '../components/InspirationHomeCard';
 import { getTodayTodos, type TodoItem } from '../services/todos';
-import { confirmMedication, skipMedicationToday, snoozeMedication } from '../services/medications';
-import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
+import {
+  confirmMedication,
+  skipMedicationToday,
+  snoozeMedication,
+  resetMedicationToday,
+} from '../services/medications';
+import { confirmNudge, skipNudgeToday, snoozeNudge, resetNudgeToday } from '../services/nudges';
 import {
   getLastNotification,
   syncLastNotificationFromTray,
@@ -164,16 +169,18 @@ export function HomeScreen() {
   // Painel de lembretes: as três respostas do coach por item pendente.
   const handleTodoAction = async (
     item: TodoItem,
-    action: 'done' | 'skip' | 'snooze',
+    action: 'done' | 'skip' | 'snooze' | 'undo',
   ) => {
     try {
       if (item.kind === 'med' && item.medId != null) {
         if (action === 'done') await confirmMedication(item.medId);
         else if (action === 'skip') await skipMedicationToday(item.medId);
+        else if (action === 'undo') await resetMedicationToday(item.medId);
         else await snoozeMedication(item.medId, 30);
       } else if (item.kind === 'nudge' && item.nudgeType) {
         if (action === 'done') await confirmNudge(item.nudgeType);
         else if (action === 'skip') await skipNudgeToday(item.nudgeType);
+        else if (action === 'undo') await resetNudgeToday(item.nudgeType);
         else await snoozeNudge(item.nudgeType, 30);
       }
     } catch {
@@ -349,9 +356,11 @@ export function HomeScreen() {
                   </Text>
                 </View>
                 {item.done && (
-                  <Text style={[styles.todoStatus, item.skipped && styles.todoStatusSkip]}>
-                    {item.skipped ? 'Não hoje' : '✓ Feito'}
-                  </Text>
+                  <Pressable onPress={() => handleTodoAction(item, 'undo')} hitSlop={8}>
+                    <Text style={[styles.todoStatus, item.skipped && styles.todoStatusSkip]}>
+                      {item.skipped ? 'Não hoje' : '✓ Feito'} ✕
+                    </Text>
+                  </Pressable>
                 )}
               </View>
               {!item.done && (
