@@ -12,6 +12,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
+import { ChatHistoryScreen } from '../screens/ChatHistoryScreen';
 import { BreathingScreen } from '../screens/BreathingScreen';
 import { ReadAloudScreen } from '../screens/ReadAloudScreen';
 import { RemindersScreen } from '../screens/RemindersScreen';
@@ -53,6 +54,7 @@ export type RootStackParamList = {
   Chat: { mode?: 'convince' } | undefined;
   Settings: undefined;
   History: undefined;
+  ChatHistory: undefined;
   Breathing: undefined;
   ReadAloud: { autostart?: boolean } | undefined;
   Reminders: undefined;
@@ -320,6 +322,11 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Chat" component={ChatScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
+        <Stack.Screen
+          name="ChatHistory"
+          component={ChatHistoryScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="Breathing" component={BreathingScreen} options={{ animation: 'fade' }} />
         <Stack.Screen
           name="ReadAloud"

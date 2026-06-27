@@ -1090,6 +1090,16 @@ export async function getRecentChat(habitId: number, limit = 20): Promise<ChatMe
   return rows.map(rowToChat).reverse();
 }
 
+/** TODAS as mensagens do chat (ordem cronológica) — para a tela de histórico. */
+export async function getAllChat(habitId: number): Promise<ChatMessage[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<ChatRow>(
+    'SELECT * FROM chat_messages WHERE habit_id = ? ORDER BY id ASC',
+    [habitId],
+  );
+  return rows.map(rowToChat);
+}
+
 export async function clearChat(habitId: number) {
   const d = await getDb();
   await d.runAsync('DELETE FROM chat_messages WHERE habit_id = ?', [habitId]);

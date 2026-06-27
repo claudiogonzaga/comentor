@@ -300,16 +300,26 @@ export function ChatScreen() {
               </Text>
             </View>
           </View>
-          <Pressable
-            onPress={speaking ? handleStopSpeaking : toggleSpeech}
-            hitSlop={12}
-            style={styles.speechToggle}
-          >
-            <GreekIcon name={speechEnabled ? 'sound' : 'mute'} size={20} />
-            <Text style={styles.speechToggleLabel}>
-              {speaking ? 'parar' : speechEnabled ? 'voz on' : 'voz off'}
-            </Text>
-          </Pressable>
+          <View style={styles.headerRight}>
+            <Pressable
+              onPress={() => navigation.navigate('ChatHistory')}
+              hitSlop={12}
+              style={styles.speechToggle}
+            >
+              <GreekIcon name="clock" size={20} />
+              <Text style={styles.speechToggleLabel}>histórico</Text>
+            </Pressable>
+            <Pressable
+              onPress={speaking ? handleStopSpeaking : toggleSpeech}
+              hitSlop={12}
+              style={styles.speechToggle}
+            >
+              <GreekIcon name={speechEnabled ? 'sound' : 'mute'} size={20} />
+              <Text style={styles.speechToggleLabel}>
+                {speaking ? 'parar' : speechEnabled ? 'voz on' : 'voz off'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         <ScrollView
@@ -425,6 +435,11 @@ const styles = StyleSheet.create({
     minWidth: 60,
   },
   headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
