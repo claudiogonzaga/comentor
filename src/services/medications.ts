@@ -91,8 +91,12 @@ function escalatedBody(name: string, actionLine: string, k: number): string {
  * corrente de insistências DATE para o dia atual).
  */
 
-/** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial. */
-const MED_MAX_REPEATS = 4;
+/** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial.
+ * Alto de propósito: um bom coach insiste até a tarefa ser resolvida. A corrente
+ * é cancelada assim que o usuário marca Já fiz / Não vou fazer / Me dê mais tempo,
+ * e é re-armada ao abrir o app — então insiste "até resolver" (respeitando os
+ * períodos sem som). */
+const MED_MAX_REPEATS = 20;
 /** Espaçamento mínimo (min) entre as insistências. */
 const MIN_MED_INTERVAL_MIN = 5;
 

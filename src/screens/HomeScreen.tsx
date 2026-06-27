@@ -13,7 +13,10 @@ import { useAppStore } from '../store/useAppStore';
 import { setSpokenVolume } from '../services/spokenNudges';
 import { VerticalVolume } from '../components/VerticalVolume';
 import { SequenceCard } from '../components/SequenceCard';
-import { getTodayTodos, toggleTodo, type TodoItem } from '../services/todos';
+import { InspirationHomeCard } from '../components/InspirationHomeCard';
+import { getTodayTodos, type TodoItem } from '../services/todos';
+import { confirmMedication, skipMedicationToday, snoozeMedication } from '../services/medications';
+import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
 import {
   getLastNotification,
   syncLastNotificationFromTray,
@@ -158,19 +161,28 @@ export function HomeScreen() {
     }
   };
 
-  const handleToggleTodo = async (item: TodoItem) => {
-    // Atualização otimista — vira o "feito" na hora e reconcilia no fim.
-    setTodos((prev) =>
-      prev.map((t) => (t.key === item.key ? { ...t, done: !t.done } : t)),
-    );
+  // Painel de lembretes: as três respostas do coach por item pendente.
+  const handleTodoAction = async (
+    item: TodoItem,
+    action: 'done' | 'skip' | 'snooze',
+  ) => {
     try {
-      await toggleTodo(item);
-    } finally {
-      try {
-        setTodos(await getTodayTodos());
-      } catch {
-        /* keep optimistic state */
+      if (item.kind === 'med' && item.medId != null) {
+        if (action === 'done') await confirmMedication(item.medId);
+        else if (action === 'skip') await skipMedicationToday(item.medId);
+        else await snoozeMedication(item.medId, 30);
+      } else if (item.kind === 'nudge' && item.nudgeType) {
+        if (action === 'done') await confirmNudge(item.nudgeType);
+        else if (action === 'skip') await skipNudgeToday(item.nudgeType);
+        else await snoozeNudge(item.nudgeType, 30);
       }
+    } catch {
+      /* best-effort */
+    }
+    try {
+      setTodos(await getTodayTodos());
+    } catch {
+      /* mantém estado */
     }
   };
 
@@ -294,30 +306,29 @@ export function HomeScreen() {
           </Card>
         ) : null}
 
-        {/* #5 — Lista de tarefas do dia a partir dos lembretes. Check = riscado. */}
+        {/* Painel de INSPIRAÇÃO (separado do de lembretes). */}
+        <InspirationHomeCard />
+
+        {/* Painel de LEMBRETES: cada pendência traz as 3 respostas do coach. */}
         <Card style={styles.todoCard}>
           <Pressable
             style={styles.todoHeader}
             onPress={() => navigation.navigate('Reminders')}
           >
             <View style={styles.todoHeaderLeft}>
-              <GreekIcon name="check" size={18} color={colors.accent.gold} />
-              <Text style={styles.todoTitle}>HÁBITOS SAUDÁVEIS</Text>
+              <GreekIcon name="bell" size={18} color={colors.accent.gold} />
+              <Text style={styles.todoTitle}>LEMBRETES</Text>
             </View>
             <GreekIcon name="chevronRight" size={18} color={colors.text.tertiary} />
           </Pressable>
           {todos.length === 0 && (
             <Text style={styles.todoEmpty}>
-              Nenhum hábito para hoje. Toque para adicionar.
+              Nenhum lembrete para hoje. Toque para adicionar.
             </Text>
           )}
           {todos.map((item) => (
-              <Pressable
-                key={item.key}
-                style={styles.todoRow}
-                onPress={() => handleToggleTodo(item)}
-                hitSlop={6}
-              >
+            <View key={item.key} style={styles.todoItem}>
+              <View style={styles.todoRow}>
                 <View style={styles.todoIcon}>
                   <GreekIcon
                     name={item.icon}
@@ -337,38 +348,67 @@ export function HomeScreen() {
                     {item.subtitle ? ` · ${item.subtitle}` : ''}
                   </Text>
                 </View>
-                <View style={[styles.checkbox, item.done && styles.checkboxDone]}>
-                  {item.done && (
-                    <GreekIcon name="check" size={14} color={colors.text.onGold} strokeWidth={2.4} />
-                  )}
+                {item.done && (
+                  <Text style={[styles.todoStatus, item.skipped && styles.todoStatusSkip]}>
+                    {item.skipped ? 'Não hoje' : '✓ Feito'}
+                  </Text>
+                )}
+              </View>
+              {!item.done && (
+                <View style={styles.todoActions}>
+                  <Pressable
+                    style={[styles.actBtn, styles.actDone]}
+                    onPress={() => handleTodoAction(item, 'done')}
+                    hitSlop={4}
+                  >
+                    <Text style={styles.actDoneText}>Já fiz</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.actBtn}
+                    onPress={() => handleTodoAction(item, 'snooze')}
+                    hitSlop={4}
+                  >
+                    <Text style={styles.actText}>Mais tempo</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.actBtn}
+                    onPress={() => handleTodoAction(item, 'skip')}
+                    hitSlop={4}
+                  >
+                    <Text style={styles.actText}>Não hoje</Text>
+                  </Pressable>
                 </View>
-              </Pressable>
-            ))}
-          </Card>
+              )}
+            </View>
+          ))}
+        </Card>
 
         <HealthCard />
 
-        {!data?.todayLog?.completed && (
-          <View style={styles.actions}>
-            <Button
-              label="Vamos bater um papo"
-              onPress={() => navigation.navigate('Chat', { mode: 'convince' })}
-            />
-            <View style={{ height: spacing.sm }} />
-            <Button
-              label="Exercício de respiração"
-              variant="secondary"
-              onPress={() => navigation.navigate('Breathing')}
-            />
-            <View style={{ height: spacing.sm }} />
-            <Button
-              label="Vou dormir agora"
-              variant="secondary"
-              onPress={handleMarkDone}
-              loading={marking}
-            />
-          </View>
-        )}
+        <View style={styles.actions}>
+          {/* A Comentora conduz: abre o chat já comentando saúde/hábitos do dia. */}
+          <Button
+            label="Chat com Comentora"
+            onPress={() => navigation.navigate('Chat')}
+          />
+          {!data?.todayLog?.completed && (
+            <>
+              <View style={{ height: spacing.sm }} />
+              <Button
+                label="Exercício de respiração"
+                variant="secondary"
+                onPress={() => navigation.navigate('Breathing')}
+              />
+              <View style={{ height: spacing.sm }} />
+              <Button
+                label="Vou dormir agora"
+                variant="secondary"
+                onPress={handleMarkDone}
+                loading={marking}
+              />
+            </>
+          )}
+        </View>
 
         <View style={styles.secondaryActions}>
           <Button
@@ -491,11 +531,38 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginLeft: spacing.xs,
   },
+  todoItem: {
+    paddingVertical: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
   todoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm,
   },
+  todoStatus: {
+    ...typography.small,
+    color: colors.accent.gold,
+    marginLeft: spacing.sm,
+  },
+  todoStatusSkip: { color: colors.text.tertiary },
+  todoActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+    paddingLeft: 36,
+  },
+  actBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  actText: { ...typography.small, color: colors.text.secondary },
+  actDone: { borderColor: colors.accent.gold, backgroundColor: 'rgba(244,197,83,0.15)' },
+  actDoneText: { ...typography.small, color: colors.accent.gold },
   todoIcon: {
     width: 28,
     alignItems: 'center',

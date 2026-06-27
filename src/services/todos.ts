@@ -29,6 +29,8 @@ export interface TodoItem {
   time: string; // HH:MM
   icon: GreekIconName;
   done: boolean;
+  /** Marcado como "Não vou fazer hoje" (resolvido, mas não conta como feito). */
+  skipped?: boolean;
 }
 
 function todayISO(): string {
@@ -130,7 +132,8 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
         subtitle: n.body || undefined,
         time: n.scheduleTime,
         icon: iconForEmoji(n.emoji, 'nudge'),
-        done: done.has(n.type),
+        done: done.has(n.type) || done.has(`${n.type}:skip`),
+        skipped: done.has(`${n.type}:skip`) && !done.has(n.type),
       });
     }
   } catch {
@@ -164,7 +167,8 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
         subtitle,
         time: med.time,
         icon: iconForEmoji(med.emoji, 'med'),
-        done: done.has(key),
+        done: done.has(key) || done.has(`${key}:skip`),
+        skipped: done.has(`${key}:skip`) && !done.has(key),
       });
     }
   } catch {

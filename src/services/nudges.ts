@@ -19,7 +19,9 @@ import type { Nudge } from '../types';
 const VERIFY_NUDGE_TYPES = new Set(['bluelight']);
 
 /** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial. */
-const NUDGE_MAX_REPEATS = 4;
+// Alto de propósito: insiste até o usuário resolver (a corrente é cancelada ao
+// marcar Já fiz / Não vou fazer / Me dê mais tempo, e re-armada ao abrir o app).
+const NUDGE_MAX_REPEATS = 20;
 /** Espaçamento mínimo (min) entre as insistências, mesmo se o intervalo for menor. */
 const MIN_NUDGE_INTERVAL_MIN = 5;
 
@@ -121,7 +123,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
 
     // Corrente de insistências de hoje — só para nudges "verify" ainda não
     // confirmados. A coruja re-notifica até o usuário tocar "Já fiz ✅".
-    if (isVerify && !doneTypes.includes(n.type)) {
+    if (isVerify && !doneTypes.includes(n.type) && !doneTypes.includes(`${n.type}:skip`)) {
       const base = buildTodayAt(safeHour, safeMinute);
       for (let k = 1; k <= NUDGE_MAX_REPEATS; k++) {
         const fireAt = new Date(base.getTime() + k * intervalMin * 60_000);
@@ -181,6 +183,37 @@ export async function confirmNudge(nudgeType: string): Promise<void> {
   }
 
   // Dispensa as notificações deste nudge que já estão na bandeja.
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const p of presented) {
+      const data = p.request.content.data as { nudgeType?: string };
+      if (data?.nudgeType === nudgeType) {
+        await Notifications.dismissNotificationAsync(p.request.identifier);
+      }
+    }
+  } catch {
+    /* dismissal is best-effort */
+  }
+}
+
+/**
+ * "Não vou fazer hoje": encerra a insistência de hoje SEM contar como feito
+ * (chave `:skip`, separada para não inflar estatísticas). Volta a lembrar amanhã.
+ */
+export async function skipNudgeToday(nudgeType: string): Promise<void> {
+  const today = todayISO();
+  try {
+    await markNudgeDone(`${nudgeType}:skip`, today);
+  } catch (err) {
+    console.warn(`failed to mark nudge skipped ${nudgeType}:`, err);
+  }
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  for (const s of scheduled) {
+    const data = s.content.data as { nudgeType?: string; followup?: boolean };
+    if (data?.nudgeType === nudgeType && data?.followup) {
+      await Notifications.cancelScheduledNotificationAsync(s.identifier);
+    }
+  }
   try {
     const presented = await Notifications.getPresentedNotificationsAsync();
     for (const p of presented) {
