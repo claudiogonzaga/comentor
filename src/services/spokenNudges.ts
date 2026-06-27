@@ -15,7 +15,7 @@ import { requireNativeModule } from 'expo-modules-core';
 import { getUserConfig } from './database';
 import { getApiKey } from './secureStore';
 import { prepareNudgeAudio, cleanupNudgeAudio, DEFAULT_GEMINI_VOICE } from './geminiTTS';
-import { getQuietPeriodsCached, anyQuietAt } from './quietHours';
+import { getQuietPeriodsCached, getEffectiveQuietPeriods, anyQuietAt } from './quietHours';
 
 interface SpokenNudgesNative {
   isExactAlarmAllowed(): boolean;
@@ -161,6 +161,87 @@ export function isSpokenQuietNow(cfg: QuietConfig | null | undefined): boolean {
   const start = hhmmToMin(cfg.spokenQuietStart, 9 * 60);
   const end = hhmmToMin(cfg.spokenQuietEnd, 18 * 60);
   return start <= end ? nowMin >= start && nowMin < end : nowMin >= start || nowMin < end;
+}
+
+/**
+ * Diagnóstico da VOZ: lista, em português, tudo que poderia estar impedindo a
+ * Comentora de falar os avisos — para o usuário (e a gente) entender por que
+ * está mudo. Mostrado num Alert pelo botão "Por que a voz não fala?".
+ */
+export async function getVoiceDiagnostics(): Promise<string> {
+  let cfg: Record<string, unknown> = {};
+  try {
+    cfg = (await getUserConfig()) as unknown as Record<string, unknown>;
+  } catch {
+    /* usa defaults */
+  }
+  const blockers: string[] = [];
+  const info: string[] = [];
+
+  const fgOn = !!cfg.voiceNudgesEnabled;
+  const bgOn = !!cfg.spokenNudgesEnabled;
+  info.push(`Falar com o app ABERTO: ${fgOn ? 'ligado ✓' : 'DESLIGADO'}`);
+  info.push(`Falar com a tela APAGADA: ${bgOn ? 'ligado ✓' : 'DESLIGADO'}`);
+  if (!fgOn && !bgOn) {
+    blockers.push('Nenhuma das duas opções de voz está ligada. Ligue "Falar as notificações em voz alta" e/ou "Falar em voz alta (tela apagada)".');
+  }
+
+  if (cfg.silentMode) {
+    blockers.push('O MODO SILENCIOSO (botão na tela inicial) está ligado — ele bloqueia toda a voz. Desligue-o.');
+  }
+
+  const fone = isHeadphonesConnected();
+  if (cfg.spokenHeadphonesOnly && !fone) {
+    blockers.push('"Só falar com fone de ouvido" está ligado e NENHUM fone está conectado — por isso fica só a notificação, sem voz. Conecte um fone ou desligue essa opção.');
+  }
+
+  // Período sem som ativo AGORA?
+  try {
+    const periods = await getEffectiveQuietPeriods();
+    const now = new Date();
+    const mod = now.getHours() * 60 + now.getMinutes();
+    const active = periods.filter((p) => anyQuietAt([p], mod, now.getDay()));
+    if (active.length) {
+      blockers.push(
+        `AGORA você está dentro de um período SEM SOM (${active
+          .map((p) => `${p.start}–${p.end}`)
+          .join(', ')}) — a voz não fala nesses horários. Veja "Períodos sem som" em Sons e Vozes (o horário silencioso antigo pode ter virado um período aqui).`,
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Requisitos da fala em background.
+  if (bgOn) {
+    if (!spokenNudgesAvailable()) {
+      blockers.push('A fala em background não está disponível neste aparelho/instalação.');
+    } else {
+      if (!isExactAlarmAllowed()) {
+        blockers.push('Falta a permissão "alarmes e lembretes" do Android — sem ela a voz em background não dispara na hora certa.');
+      }
+      if (!isIgnoringBatteryOptimizations()) {
+        info.push('• A economia de bateria está ativa — em alguns celulares (Xiaomi, Samsung…) ela impede a voz em background.');
+      }
+    }
+  }
+
+  // Voz Gemini precisa de chave (senão cai na voz do sistema, que sempre existe).
+  if (cfg.voiceProvider === 'gemini') {
+    try {
+      const k = await getApiKey();
+      if (!k) info.push('• Voz Gemini selecionada, mas sem chave — usa a voz do sistema.');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const head =
+    blockers.length === 0
+      ? '✓ As configurações de voz parecem OK. Toque em "Testar agora (fala em 1 min)" para ouvir. Lembre: com o app FECHADO só fala se "tela apagada" estiver ligado e o Android permitir.'
+      : 'Encontrei o que está impedindo a voz:';
+
+  return [head, ...blockers.map((b) => `• ${b}`), '', ...info].join('\n');
 }
 
 // ---- agendamento ----

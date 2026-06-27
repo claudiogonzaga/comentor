@@ -34,6 +34,7 @@ import {
   isIgnoringBatteryOptimizations,
   requestIgnoreBatteryOptimizations,
   scheduleSpokenTest,
+  getVoiceDiagnostics,
   cancelAllSpoken,
   setSpokenHeadphonesOnly,
   isHeadphonesConnected,
@@ -501,6 +502,18 @@ export function SoundsVoiceScreen() {
                   </Text>
                 </Pressable>
               )}
+
+              <Pressable
+                onPress={async () => {
+                  const diag = await getVoiceDiagnostics();
+                  Alert.alert('Por que a voz não fala?', diag);
+                }}
+                style={styles.testSpokenBtn}
+              >
+                <Text style={[typography.small, { color: colors.text.secondary }]}>
+                  Por que a voz não fala? (diagnóstico)
+                </Text>
+              </Pressable>
             </>
           )}
 
