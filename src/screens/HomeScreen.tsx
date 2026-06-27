@@ -324,7 +324,9 @@ export function HomeScreen() {
           >
             <View style={styles.todoHeaderLeft}>
               <GreekIcon name="bell" size={18} color={colors.accent.gold} />
-              <Text style={styles.todoTitle}>LEMBRETES</Text>
+              <Text style={styles.todoTitle} numberOfLines={1}>
+                HÁBITOS SAUDÁVEIS E LEMBRETES
+              </Text>
             </View>
             <GreekIcon name="chevronRight" size={18} color={colors.text.tertiary} />
           </Pressable>
@@ -528,6 +530,7 @@ const styles = StyleSheet.create({
   todoHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
   todoEmpty: {
     ...typography.small,
@@ -539,6 +542,7 @@ const styles = StyleSheet.create({
     color: colors.accent.gold,
     textTransform: 'uppercase',
     marginLeft: spacing.xs,
+    flexShrink: 1,
   },
   todoItem: {
     paddingVertical: spacing.xs,

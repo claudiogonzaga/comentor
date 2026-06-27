@@ -14,8 +14,10 @@ import {
 import { scheduleAllMedications } from '../services/medications';
 import type { Medication } from '../types';
 
-const FASTING_HOURS_OPTIONS = [12, 14, 16, 18, 20];
-const DEFAULT_HOURS = 16;
+// O usuário escolhe a JANELA DE ALIMENTAÇÃO (horas comendo). O jejum é o resto
+// do dia (24 − janela). Ex.: 8h de janela = 16h de jejum (protocolo 16:8).
+const EATING_WINDOW_OPTIONS = [4, 6, 8, 10, 12];
+const DEFAULT_HOURS = 16; // jejum padrão (janela de 8h)
 const DEFAULT_FIRST_MEAL = '12:00';
 
 /** Da 1ª refeição + horas de jejum, calcula a janela de alimentação. */
@@ -84,9 +86,11 @@ export function FastingCard() {
     await persistAndReschedule();
   };
 
-  const setHours = async (h: number) => {
+  // Recebe as horas da JANELA DE ALIMENTAÇÃO e guarda o jejum (24 − janela).
+  const setEatingWindow = async (eat: number) => {
     if (!fasting) return;
-    await updateMedication(fasting.id, { fastingHours: h });
+    const fastH = Math.min(23, Math.max(1, 24 - eat));
+    await updateMedication(fasting.id, { fastingHours: fastH });
     await persistAndReschedule();
   };
 
@@ -113,23 +117,23 @@ export function FastingCard() {
         />
       </View>
       <Text style={styles.subtitle}>
-        Escolha as horas de jejum e o horário da primeira refeição. A coruja avisa
-        30 min antes de fechar a janela de alimentação e no fim dela.
+        Escolha as horas da sua janela de alimentação e o horário da primeira
+        refeição. A coruja avisa 30 min antes de fechar a janela e no fim dela.
       </Text>
 
       {enabled && (
         <>
-          <Text style={styles.label}>Horas de jejum</Text>
+          <Text style={styles.label}>Janela de alimentação</Text>
           <View style={styles.chipRow}>
-            {FASTING_HOURS_OPTIONS.map((h) => {
-              const on = h === hours;
+            {EATING_WINDOW_OPTIONS.map((eat) => {
+              const on = eat === w.eat;
               return (
                 <Pressable
-                  key={h}
-                  onPress={() => setHours(h)}
+                  key={eat}
+                  onPress={() => setEatingWindow(eat)}
                   style={[styles.chip, on && styles.chipOn]}
                 >
-                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{h}h</Text>
+                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{eat}h</Text>
                 </Pressable>
               );
             })}
@@ -139,8 +143,8 @@ export function FastingCard() {
           <TimePickerInput label="Primeira refeição" value={firstMeal} onChange={setFirstMeal} />
 
           <Text style={styles.preview}>
-            Janela de alimentação: {firstMeal} → {w.end} ({w.eat}h). Aviso às {w.warn}; pare de
-            comer às {w.end}.
+            Comer das {firstMeal} às {w.end} ({w.eat}h de janela · {24 - w.eat}h de jejum).
+            Aviso às {w.warn}; pare de comer às {w.end}.
           </Text>
         </>
       )}
