@@ -34,6 +34,13 @@ export function InspirationHomeCard() {
 
   if (!cards || cards.length === 0) return null;
   const card = cards[idx];
+  // Alguns cards já trazem o autor embutido no texto (ex.: '"…" — Fulano') e
+  // também no campo author — então só mostramos a linha do autor se ela ainda
+  // NÃO estiver no texto. Também não adicionamos aspas se o texto já tem.
+  const text = card.text.trim();
+  const hasOwnQuotes = /["“”']/.test(text.charAt(0));
+  const display = card.type === 'quote' && !hasOwnQuotes ? `“${text}”` : text;
+  const showAuthor = !!card.author && !text.includes(card.author);
 
   return (
     <Card style={styles.card}>
@@ -46,10 +53,8 @@ export function InspirationHomeCard() {
           <Text style={styles.another}>outra ↻</Text>
         </Pressable>
       </View>
-      <Text style={styles.text}>
-        {card.type === 'quote' ? `“${card.text}”` : card.text}
-      </Text>
-      {card.author ? <Text style={styles.author}>— {card.author}</Text> : null}
+      <Text style={styles.text}>{display}</Text>
+      {showAuthor ? <Text style={styles.author}>— {card.author}</Text> : null}
     </Card>
   );
 }

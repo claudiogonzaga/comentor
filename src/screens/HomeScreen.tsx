@@ -370,21 +370,21 @@ export function HomeScreen() {
                     onPress={() => handleTodoAction(item, 'done')}
                     hitSlop={4}
                   >
-                    <Text style={styles.actDoneText}>Já fiz</Text>
+                    <Text style={styles.actDoneText} numberOfLines={1}>Já fiz</Text>
                   </Pressable>
                   <Pressable
                     style={styles.actBtn}
                     onPress={() => handleTodoAction(item, 'snooze')}
                     hitSlop={4}
                   >
-                    <Text style={styles.actText}>Mais tempo</Text>
+                    <Text style={styles.actText} numberOfLines={1}>Mais tempo</Text>
                   </Pressable>
                   <Pressable
                     style={styles.actBtn}
                     onPress={() => handleTodoAction(item, 'skip')}
                     hitSlop={4}
                   >
-                    <Text style={styles.actText}>Não hoje</Text>
+                    <Text style={styles.actText} numberOfLines={1}>Não hoje</Text>
                   </Pressable>
                 </View>
               )}
@@ -558,12 +558,14 @@ const styles = StyleSheet.create({
   todoStatusSkip: { color: colors.text.tertiary },
   todoActions: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: spacing.xs,
     paddingBottom: spacing.sm,
     paddingLeft: 36,
   },
   actBtn: {
-    paddingHorizontal: spacing.md,
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: spacing.xs,
     paddingVertical: 6,
     borderRadius: radius.pill,
     borderWidth: 1,
