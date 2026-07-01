@@ -8,6 +8,7 @@ import {
   updateNudge,
 } from './database';
 import { NUDGE_CATEGORY, ensureChannel, ensureNotificationCategories, gatedSchedule } from './notifications';
+import { persuasiveBody } from './persuasion';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import type { Nudge } from '../types';
 
@@ -132,7 +133,8 @@ export async function scheduleAllNudges(): Promise<string[]> {
           const id = await gatedSchedule({
             content: {
               title,
-              body: `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,
+              // Argumento persuasivo VARIADO a cada insistência (k).
+              body: `${n.body}\n\n${persuasiveBody(n.title, 'Toque em "Já fiz ✅" quando terminar.', k)}`,
               data: {
                 type: `nudge:${n.type}`,
                 nudgeId: n.id,

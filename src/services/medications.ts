@@ -15,6 +15,7 @@ import {
 } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenMedications } from './spokenNudges';
+import { persuasiveBody } from './persuasion';
 import type { Medication } from '../types';
 
 /**
@@ -73,13 +74,8 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
  * aumentando o tom — do lembrete gentil ao apelo direto — até o usuário marcar.
  */
 function escalatedBody(name: string, actionLine: string, k: number): string {
-  const openers = [
-    `Ainda pendente: "${name}". ${actionLine}`,
-    `Vamos lá, me responde por favor 🙏 — "${name}" ainda não foi marcado. ${actionLine}`,
-    `Ô! Não vou desistir de você: "${name}" continua te esperando. ${actionLine}`,
-    `Última cobrança por agora… "${name}" segue pendente. É rapidinho — ${actionLine.charAt(0).toLowerCase()}${actionLine.slice(1)}`,
-  ];
-  return openers[Math.min(Math.max(1, k) - 1, openers.length - 1)];
+  // Argumentos persuasivos variados (mudam e escalam a cada insistência).
+  return persuasiveBody(name, actionLine, k);
 }
 
 /**
