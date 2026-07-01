@@ -56,6 +56,8 @@ export interface UserConfig {
   name: string | null;
   bedtime: string;
   reminderIntervalMinutes: number;
+  /** Minutos do "Me dê mais tempo" (snooze) dos lembretes. Default 20. */
+  snoozeMinutes: number;
   maxReminders: number;
   tone: Tone;
   geminiModel: GeminiModel;

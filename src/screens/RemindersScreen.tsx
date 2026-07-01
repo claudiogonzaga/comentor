@@ -30,6 +30,7 @@ import {
   updateMedication,
 } from '../services/database';
 import { scheduleAllMedications } from '../services/medications';
+import { scheduleAllNudges } from '../services/nudges';
 import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
 import { ensureSleepHabit } from '../services/coach';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
@@ -337,6 +338,36 @@ export function RemindersScreen() {
           </Text>
         </Card>
 
+        {/* "Me dê mais tempo" — minutos do snooze dos lembretes (default 20). */}
+        <Card style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>“Me dê mais tempo”</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
+            Quando você toca em “Me dê mais tempo” (na notificação ou no painel), a
+            coruja volta a lembrar depois de:
+          </Text>
+          <View style={styles.snoozeRow}>
+            {[10, 15, 20, 30, 45, 60].map((min) => {
+              const on = (config?.snoozeMinutes ?? 20) === min;
+              return (
+                <Pressable
+                  key={min}
+                  onPress={async () => {
+                    await setConfig({ snoozeMinutes: min });
+                    // Atualiza o rótulo do botão da notificação e reaplica.
+                    await scheduleAllMedications();
+                    await scheduleAllNudges();
+                  }}
+                  style={[styles.snoozeChip, on && styles.snoozeChipOn]}
+                >
+                  <Text style={[styles.snoozeChipText, on && styles.snoozeChipTextOn]}>
+                    {min} min
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
+
         {/* Jejum intermitente — hábito pré-definido configurável, abaixo do Sono. */}
         <FastingCard />
 
@@ -566,6 +597,17 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     marginBottom: spacing.xs,
   },
+  snoozeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  snoozeChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  snoozeChipOn: { borderColor: colors.accent.gold, backgroundColor: 'rgba(244,197,83,0.15)' },
+  snoozeChipText: { ...typography.small, color: colors.text.secondary },
+  snoozeChipTextOn: { color: colors.accent.gold },
   sleepIntervalInput: {
     ...typography.bodyMedium,
     color: colors.text.primary,

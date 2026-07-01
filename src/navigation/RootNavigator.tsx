@@ -143,46 +143,49 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
       } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
         nav.navigate('Breathing');
       } else if (type.startsWith('nudge:') || type === 'awareness') {
-        // Verify-behavior nudges (óculos de luz azul) carry the
-        // "Já fiz ✅" / "Lembrar depois" buttons. Resolve the action, then go
-        // Home so the user lands somewhere sensible.
+        // Botões "Já fiz" / "Me dê mais tempo": MARCAM sem abrir o app (a ação
+        // resolve em background e a notificação some). Só o toque no CORPO da
+        // notificação navega para a Home.
+        const snoozeMin = useAppStore.getState().config?.snoozeMinutes ?? 20;
         if (action === NUDGE_DONE_ACTION && data.nudgeType) {
           try {
             await confirmNudge(data.nudgeType);
           } catch {
-            /* still navigate even if it fails */
+            /* best-effort */
           }
+          return;
         } else if (action === NUDGE_SNOOZE_ACTION && data.nudgeType) {
           try {
-            await snoozeNudge(data.nudgeType);
+            await snoozeNudge(data.nudgeType, snoozeMin);
           } catch {
-            /* still navigate even if it fails */
+            /* best-effort */
           }
+          return;
         }
         nav.navigate('Home');
       } else if (type.startsWith('med:')) {
-        // Lembretes de remédio/hábito trazem "Já tomei 💊" / "Lembrar depois".
-        // Resolve a ação e vai para a HOME (lista de TODOs/hábitos), NÃO para a
-        // tela de gerenciar/editar lembretes — tocar em "Já fiz" e cair na tela
-        // de edição era confuso (o usuário tinha que voltar pra ver o item feito).
+        const snoozeMin = useAppStore.getState().config?.snoozeMinutes ?? 20;
         if (action === MED_DONE_ACTION && typeof data.medId === 'number') {
           try {
             await confirmMedication(data.medId);
           } catch {
-            /* still navigate even if it fails */
+            /* best-effort */
           }
+          return;
         } else if (action === MED_SNOOZE_ACTION && typeof data.medId === 'number') {
           try {
-            await snoozeMedication(data.medId, 30);
+            await snoozeMedication(data.medId, snoozeMin);
           } catch {
-            /* still navigate even if it fails */
+            /* best-effort */
           }
+          return;
         } else if (action === MED_SKIP_ACTION && typeof data.medId === 'number') {
           try {
             await skipMedicationToday(data.medId);
           } catch {
-            /* still navigate even if it fails */
+            /* best-effort */
           }
+          return;
         }
         nav.navigate('Home');
       }

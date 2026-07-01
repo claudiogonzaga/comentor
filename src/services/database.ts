@@ -290,6 +290,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN notifications_per_day INTEGER NOT NULL DEFAULT 4`,
     );
   }
+  if (!colNames.includes('snooze_minutes')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN snooze_minutes INTEGER NOT NULL DEFAULT 20`,
+    );
+  }
   if (!colNames.includes('voice_provider')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN voice_provider TEXT NOT NULL DEFAULT 'system'`,
@@ -683,6 +688,7 @@ interface UserConfigRow {
   owl_species: string | null;
   sleep_awareness_enabled: number;
   notifications_per_day: number | null;
+  snooze_minutes: number | null;
   voice_provider: string | null;
   gemini_voice_name: string | null;
   dnd_bypass_enabled: number | null;
@@ -722,6 +728,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   name: r.name,
   bedtime: r.bedtime,
   reminderIntervalMinutes: r.reminder_interval_minutes,
+  snoozeMinutes: r.snooze_minutes ?? 20,
   maxReminders: r.max_reminders,
   tone: r.tone as Tone,
   geminiModel: r.gemini_model as GeminiModel,
@@ -791,6 +798,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     name: 'name',
     bedtime: 'bedtime',
     reminderIntervalMinutes: 'reminder_interval_minutes',
+    snoozeMinutes: 'snooze_minutes',
     maxReminders: 'max_reminders',
     tone: 'tone',
     geminiModel: 'gemini_model',

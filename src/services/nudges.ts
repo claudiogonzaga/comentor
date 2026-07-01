@@ -263,7 +263,7 @@ export async function resetNudgeToday(nudgeType: string): Promise<void> {
  * `minutes` minutos (não marca como feito). A âncora diária e a corrente
  * normal seguem intactas.
  */
-export async function snoozeNudge(nudgeType: string, minutes = 10): Promise<void> {
+export async function snoozeNudge(nudgeType: string, minutes = 20): Promise<void> {
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
 

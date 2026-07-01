@@ -176,12 +176,12 @@ export function HomeScreen() {
         if (action === 'done') await confirmMedication(item.medId);
         else if (action === 'skip') await skipMedicationToday(item.medId);
         else if (action === 'undo') await resetMedicationToday(item.medId);
-        else await snoozeMedication(item.medId, 30);
+        else await snoozeMedication(item.medId, storeConfig?.snoozeMinutes ?? 20);
       } else if (item.kind === 'nudge' && item.nudgeType) {
         if (action === 'done') await confirmNudge(item.nudgeType);
         else if (action === 'skip') await skipNudgeToday(item.nudgeType);
         else if (action === 'undo') await resetNudgeToday(item.nudgeType);
-        else await snoozeNudge(item.nudgeType, 30);
+        else await snoozeNudge(item.nudgeType, storeConfig?.snoozeMinutes ?? 20);
       }
     } catch {
       /* best-effort */

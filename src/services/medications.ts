@@ -476,7 +476,7 @@ export async function resetMedicationToday(medId: number): Promise<void> {
  * `minutes` minutos (não marca como tomado). A âncora diária e a corrente
  * normal seguem intactas.
  */
-export async function snoozeMedication(medId: number, minutes = 30): Promise<void> {
+export async function snoozeMedication(medId: number, minutes = 20): Promise<void> {
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
 

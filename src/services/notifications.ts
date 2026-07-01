@@ -86,6 +86,20 @@ export async function ensurePermissions(): Promise<boolean> {
  * opens the app; RootNavigator routes the action by its identifier.
  */
 export async function ensureNotificationCategories() {
+  // Minutos do "Me dê mais tempo" (configurável; default 20).
+  let snoozeMin = 20;
+  try {
+    const c = await getUserConfig();
+    snoozeMin = Math.max(1, c.snoozeMinutes ?? 20);
+  } catch {
+    /* mantém default */
+  }
+  const snoozeLabel = `Me dê mais tempo (${snoozeMin} min)`;
+  // Ações de hábito/remédio NÃO abrem o app: marcam em background (o app costuma
+  // estar vivo em background). opensAppToForeground:false → tocar "Já fiz" /
+  // "Me dê mais tempo" / "Não hoje" resolve sem trazer a tela pra frente.
+  const bg = { opensAppToForeground: false };
+
   await Notifications.setNotificationCategoryAsync(SLEEP_CATEGORY, [
     {
       identifier: SLEEP_NOW_ACTION,
@@ -95,60 +109,24 @@ export async function ensureNotificationCategories() {
     {
       identifier: SNOOZE_ACTION,
       buttonTitle: 'Adiar 15 min',
-      options: { opensAppToForeground: true },
+      options: { opensAppToForeground: true }, // abre o fluxo de adiar (precisa de UI)
     },
   ]);
-  // Confirmation buttons for "verify" behavior nudges. Both open the app so
-  // RootNavigator can handle them reliably even from a cold start (a killed
-  // app can't run JS for a background action without a registered task), which
-  // matches the proven sleep-reminder buttons.
   await Notifications.setNotificationCategoryAsync(NUDGE_CATEGORY, [
-    {
-      identifier: NUDGE_DONE_ACTION,
-      buttonTitle: 'Já fiz ✅',
-      options: { opensAppToForeground: true },
-    },
-    {
-      identifier: NUDGE_SNOOZE_ACTION,
-      buttonTitle: 'Lembrar depois',
-      options: { opensAppToForeground: true },
-    },
+    { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
+    { identifier: NUDGE_SNOOZE_ACTION, buttonTitle: snoozeLabel, options: bg },
   ]);
   // Medication/supplement reminders: the owl insists until "Já tomei 💊".
   await Notifications.setNotificationCategoryAsync(MED_CATEGORY, [
-    {
-      identifier: MED_DONE_ACTION,
-      buttonTitle: 'Já tomei 💊',
-      options: { opensAppToForeground: true },
-    },
-    {
-      identifier: MED_SNOOZE_ACTION,
-      buttonTitle: 'Me dê mais tempo (30 min)',
-      options: { opensAppToForeground: true },
-    },
-    {
-      identifier: MED_SKIP_ACTION,
-      buttonTitle: 'Não vou tomar',
-      options: { opensAppToForeground: true },
-    },
+    { identifier: MED_DONE_ACTION, buttonTitle: 'Já tomei 💊', options: bg },
+    { identifier: MED_SNOOZE_ACTION, buttonTitle: snoozeLabel, options: bg },
+    { identifier: MED_SKIP_ACTION, buttonTitle: 'Não vou tomar', options: bg },
   ]);
   // Mesmos botões, mas para hábitos de FAZER (não tomar): "Já fiz ✅" sem pílula.
   await Notifications.setNotificationCategoryAsync(MED_DO_CATEGORY, [
-    {
-      identifier: MED_DONE_ACTION,
-      buttonTitle: 'Já fiz ✅',
-      options: { opensAppToForeground: true },
-    },
-    {
-      identifier: MED_SNOOZE_ACTION,
-      buttonTitle: 'Me dê mais tempo (30 min)',
-      options: { opensAppToForeground: true },
-    },
-    {
-      identifier: MED_SKIP_ACTION,
-      buttonTitle: 'Não vou fazer',
-      options: { opensAppToForeground: true },
-    },
+    { identifier: MED_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
+    { identifier: MED_SNOOZE_ACTION, buttonTitle: snoozeLabel, options: bg },
+    { identifier: MED_SKIP_ACTION, buttonTitle: 'Não vou fazer', options: bg },
   ]);
 }
 
