@@ -33,6 +33,8 @@ interface ReadAloudState {
   playSavedUri: (uri: string, title: string, rate: number) => Promise<void>;
   toggle: () => void;
   stop: () => void;
+  /** Cancela SÓ a geração de áudio em andamento (o player não é afetado). */
+  cancelGeneration: () => void;
   seek: (fraction: number) => void;
   /** Volta `seconds` no áudio (ex.: 30s). Não passa de 0. */
   skipBack: (seconds: number) => void;
@@ -178,9 +180,10 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       const t = text.trim();
       if (!t) return;
       const mine = ++token;
-      abortOngoingGeneration(); // mata o loop da tentativa anterior
-      genAbort = new AbortController();
-      const signal = genAbort.signal;
+      abortOngoingGeneration(); // uma geração por vez (a nova substitui a antiga)
+      const myAbort = new AbortController();
+      genAbort = myAbort;
+      const signal = myAbort.signal;
       await stopSpeaking();
       teardownPlayer();
       set({
@@ -200,22 +203,35 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
           geminiVoiceName: opts.geminiVoiceName,
           paused: opts.paused,
           signal,
+          // Progresso segue a GERAÇÃO (myAbort), não o player: tocar outro
+          // arquivo no meio não apaga nem interrompe o andamento.
           onProgress: (done, total) => {
-            if (mine === token) set({ gen: { done, total } });
+            if (genAbort === myAbort) set({ gen: { done, total } });
           },
         });
-        if (mine !== token) {
-          stopReadAloudKeepAlive();
-          return; // parado/superado no meio
-        }
+        if (genAbort === myAbort) genAbort = null;
         set({ gen: null });
-        stopReadAloudKeepAlive(); // para o silêncio antes de tocar o áudio real
+        stopReadAloudKeepAlive();
+        // Se o usuário tocou OUTRA coisa durante a geração, não rouba o player:
+        // o áudio ficou no cache e toca na hora quando ele pedir esse texto.
+        if (mine !== token) return;
         if (uri) await attachAndPlay(uri, opts.rate ?? 1, mine);
         else set({ status: 'idle' });
       } catch (e) {
+        if (genAbort === myAbort) genAbort = null;
         stopReadAloudKeepAlive();
-        if (mine !== token) return;
-        set({ status: 'idle', gen: null, error: formatErr(e) });
+        if ((e as { aborted?: boolean })?.aborted) {
+          // cancelamento explícito — não é erro
+          if (mine === token) set({ status: 'idle', gen: null });
+          else set({ gen: null });
+          return;
+        }
+        set((s2) => ({
+          gen: null,
+          // só derruba o status se ainda é a geração ativa (não o player de outro áudio)
+          ...(mine === token ? { status: 'idle' as const, error: formatErr(e) } : {}),
+          finishedTick: s2.finishedTick,
+        }));
       }
     },
 
@@ -225,7 +241,6 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       const t = text.trim();
       if (!t) return;
       const mine = ++token;
-      abortOngoingGeneration();
       stopSpeaking();
       teardownPlayer();
       set({
@@ -255,7 +270,6 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     // Texto SALVO com áudio pronto → toca direto (instantâneo).
     playSavedUri: async (uri, title, rate) => {
       const mine = ++token;
-      abortOngoingGeneration();
       await stopSpeaking();
       teardownPlayer();
       if (mine !== token) return;
@@ -298,11 +312,22 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
 
     stop: () => {
       token++;
-      abortOngoingGeneration();
       stopSpeaking();
-      stopReadAloudKeepAlive();
+      // keep-alive fica se ainda há GERAÇÃO em andamento (o stop é do player).
+      if (!genAbort) stopReadAloudKeepAlive();
       teardownPlayer();
-      set({ status: 'idle', gen: null, currentTime: 0, duration: 0, title: '' });
+      // NÃO zera `gen`: a geração em segundo plano segue (só o player para).
+      set({ status: 'idle', currentTime: 0, duration: 0, title: '' });
+    },
+
+    // Cancela SÓ a geração (botão "Parar geração" do banner). Player intacto.
+    cancelGeneration: () => {
+      abortOngoingGeneration();
+      stopReadAloudKeepAlive();
+      set((s2) => ({
+        gen: null,
+        ...(s2.status === 'generating' ? { status: 'idle' as const } : {}),
+      }));
     },
 
     // Arrastar a barra: pula no tempo SEM mudar play/pause (arrastar pausado

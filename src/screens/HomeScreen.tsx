@@ -453,7 +453,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     // Desce o conteúdo abaixo da faixa superior do meandro (greca), para a
     // engrenagem/volume não ficarem sobrepostos à borda grega.
-    paddingTop: spacing.lg,
+    paddingTop: spacing.xs,
     paddingBottom: spacing.xxl,
   },
   header: {

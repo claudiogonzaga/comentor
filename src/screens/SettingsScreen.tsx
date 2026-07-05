@@ -273,11 +273,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // Padding maior (= ao dos cards) para o "Voltar" não encostar na faixa
-    // lateral do meandro; marginTop desce abaixo da faixa do topo.
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
-    marginTop: spacing.xl,
   },
   back: {
     ...typography.bodyMedium,

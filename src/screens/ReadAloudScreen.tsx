@@ -678,19 +678,37 @@ export function ReadAloudScreen() {
                 ? `Preparando o áudio… ${gen.done}/${gen.total} · pode sair desta tela; começo a ler quando ficar pronto`
                 : 'Preparando a leitura…'}
             </Text>
-            <Button label="Parar" variant="secondary" onPress={() => useReadAloud.getState().stop()} />
+            <Button
+              label="Parar geração"
+              variant="secondary"
+              onPress={() => useReadAloud.getState().cancelGeneration()}
+            />
           </>
-        ) : showPlayer ? (
-          <PlayerBar />
-        ) : busy ? (
-          // Leitura pela voz do sistema (sem barra)
-          <Button label="Parar" variant="secondary" onPress={() => useReadAloud.getState().stop()} />
         ) : (
-          <Button
-            label="▶  Leia para mim"
-            onPress={handlePlay}
-            disabled={!text.trim() || savingAudio}
-          />
+          <>
+            {/* Geração continua em 2º plano mesmo tocando outro áudio. */}
+            {gen && (
+              <Text style={styles.progress}>
+                Gerando áudio em segundo plano… {gen.done}/{gen.total}
+              </Text>
+            )}
+            {showPlayer ? (
+              <PlayerBar />
+            ) : busy ? (
+              // Leitura pela voz do sistema (sem barra)
+              <Button
+                label="Parar"
+                variant="secondary"
+                onPress={() => useReadAloud.getState().stop()}
+              />
+            ) : (
+              <Button
+                label="▶  Leia para mim"
+                onPress={handlePlay}
+                disabled={!text.trim() || savingAudio}
+              />
+            )}
+          </>
         )}
       </View>
     </ScreenContainer>

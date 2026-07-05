@@ -96,7 +96,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: spacing.md,
-    marginTop: spacing.xl, // desce abaixo da faixa do meandro do topo
   },
   back: { transform: [{ rotate: '180deg' }] },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: spacing.xxl },
