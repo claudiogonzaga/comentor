@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
+import { registerPlayer, claimPlayback } from '../services/playerBus';
 
 // Fila de mídia: toca uma lista de faixas EM SEQUÊNCIA, com áudio em segundo
 // plano (continua com a tela apagada, igual ao "Leia para mim"). Cada item toca
@@ -108,6 +109,7 @@ export const useMediaQueue = create<MediaQueueState>((set, get) => {
     items: [],
     index: 0,
     start: async (items) => {
+      claimPlayback('sequence'); // player único: para o Leia para mim antes
       await ensureBg();
       clearSub();
       release();
@@ -147,4 +149,9 @@ export const useMediaQueue = create<MediaQueueState>((set, get) => {
       set({ status: 'idle', items: [], index: 0 });
     },
   };
+});
+
+// Player único: quando OUTRO player (ex.: Leia para mim) assume, a Sequência para.
+registerPlayer('sequence', () => {
+  useMediaQueue.getState().stop();
 });

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { prepareReadAloudAudio, speakLongText, stopSpeaking } from '../services/voice';
 import { startReadAloudKeepAlive, stopReadAloudKeepAlive } from '../services/readAloudKeepAlive';
+import { registerPlayer, claimPlayback } from '../services/playerBus';
 
 export type ReadAloudStatus = 'idle' | 'generating' | 'playing' | 'paused';
 
@@ -55,6 +56,18 @@ let token = 0;
 // "Preparando o áudio… 0/N" esperando um slot que nunca sobrava.
 let genAbort: AbortController | null = null;
 
+// Player único: quando OUTRO player (ex.: Minha sequência) assume, este para —
+// só o áudio/fala; a GERAÇÃO em segundo plano continua intacta.
+registerPlayer('readaloud', () => {
+  try {
+    void stopSpeaking();
+  } catch {
+    /* ignore */
+  }
+  teardownPlayer();
+  useReadAloud.setState({ status: 'idle', currentTime: 0, duration: 0, title: '' });
+});
+
 function abortOngoingGeneration(): void {
   try {
     genAbort?.abort();
@@ -105,6 +118,7 @@ function formatErr(e: unknown): string {
 
 export const useReadAloud = create<ReadAloudState>((set, get) => {
   const attachAndPlay = async (uri: string, rate: number, mine: number) => {
+    claimPlayback('readaloud'); // para a Sequência (ou outros) antes de tocar
     // Modo de áudio da REPRODUÇÃO: toca em background + duca outras mídias.
     // Setado DIRETO (não pelo ensureBackgroundAudio guardado) para sempre
     // sobrescrever o 'mixWithOthers' que o keep-alive da geração deixou.
@@ -241,6 +255,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       const t = text.trim();
       if (!t) return;
       const mine = ++token;
+      claimPlayback('readaloud');
       stopSpeaking();
       teardownPlayer();
       set({
