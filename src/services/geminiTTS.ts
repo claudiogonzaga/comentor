@@ -177,15 +177,34 @@ export class GeminiTTSError extends Error {
   readonly quotaExceeded: boolean;
   /** true quando o 429 é o limite DIÁRIO (RPD) — não adianta re-tentar hoje. */
   readonly dailyQuota: boolean;
+  /** true quando a geração foi CANCELADA (nova geração/stop) — não é falha. */
+  readonly aborted: boolean;
   constructor(
     message: string,
-    opts: { httpStatus?: number; quotaExceeded?: boolean; dailyQuota?: boolean } = {},
+    opts: {
+      httpStatus?: number;
+      quotaExceeded?: boolean;
+      dailyQuota?: boolean;
+      aborted?: boolean;
+    } = {},
   ) {
     super(message);
     this.name = 'GeminiTTSError';
     this.httpStatus = opts.httpStatus;
     this.quotaExceeded = !!opts.quotaExceeded;
     this.dailyQuota = !!opts.dailyQuota;
+    this.aborted = !!opts.aborted;
+  }
+}
+
+/** Sinal de cancelamento (AbortSignal serve; só lemos `.aborted`). */
+export interface TtsSignal {
+  aborted: boolean;
+}
+
+function throwIfAborted(signal?: TtsSignal): void {
+  if (signal?.aborted) {
+    throw new GeminiTTSError('geração cancelada', { aborted: true });
   }
 }
 
@@ -226,8 +245,11 @@ function retryDelayMs(attempt: number): number {
  */
 const RPM_LIMIT = 9;
 const rpmWindow: number[] = [];
-async function acquireRpmSlot(): Promise<void> {
+async function acquireRpmSlot(signal?: TtsSignal): Promise<void> {
   for (;;) {
+    // Cancelado enquanto esperava um slot? Sai já — gerações canceladas não
+    // podem continuar consumindo o orçamento de RPM das novas (loop "zumbi").
+    throwIfAborted(signal);
     const now = Date.now();
     // Descarta entradas velhas (>60s) E do FUTURO (relógio recuou via NTP/ajuste
     // manual) — sem o segundo caso, um recuo congelaria o trecho por todo o recuo.
@@ -292,7 +314,9 @@ async function fetchPcm(
   voiceName: string,
   apiKey: string,
   attempt = 0,
+  signal?: TtsSignal,
 ): Promise<Uint8Array> {
+  throwIfAborted(signal);
   // Bloqueio diário (RPD) ativo? Nem chama a API — cai direto para o fallback.
   if (dailyBlockUntil && Date.now() < dailyBlockUntil) {
     throw new GeminiTTSError('Gemini TTS: cota diária da API esgotada', {
@@ -303,7 +327,7 @@ async function fetchPcm(
   }
   // Ritma para não estourar os 10 RPM (gargalo real do TTS). Adquire um slot em
   // TODA requisição — inclusive cada retry, que é uma nova requisição.
-  await acquireRpmSlot();
+  await acquireRpmSlot(signal);
   const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text }] }],
@@ -328,7 +352,8 @@ async function fetchPcm(
     // antes de desistir (em vez de cair na voz do sistema na primeira falha).
     if (attempt < MAX_RETRIES) {
       await sleep(retryDelayMs(attempt));
-      return fetchPcm(text, voiceName, apiKey, attempt + 1);
+      throwIfAborted(signal);
+      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
     }
     const msg = err instanceof Error ? err.message : 'erro de rede';
     throw new GeminiTTSError(`Gemini TTS: ${msg}`);
@@ -338,7 +363,8 @@ async function fetchPcm(
   // 5xx ("An internal error has occurred. Please retry") é transitório → re-tenta.
   if (res.status >= 500 && res.status < 600 && attempt < MAX_RETRIES) {
     await sleep(retryDelayMs(attempt));
-    return fetchPcm(text, voiceName, apiKey, attempt + 1);
+    throwIfAborted(signal);
+    return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
   }
 
   if (!res.ok) {
@@ -363,7 +389,8 @@ async function fetchPcm(
               ? Math.min(65000, ra * 1000)
               : Math.min(60000, 12000 * Math.pow(2, attempt));
         await sleep(delay);
-        return fetchPcm(text, voiceName, apiKey, attempt + 1);
+        throwIfAborted(signal);
+        return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
       }
     }
     const msg = j.error?.message ?? `HTTP ${res.status}`;
@@ -380,7 +407,8 @@ async function fetchPcm(
     // 200 mas sem áudio — também é uma falha transitória; re-tenta antes de desistir.
     if (attempt < MAX_RETRIES) {
       await sleep(retryDelayMs(attempt));
-      return fetchPcm(text, voiceName, apiKey, attempt + 1);
+      throwIfAborted(signal);
+      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
     }
     throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
   }
@@ -547,6 +575,7 @@ export async function synthesizeFullSpeechGemini(
   chunks: string[],
   voiceName: string = DEFAULT_GEMINI_VOICE,
   onProgress?: (done: number, total: number) => void,
+  signal?: TtsSignal,
 ): Promise<GeminiTTSResult> {
   const clean = chunks.map((c) => c.trim()).filter(Boolean);
   if (clean.length === 0) throw new GeminiTTSError('texto vazio');
@@ -566,8 +595,9 @@ export async function synthesizeFullSpeechGemini(
   const pcms: Uint8Array[] = [];
   let totalLen = 0;
   for (let i = 0; i < clean.length; i++) {
+    throwIfAborted(signal);
     onProgress?.(i, clean.length);
-    const pcm = normalizePcm(await fetchPcm(clean[i], voiceName, apiKey));
+    const pcm = normalizePcm(await fetchPcm(clean[i], voiceName, apiKey, 0, signal));
     pcms.push(pcm);
     totalLen += pcm.length;
   }

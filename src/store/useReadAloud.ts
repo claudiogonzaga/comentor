@@ -47,6 +47,20 @@ let sub: { remove: () => void } | null = null;
 // Token de geração/reprodução: cada start/stop o incrementa; trabalho de uma
 // geração antiga (que ainda estava gerando) é descartado quando o token muda.
 let token = 0;
+// CANCELAMENTO REAL da geração anterior: sem isto, cada nova tentativa deixava
+// um loop "zumbi" gerando os trechos antigos — os zumbis consumiam os slots de
+// requisições/minuto e a cota da API, e a tentativa nova ficava presa no
+// "Preparando o áudio… 0/N" esperando um slot que nunca sobrava.
+let genAbort: AbortController | null = null;
+
+function abortOngoingGeneration(): void {
+  try {
+    genAbort?.abort();
+  } catch {
+    /* ignore */
+  }
+  genAbort = null;
+}
 
 function teardownPlayer() {
   try {
@@ -164,6 +178,9 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       const t = text.trim();
       if (!t) return;
       const mine = ++token;
+      abortOngoingGeneration(); // mata o loop da tentativa anterior
+      genAbort = new AbortController();
+      const signal = genAbort.signal;
       await stopSpeaking();
       teardownPlayer();
       set({
@@ -182,6 +199,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
         const uri = await prepareReadAloudAudio(t, {
           geminiVoiceName: opts.geminiVoiceName,
           paused: opts.paused,
+          signal,
           onProgress: (done, total) => {
             if (mine === token) set({ gen: { done, total } });
           },
@@ -207,6 +225,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       const t = text.trim();
       if (!t) return;
       const mine = ++token;
+      abortOngoingGeneration();
       stopSpeaking();
       teardownPlayer();
       set({
@@ -236,6 +255,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     // Texto SALVO com áudio pronto → toca direto (instantâneo).
     playSavedUri: async (uri, title, rate) => {
       const mine = ++token;
+      abortOngoingGeneration();
       await stopSpeaking();
       teardownPlayer();
       if (mine !== token) return;
@@ -278,6 +298,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
 
     stop: () => {
       token++;
+      abortOngoingGeneration();
       stopSpeaking();
       stopReadAloudKeepAlive();
       teardownPlayer();

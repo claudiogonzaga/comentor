@@ -522,6 +522,8 @@ export async function prepareReadAloudAudio(
     geminiVoiceName?: string;
     paused?: boolean;
     onProgress?: (done: number, total: number) => void;
+    /** Cancela a geração (nova geração/stop) — evita loops "zumbis". */
+    signal?: { aborted: boolean };
   } = {},
 ): Promise<string | null> {
   const src = opts.paused ? addSentencePauses(text) : text;
@@ -531,6 +533,7 @@ export async function prepareReadAloudAudio(
     chunks,
     opts.geminiVoiceName ?? activeGeminiVoiceName,
     opts.onProgress,
+    opts.signal,
   );
   return uri;
 }
