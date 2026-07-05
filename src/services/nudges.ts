@@ -8,7 +8,7 @@ import {
   updateNudge,
 } from './database';
 import { NUDGE_CATEGORY, ensureChannel, ensureNotificationCategories, gatedSchedule } from './notifications';
-import { persuasiveBody } from './persuasion';
+import { persuasiveBody, escalationBody } from './persuasion';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import type { Nudge } from '../types';
 
@@ -69,10 +69,12 @@ export async function scheduleAllNudges(): Promise<string[]> {
 
   let sound: string = 'default';
   let intervalMin = 10;
+  let userName: string | null = null;
   try {
     const config = await getUserConfig();
     sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
     intervalMin = Math.max(MIN_NUDGE_INTERVAL_MIN, config.reminderIntervalMinutes ?? 10);
+    userName = config.name;
   } catch {
     /* keep defaults */
   }
@@ -133,8 +135,11 @@ export async function scheduleAllNudges(): Promise<string[]> {
           const id = await gatedSchedule({
             content: {
               title,
-              // Argumento persuasivo VARIADO a cada insistência (k).
-              body: `${n.body}\n\n${persuasiveBody(n.title, 'Toque em "Já fiz ✅" quando terminar.', k)}`,
+              // Escalada: 1ª cobrança pergunta com o nome; 2ª pede explicação;
+              // depois, argumentos persuasivos variados.
+              body:
+                escalationBody({ userName, question: `você já fez ${n.title}?`, k }) ||
+                persuasiveBody(n.title, 'Toque em "Já fiz ✅" quando terminar.', k),
               data: {
                 type: `nudge:${n.type}`,
                 nudgeId: n.id,

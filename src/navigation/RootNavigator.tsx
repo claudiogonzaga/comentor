@@ -35,6 +35,7 @@ import {
 } from '../services/notifications';
 import { confirmNudge, snoozeNudge } from '../services/nudges';
 import { confirmMedication, snoozeMedication, skipMedicationToday } from '../services/medications';
+import { askAndHandleVoiceAnswer } from '../services/reminderVoiceAnswer';
 import { saveLastNotification } from '../services/lastNotification';
 import { isHeadphonesConnected } from '../services/spokenNudges';
 import { isQuietNow } from '../services/quietHours';
@@ -265,7 +266,30 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           playOwlCall(cfg?.owlSpecies);
           await new Promise((r) => setTimeout(r, 3000 + 1500));
         }
-        await speak(text, { volume: cfg?.nudgeVolume ?? 1 });
+        // Espera a fala TERMINAR (speak resolve antes do fim; onDone marca o fim).
+        await new Promise<void>((resolve) => {
+          void speak(text, { volume: cfg?.nudgeVolume ?? 1, onDone: resolve, onError: () => resolve() });
+        });
+        // RESPOSTA POR VOZ: para lembretes acionáveis (hábito/remédio), a
+        // Comentora lista as opções (a/b/c) e abre o MICROFONE. A resposta
+        // falada marca feito / adia / pula — sem tocar na tela.
+        const dd = (notification.request.content.data ?? {}) as {
+          medId?: number;
+          nudgeType?: string;
+          verify?: boolean;
+        };
+        const ref =
+          typeof dd.medId === 'number'
+            ? ({ kind: 'med', medId: dd.medId } as const)
+            : dd.nudgeType && dd.verify
+              ? ({ kind: 'nudge', nudgeType: dd.nudgeType } as const)
+              : null;
+        if (ref) {
+          await askAndHandleVoiceAnswer(ref, {
+            snoozeMinutes: cfg?.snoozeMinutes ?? 20,
+            volume: cfg?.nudgeVolume ?? 1,
+          });
+        }
       } catch {
         /* speaking is best-effort */
       }

@@ -39,3 +39,35 @@ export function persuasiveBody(name: string, actionLine: string, k: number): str
   const idx = Math.max(0, k - 1) % LINES.length;
   return `${LINES[idx](name)} ${actionLine}`;
 }
+
+export interface EscalationOpts {
+  /** Nome do usuário (personaliza a 2ª cobrança). */
+  userName?: string | null;
+  /** Pergunta direta sobre a ação, ex.: 'você já tomou as vitaminas?' */
+  question: string;
+  /** k-ésima insistência (1 = primeira cobrança após o aviso inicial). */
+  k: number;
+}
+
+/**
+ * ESCALADA da cobrança (muda o texto a cada repetição):
+ *  aviso inicial (k=0, fora daqui) — direto: "Hora de tomar vitaminas";
+ *  k=1 — pergunta pessoal: "Helena, você já tomou as vitaminas? Marque aqui,
+ *        por favor: já fez ou precisa de mais tempo.";
+ *  k=2 — pede explicação: "Para evitar repetições desnecessárias, me diga o
+ *        que aconteceu com este lembrete. Você já tomou as vitaminas?";
+ *  k≥3 — argumentos persuasivos variados (persuasiveBody).
+ */
+export function escalationBody(opts: EscalationOpts): string {
+  const { userName, question, k } = opts;
+  const q = question.trim();
+  const qCap = q.charAt(0).toUpperCase() + q.slice(1);
+  if (k <= 1) {
+    const prefix = userName?.trim() ? `${userName.trim()}, ` : '';
+    return `${prefix}${prefix ? q : qCap} Marque aqui, por favor: já fez ou precisa de mais tempo.`;
+  }
+  if (k === 2) {
+    return `Para evitar repetições desnecessárias, gostaria que me dissesse o que aconteceu com este lembrete. ${qCap}`;
+  }
+  return '';
+}

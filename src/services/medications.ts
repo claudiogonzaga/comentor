@@ -15,7 +15,7 @@ import {
 } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenMedications } from './spokenNudges';
-import { persuasiveBody } from './persuasion';
+import { persuasiveBody, escalationBody } from './persuasion';
 import type { Medication } from '../types';
 
 /**
@@ -46,7 +46,7 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
   const emoji = med.emoji ?? (ingest ? '💊' : '🔔');
   const detail = med.dosage?.trim();
   if (ingest) {
-    const baseBody = detail ? `Hora de tomar: ${detail}.` : 'Hora de tomar o seu lembrete.';
+    const baseBody = detail ? `Hora de tomar: ${detail}.` : `Hora de tomar ${med.name}.`;
     const actionLine = 'Toque em "Já tomei 💊" quando tomar.';
     return {
       emoji,
@@ -57,7 +57,7 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
       category: MED_CATEGORY,
     };
   }
-  const baseBody = detail ? `Está na hora: ${detail}.` : 'Está na hora deste hábito.';
+  const baseBody = detail ? `Está na hora: ${detail}.` : `Hora de ${med.name}.`;
   const actionLine = 'Toque em "Já fiz ✅" quando concluir.';
   return {
     emoji,
@@ -70,12 +70,20 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
 }
 
 /**
- * Mensagem ESCALADA da k-ésima insistência (k = 1, 2, 3…): a coruja vai
- * aumentando o tom — do lembrete gentil ao apelo direto — até o usuário marcar.
+ * Mensagem ESCALADA da k-ésima insistência: 1ª cobrança pergunta com o NOME do
+ * usuário; 2ª pede uma explicação ("para evitar repetições…"); da 3ª em diante,
+ * argumentos persuasivos variados.
  */
-function escalatedBody(name: string, actionLine: string, k: number): string {
-  // Argumentos persuasivos variados (mudam e escalam a cada insistência).
-  return persuasiveBody(name, actionLine, k);
+function escalatedBody(
+  med: Pick<Medication, 'emoji' | 'name'>,
+  userName: string | null,
+  actionLine: string,
+  k: number,
+): string {
+  const question = isIngest(med) ? `você já tomou ${med.name}?` : `você já fez ${med.name}?`;
+  const scripted = escalationBody({ userName, question, k });
+  if (scripted) return scripted;
+  return persuasiveBody(med.name, actionLine, k);
 }
 
 /**
@@ -153,10 +161,12 @@ export async function scheduleAllMedications(): Promise<string[]> {
 
   let sound: string = 'default';
   let intervalMin = 10;
+  let userName: string | null = null;
   try {
     const config = await getUserConfig();
     sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
     intervalMin = Math.max(MIN_MED_INTERVAL_MIN, config.reminderIntervalMinutes ?? 10);
+    userName = config.name;
   } catch {
     /* keep defaults */
   }
@@ -331,7 +341,8 @@ export async function scheduleAllMedications(): Promise<string[]> {
             content: {
               title,
               // Tom crescente a cada insistência (≥3 vezes).
-              body: `${baseBody}\n\n${escalatedBody(med.name, actionLine, k)}`,
+              // Só a mensagem escalada (sem repetir o "Hora de tomar…").
+              body: escalatedBody(med, userName, actionLine, k),
               data: { type: `med:${med.id}`, medId: med.id, followup: true },
               sound,
               categoryIdentifier: category,
