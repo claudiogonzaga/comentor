@@ -12,25 +12,51 @@ import { getBreathingSound, type BreathingSoundId } from '../constants/breathing
 let active: AudioPlayer | null = null;
 let activeStatusSub: { remove: () => void } | null = null;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
-let backgroundReady = false;
 
 /**
- * Liga a reprodução em SEGUNDO PLANO (continua com a tela apagada/bloqueada). O
- * usuário apaga a tela para dormir — o som da respiração precisa seguir tocando.
- * Igual ao "Leia para mim": `shouldPlayInBackground` mantém o foreground service
- * de mídia do expo-audio segurando o áudio. Idempotente.
+ * Entra no modo de áudio do exercício de respiração.
+ *
+ * `shouldPlayInBackground` mantém o foreground service de mídia do expo-audio
+ * segurando o áudio: o usuário apaga a tela para dormir e a trilha continua.
+ *
+ * `interruptionMode: 'mixWithOthers'` é a diferença que importa aqui. Com
+ * `duckOthers` (o padrão do resto do app) o app PEDE foco de áudio transitório,
+ * e aí o Android abaixa o volume de quem já estava tocando — pior ainda, os
+ * players que não implementam ducking (Music Folder Player, vários apps de
+ * audiolivro) tratam isso como perda de foco e simplesmente PAUSAM. Com
+ * `mixWithOthers` não pedimos foco nenhum: a trilha da respiração toca por cima
+ * do que já estiver tocando, sem mexer no volume do outro app.
+ *
+ * NÃO tem guarda de "já configurado" de propósito: o modo é global do app e as
+ * outras telas (Leia para mim, fila de mídia) sobrescrevem para `duckOthers`,
+ * então precisa ser reaplicado a cada play. É a mesma lição registrada no
+ * comentário do useReadAloud.
  */
-async function ensureBackgroundAudio(): Promise<void> {
-  if (backgroundReady) return;
+async function enterMixingAudioMode(): Promise<void> {
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'mixWithOthers',
+    });
+  } catch {
+    /* se falhar, toca em primeiro plano mesmo */
+  }
+}
+
+/**
+ * Devolve o modo padrão do app ao encerrar o exercício, para que os avisos
+ * falados, os nudges e o "Leia para mim" continuem ducando como antes.
+ */
+async function restoreDefaultAudioMode(): Promise<void> {
   try {
     await setAudioModeAsync({
       playsInSilentMode: true,
       shouldPlayInBackground: true,
       interruptionMode: 'duckOthers',
     });
-    backgroundReady = true;
   } catch {
-    /* se falhar, toca em primeiro plano mesmo */
+    /* nada a fazer — o próximo player seta o modo de novo */
   }
 }
 
@@ -42,8 +68,14 @@ function release(player: AudioPlayer): void {
   }
 }
 
-/** Para e libera o som de respiração que estiver tocando. */
-export function stopBreathingSound(): void {
+/**
+ * Para e libera a trilha ativa. `restoreMode` distingue os dois motivos de
+ * parar: o usuário encerrando o exercício (devolve o modo de áudio padrão) e a
+ * limpeza interna antes de trocar de trilha (não devolve — quem chamou vai
+ * ligar o modo de mistura logo em seguida, e um restore assíncrono em voo
+ * poderia aterrissar depois e desfazê-lo).
+ */
+function stopActiveSound(restoreMode: boolean): void {
   if (previewTimer) {
     clearTimeout(previewTimer);
     previewTimer = null;
@@ -64,7 +96,13 @@ export function stopBreathingSound(): void {
     }
     release(active);
     active = null;
+    if (restoreMode) void restoreDefaultAudioMode();
   }
+}
+
+/** Para e libera o som de respiração que estiver tocando. */
+export function stopBreathingSound(): void {
+  stopActiveSound(true);
 }
 
 /** Resolve a fonte de áudio: asset embutido (number) ou { uri } do usuário. */
@@ -102,8 +140,10 @@ export async function playBreathingSound(opts: {
   const source = resolveSource(opts.id, opts.customUri ?? null);
   if (source == null) return false;
   try {
-    await ensureBackgroundAudio(); // continua tocando com a tela apagada
-    stopBreathingSound();
+    stopActiveSound(false); // troca de trilha: para sem devolver o modo de áudio
+    // Depois do stop, para o restore não correr por cima: trilha por cima do
+    // que o usuário já estiver ouvindo, e seguindo com a tela apagada.
+    await enterMixingAudioMode();
     const player = createAudioPlayer(source);
     active = player;
     player.loop = opts.loop !== false;
