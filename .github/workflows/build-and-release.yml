@@ -112,15 +112,26 @@ jobs:
           # Custo: consome a cota mensal de builds da EAS. Se a cota virar o
           # gargalo, a alternativa segura NÃO é voltar para o --local aqui — é
           # buildar na máquina local e publicar com scripts/release.sh.
+          # stdout e stderr SEPARADOS: com --json o stdout é JSON puro, mas a EAS
+          # escreve progresso e avisos no stderr. Juntar os dois (2>&1) corrompe
+          # o JSON — foi o que quebrou o run 30751524329.
+          set +e
           eas build --platform android --profile preview --non-interactive --wait --json \
-            2>&1 | sed -E 's#eyJqb2Ii[A-Za-z0-9+/=]{100,}#[REDIGIDO]#g' > build.json
-          APK_URL=$(node -p "
-            const b=JSON.parse(require('fs').readFileSync('build.json','utf8'));
-            const r=Array.isArray(b)?b[0]:b;
-            r.artifacts?.applicationArchiveUrl || r.artifacts?.buildUrl || ''
-          ")
+            > build.json 2> build.err
+          STATUS=$?
+          set -e
+          # O stderr é informativo e deve aparecer no log, mas redigido: se algum
+          # dia a EAS voltar a imprimir o blob do job, ele não vaza.
+          sed -E 's#eyJqb2Ii[A-Za-z0-9+/=]{100,}#[REDIGIDO]#g' build.err >&2 || true
+          if [ $STATUS -ne 0 ]; then
+            echo "::error::eas build terminou com codigo $STATUS"
+            exit $STATUS
+          fi
+          APK_URL=$(jq -r '(if type=="array" then .[0] else . end)
+                           | .artifacts.applicationArchiveUrl // .artifacts.buildUrl // ""' build.json)
           if [ -z "$APK_URL" ]; then
-            echo '::error::A EAS nao devolveu URL de artefato — build falhou ou foi cancelado.'
+            echo '::error::A EAS nao devolveu URL de artefato.'
+            head -c 2000 build.json >&2
             exit 1
           fi
           echo "Baixando APK de $APK_URL"
