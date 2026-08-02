@@ -31,9 +31,18 @@ on:
         required: false
         default: 'Nova versão do CoMentor'
 
+# Um push novo cancela o run anterior que ainda estiver de pé, em vez de deixar
+# os dois disputando o mesmo build.
+concurrency:
+  group: build-and-release
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Sem isto, um Gradle travado fica pendurado até o teto de 6 h do GitHub —
+    # foi o que aconteceu em 13 runs seguidos. O build saudável leva ~10 min.
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
@@ -78,6 +87,30 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      # CAUSA RAIZ das falhas anteriores: ':expo-updates:kspReleaseKotlin'
+      # estourava com 'java.lang.OutOfMemoryError: Metaspace' nos defaults do
+      # Gradle. Quando não morria, o daemon travava e o job ficava pendurado
+      # até o teto de 6 h.
+      #
+      # O gradle.properties do GRADLE_USER_HOME tem precedência sobre o do
+      # projeto, então dá para ajustar a memória sem tocar no app.json nem
+      # alterar o fingerprint nativo. O runner tem 16 GB.
+      #
+      # org.gradle.daemon=false: em CI o daemon não é reaproveitado entre runs,
+      # e sem ele some toda a classe de erro "Could not receive a message from
+      # the daemon".
+      - name: Ajustar memória do Gradle e do Kotlin
+        if: steps.ver.outputs.build == 'true'
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=2g"
+            echo "kotlin.daemon.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g"
+            echo "org.gradle.daemon=false"
+          } >> ~/.gradle/gradle.properties
+          echo "--- ~/.gradle/gradle.properties ---"
+          cat ~/.gradle/gradle.properties
+
       # Build LOCAL no próprio runner do GitHub (Ubuntu, ~14 GB livres, Android
       # SDK pré-instalado). NÃO consome a cota mensal de builds na nuvem da EAS
       # — só busca as credenciais remotas (keystore), o que é gratuito. Resolve
@@ -87,8 +120,19 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
+          set -o pipefail
+          # SEGURANÇA — NÃO REMOVER ESTE FILTRO.
+          # Quando o build falha, o 'eas build --local' imprime o job inteiro no
+          # stdout, e dentro dele vão o keystore de assinatura em base64, a senha
+          # do keystore, o alias e a senha da chave. Este repositório é público,
+          # então isso vira credencial exposta na internet — foi o que aconteceu
+          # nos runs de 05/07/2026.
+          # O sed redige o blob antes de ele virar log. Usa-se sed (e não grep)
+          # porque o sed sempre sai com código 0; o 'set -o pipefail' acima
+          # preserva o código de saída real do eas.
           eas build --platform android --profile preview --local --non-interactive \
-            --output "${{ github.workspace }}/comentor-${{ steps.ver.outputs.version }}.apk"
+            --output "${{ github.workspace }}/comentor-${{ steps.ver.outputs.version }}.apk" \
+            2>&1 | sed -E 's#eyJqb2Ii[A-Za-z0-9+/=]{100,}#[BLOB DO JOB REDIGIDO — CONTINHA O KEYSTORE]#g'
 
       - name: Publicar release no GitHub
         if: steps.ver.outputs.build == 'true'
