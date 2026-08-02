@@ -21,6 +21,7 @@ import { deleteAllDownloadedModels } from '../services/modelDownload';
 import { releaseModel } from '../services/localModel';
 import { resetAllUserData } from '../services/database';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
+import { confirmAndRestoreBackup, exportBackup } from '../services/backup';
 import type { Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
@@ -36,6 +37,19 @@ export function SettingsScreen() {
   const [tone, setTone] = useState<Tone>(config?.tone ?? 'firm');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
+
+  const handleExportBackup = async () => {
+    setExportingBackup(true);
+    try {
+      const r = await exportBackup();
+      // r.ok sem erro é o caminho feliz: a folha de compartilhamento já abriu e
+      // o usuário escolheu (ou não) onde salvar — não há o que avisar.
+      if (!r.ok && r.error) Alert.alert('Não deu para exportar', r.error);
+    } finally {
+      setExportingBackup(false);
+    }
+  };
 
   useEffect(() => {
     if (config) {
@@ -247,6 +261,31 @@ export function SettingsScreen() {
           )}
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             Atualizações vêm do GitHub Releases. O download é um APK que substitui o app atual.
+          </Text>
+        </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Backup dos seus dados</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
+            Salva num arquivo só: configurações, hábitos, histórico, conversas,
+            sequências, lembretes, medicamentos, textos do "Leia para mim" e a
+            biblioteca de inspiração. Os áudios que você subiu não entram — só o
+            nome deles.
+          </Text>
+          <Button
+            label={exportingBackup ? 'Preparando…' : 'Exportar backup'}
+            onPress={handleExportBackup}
+            disabled={exportingBackup}
+          />
+          <View style={{ height: spacing.sm }} />
+          <Button
+            label="Restaurar de um arquivo"
+            variant="secondary"
+            onPress={() => confirmAndRestoreBackup(() => refreshConfig())}
+          />
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
+            Restaurar substitui tudo o que está no aparelho. Feche e reabra o app
+            depois, para as telas recarregarem os dados novos.
           </Text>
         </Card>
 

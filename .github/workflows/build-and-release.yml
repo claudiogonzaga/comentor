@@ -69,13 +69,6 @@ jobs:
             echo "::notice::Versao nova (v$VERSION) — iniciando o build."
           fi
 
-      - name: Configurar Java 17 (necessário para o build local)
-        if: steps.ver.outputs.build == 'true'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
       - name: Instalar dependências
         if: steps.ver.outputs.build == 'true'
         run: npm install --no-audit --no-fund
@@ -87,52 +80,52 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # CAUSA RAIZ das falhas anteriores: ':expo-updates:kspReleaseKotlin'
-      # estourava com 'java.lang.OutOfMemoryError: Metaspace' nos defaults do
-      # Gradle. Quando não morria, o daemon travava e o job ficava pendurado
-      # até o teto de 6 h.
-      #
-      # O gradle.properties do GRADLE_USER_HOME tem precedência sobre o do
-      # projeto, então dá para ajustar a memória sem tocar no app.json nem
-      # alterar o fingerprint nativo. O runner tem 16 GB.
-      #
-      # org.gradle.daemon=false: em CI o daemon não é reaproveitado entre runs,
-      # e sem ele some toda a classe de erro "Could not receive a message from
-      # the daemon".
-      - name: Ajustar memória do Gradle e do Kotlin
-        if: steps.ver.outputs.build == 'true'
-        run: |
-          mkdir -p ~/.gradle
-          {
-            echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=2g"
-            echo "kotlin.daemon.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g"
-            echo "org.gradle.daemon=false"
-          } >> ~/.gradle/gradle.properties
-          echo "--- ~/.gradle/gradle.properties ---"
-          cat ~/.gradle/gradle.properties
+      # Histórico, para não se repetir: enquanto este passo usava '--local', o
+      # ':expo-updates:kspReleaseKotlin' estourava com OutOfMemoryError:
+      # Metaspace nos defaults do Gradle, e o daemon travado deixava o job
+      # pendurado até o teto de 6 h — 13 runs cancelados em sequência.
+      # Compilar na nuvem elimina isso junto com o vazamento de credenciais:
+      # não há Gradle, JDK nem keystore no runner.
 
       # Build LOCAL no próprio runner do GitHub (Ubuntu, ~14 GB livres, Android
       # SDK pré-instalado). NÃO consome a cota mensal de builds na nuvem da EAS
       # — só busca as credenciais remotas (keystore), o que é gratuito. Resolve
       # tanto a cota esgotada quanto o disco cheio do Mac local.
-      - name: Buildar o APK localmente no runner
+      - name: Buildar o APK na nuvem da EAS
         if: steps.ver.outputs.build == 'true'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           set -o pipefail
-          # SEGURANÇA — NÃO REMOVER ESTE FILTRO.
-          # Quando o build falha, o 'eas build --local' imprime o job inteiro no
-          # stdout, e dentro dele vão o keystore de assinatura em base64, a senha
-          # do keystore, o alias e a senha da chave. Este repositório é público,
-          # então isso vira credencial exposta na internet — foi o que aconteceu
-          # nos runs de 05/07/2026.
-          # O sed redige o blob antes de ele virar log. Usa-se sed (e não grep)
-          # porque o sed sempre sai com código 0; o 'set -o pipefail' acima
-          # preserva o código de saída real do eas.
-          eas build --platform android --profile preview --local --non-interactive \
-            --output "${{ github.workspace }}/comentor-${{ steps.ver.outputs.version }}.apk" \
-            2>&1 | sed -E 's#eyJqb2Ii[A-Za-z0-9+/=]{100,}#[BLOB DO JOB REDIGIDO — CONTINHA O KEYSTORE]#g'
+          # SEGURANÇA — POR QUE NUVEM E NÃO '--local'.
+          #
+          # Este repositório é PÚBLICO, e os logs do Actions também são. O
+          # 'eas build --local' precisa baixar o keystore de assinatura para o
+          # runner, e quando o build falha ele imprime o job inteiro no stdout —
+          # keystore em base64, senha do keystore, alias e senha da chave. Foi
+          # exatamente isso que expôs as credenciais nos runs de 05/07/2026.
+          #
+          # No build em nuvem as credenciais nunca deixam os servidores da EAS:
+          # o runner só recebe a URL do APK pronto. O vazamento deixa de ser
+          # algo a filtrar e passa a ser impossível por construção.
+          #
+          # Custo: consome a cota mensal de builds da EAS. Se a cota virar o
+          # gargalo, a alternativa segura NÃO é voltar para o --local aqui — é
+          # buildar na máquina local e publicar com scripts/release.sh.
+          eas build --platform android --profile preview --non-interactive --wait --json \
+            2>&1 | sed -E 's#eyJqb2Ii[A-Za-z0-9+/=]{100,}#[REDIGIDO]#g' > build.json
+          APK_URL=$(node -p "
+            const b=JSON.parse(require('fs').readFileSync('build.json','utf8'));
+            const r=Array.isArray(b)?b[0]:b;
+            r.artifacts?.applicationArchiveUrl || r.artifacts?.buildUrl || ''
+          ")
+          if [ -z "$APK_URL" ]; then
+            echo '::error::A EAS nao devolveu URL de artefato — build falhou ou foi cancelado.'
+            exit 1
+          fi
+          echo "Baixando APK de $APK_URL"
+          curl -fsSL "$APK_URL" -o "${{ github.workspace }}/comentor-${{ steps.ver.outputs.version }}.apk"
+          ls -lh "${{ github.workspace }}/comentor-${{ steps.ver.outputs.version }}.apk"
 
       - name: Publicar release no GitHub
         if: steps.ver.outputs.build == 'true'

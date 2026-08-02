@@ -40,6 +40,27 @@ const DB_NAME = 'comentor.db';
 // o que disparava UNIQUE constraint failed no seed do user_config.
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
+/** Nome do arquivo do banco, dentro de `<documentDirectory>/SQLite/`. */
+export const DATABASE_FILE_NAME = DB_NAME;
+
+/**
+ * Fecha a conexão e limpa a Promise cacheada. Usado pelo restaurar backup, que
+ * precisa trocar o arquivo do banco embaixo da aplicação — com a conexão aberta
+ * o SQLite mantém o WAL e o arquivo substituído seria ignorado ou corrompido.
+ * Depois disso, a próxima chamada a getDb() reabre do zero.
+ */
+export async function closeDatabase(): Promise<void> {
+  const pending = dbPromise;
+  dbPromise = null;
+  if (!pending) return;
+  try {
+    const d = await pending;
+    await d.closeAsync();
+  } catch {
+    /* já fechado ou falhou ao abrir — de qualquer forma o cache foi limpo */
+  }
+}
+
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
