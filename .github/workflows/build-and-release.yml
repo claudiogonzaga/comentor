@@ -61,6 +61,14 @@ jobs:
         run: |
           VERSION=$(node -p "require('./app.json').expo.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Texto da release: a mensagem do commit, sem os trailers de autoria.
+          # Sem isto a release sairia com "Nova versão do CoMentor", que é o que
+          # o usuário lê no banner de atualização dentro do app.
+          {
+            echo "notes<<COMENTOR_EOF"
+            git log -1 --pretty=%B | sed '/^Co-Authored-By:/d' | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba'
+            echo "COMENTOR_EOF"
+          } >> "$GITHUB_OUTPUT"
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Release v$VERSION ja existe — nada a buildar. Suba expo.version em app.json para gerar uma nova versao."
@@ -144,5 +152,5 @@ jobs:
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: CoMentor v${{ steps.ver.outputs.version }}
-          body: ${{ inputs.notes || 'Nova versão do CoMentor' }}
+          body: ${{ inputs.notes || steps.ver.outputs.notes }}
           files: comentor-${{ steps.ver.outputs.version }}.apk

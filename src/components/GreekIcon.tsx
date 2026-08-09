@@ -42,7 +42,8 @@ export type GreekIconName =
   | 'brain'
   | 'mute'
   | 'flame'
-  | 'download';
+  | 'download'
+  | 'headphones';
 
 interface Props {
   name: GreekIconName;
@@ -86,6 +87,15 @@ function renderPaths(
   },
 ) {
   switch (name) {
+    case 'headphones':
+      // Fone de ouvido: arco sobre a cabeça + duas conchas.
+      return (
+        <>
+          <Path d="M4 14v-2a8 8 0 0 1 16 0v2" {...common} />
+          <Rect x={3} y={13.5} width={4} height={6.5} rx={1.6} {...common} />
+          <Rect x={17} y={13.5} width={4} height={6.5} rx={1.6} {...common} />
+        </>
+      );
     case 'settings':
       // Engrenagem (cog) — símbolo universal de ajustes.
       return (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
@@ -10,7 +10,11 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
 import { getDashboardData, markSleepDone, rescheduleAllNotifications } from '../services/coach';
 import { useAppStore } from '../store/useAppStore';
-import { setSpokenVolume } from '../services/spokenNudges';
+import {
+  setSpokenVolume,
+  setSpokenHeadphonesOnly,
+  isHeadphonesConnected,
+} from '../services/spokenNudges';
 import { VerticalVolume } from '../components/VerticalVolume';
 import { SequenceCard } from '../components/SequenceCard';
 import { InspirationHomeCard } from '../components/InspirationHomeCard';
@@ -104,6 +108,26 @@ export function HomeScreen() {
     },
     [storeConfig?.silentMode, setConfig],
   );
+
+  // "Só com fone": meio-termo entre o volume normal e o mudo — os avisos
+  // continuam falando, mas só quando houver fone conectado. É a MESMA
+  // configuração de "Sons e Voz"; aqui ela fica à mão, junto do volume.
+  const headphonesOnly = storeConfig?.spokenHeadphonesOnly ?? false;
+  const toggleHeadphonesOnly = useCallback(async () => {
+    const next = !headphonesOnly;
+    try {
+      await setConfig({ spokenHeadphonesOnly: next });
+      setSpokenHeadphonesOnly(next); // espelha pro nativo, que lê no disparo
+      if (next && !isHeadphonesConnected()) {
+        Alert.alert(
+          'Sem fone agora',
+          'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
+        );
+      }
+    } catch (err) {
+      console.warn('toggle headphones-only failed:', err);
+    }
+  }, [headphonesOnly, setConfig]);
 
   const [data, setData] = useState<Dashboard | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -249,6 +273,22 @@ export function HomeScreen() {
                 }}
                 onCommit={commitVolume}
               />
+              {/* Logo abaixo da barra: restringe a voz ao fone, sem precisar
+                  zerar o volume. Ligado = dourado. */}
+              <Pressable
+                onPress={toggleHeadphonesOnly}
+                hitSlop={10}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: headphonesOnly }}
+                accessibilityLabel="Falar somente com fone de ouvido"
+                style={[styles.foneBtn, headphonesOnly && styles.foneBtnOn]}
+              >
+                <GreekIcon
+                  name="headphones"
+                  size={16}
+                  color={headphonesOnly ? colors.text.onGold : colors.text.tertiary}
+                />
+              </Pressable>
             </View>
           </View>
         </View>
@@ -256,6 +296,12 @@ export function HomeScreen() {
           <Text style={styles.silentHint}>
             Silencioso: avisos só em texto (sem piado nem voz). Arraste a barrinha
             para cima para reativar o som.
+          </Text>
+        )}
+        {liveVol > 0 && headphonesOnly && (
+          <Text style={styles.silentHint}>
+            Só com fone: a Comentora só fala se houver fone conectado. Sem fone, o
+            aviso chega como notificação silenciosa. Toque no fone para desligar.
           </Text>
         )}
 
@@ -469,6 +515,17 @@ const styles = StyleSheet.create({
   volWrap: {
     alignItems: 'center',
     gap: 4,
+  },
+  foneBtn: {
+    marginTop: 2,
+    padding: 5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.bg.surfaceStrong,
+  },
+  foneBtnOn: {
+    backgroundColor: colors.accent.gold,
+    borderColor: colors.accent.gold,
   },
   silentHint: {
     ...typography.small,
