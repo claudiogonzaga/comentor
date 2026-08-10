@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Owl } from '../components/Owl';
 import { Button } from '../components/Button';
@@ -113,11 +122,51 @@ export function HomeScreen() {
   // continuam falando, mas só quando houver fone conectado. É a MESMA
   // configuração de "Sons e Voz"; aqui ela fica à mão, junto do volume.
   const headphonesOnly = storeConfig?.spokenHeadphonesOnly ?? false;
+
+  // O aviso do modo fone é PASSAGEIRO: explica a mudança no instante em que ela
+  // acontece e some. Quem indica o estado de forma permanente é o próprio botão
+  // (dourado quando ligado) — deixar o texto fixo só roubava a tela.
+  const [foneHint, setFoneHint] = useState<string | null>(null);
+  const foneHintOpacity = useRef(new Animated.Value(0)).current;
+  const foneHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showFoneHint = useCallback(
+    (msg: string) => {
+      if (foneHintTimer.current) clearTimeout(foneHintTimer.current);
+      setFoneHint(msg);
+      foneHintOpacity.setValue(1);
+      foneHintTimer.current = setTimeout(() => {
+        Animated.timing(foneHintOpacity, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) setFoneHint(null);
+        });
+      }, 4500);
+    },
+    [foneHintOpacity],
+  );
+
+  // Sem isto, alternar e sair da tela deixaria o timer disparando num
+  // componente já desmontado.
+  useEffect(
+    () => () => {
+      if (foneHintTimer.current) clearTimeout(foneHintTimer.current);
+    },
+    [],
+  );
+
   const toggleHeadphonesOnly = useCallback(async () => {
     const next = !headphonesOnly;
     try {
       await setConfig({ spokenHeadphonesOnly: next });
       setSpokenHeadphonesOnly(next); // espelha pro nativo, que lê no disparo
+      showFoneHint(
+        next
+          ? 'Só com fone: os avisos só falam se houver fone conectado.'
+          : 'Som normal: os avisos voltam a falar pelo alto-falante.',
+      );
       if (next && !isHeadphonesConnected()) {
         Alert.alert(
           'Sem fone agora',
@@ -127,7 +176,7 @@ export function HomeScreen() {
     } catch (err) {
       console.warn('toggle headphones-only failed:', err);
     }
-  }, [headphonesOnly, setConfig]);
+  }, [headphonesOnly, setConfig, showFoneHint]);
 
   const [data, setData] = useState<Dashboard | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -298,11 +347,10 @@ export function HomeScreen() {
             para cima para reativar o som.
           </Text>
         )}
-        {liveVol > 0 && headphonesOnly && (
-          <Text style={styles.silentHint}>
-            Só com fone: a Comentora só fala se houver fone conectado. Sem fone, o
-            aviso chega como notificação silenciosa. Toque no fone para desligar.
-          </Text>
+        {foneHint && (
+          <Animated.Text style={[styles.silentHint, { opacity: foneHintOpacity }]}>
+            {foneHint}
+          </Animated.Text>
         )}
 
         <View style={styles.owlWrap}>
