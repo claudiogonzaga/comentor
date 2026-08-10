@@ -453,8 +453,13 @@ export function HomeScreen() {
                 </View>
                 {item.done && (
                   <Pressable onPress={() => handleTodoAction(item, 'undo')} hitSlop={8}>
-                    <Text style={[styles.todoStatus, item.skipped && styles.todoStatusSkip]}>
-                      {item.skipped ? 'Não hoje' : '✓ Feito'} ✕
+                    <Text
+                      style={[
+                        styles.todoStatus,
+                        (item.skipped || item.missed) && styles.todoStatusSkip,
+                      ]}
+                    >
+                      {item.missed ? 'Não feito' : item.skipped ? 'Não hoje' : '✓ Feito'} ✕
                     </Text>
                   </Pressable>
                 )}

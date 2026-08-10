@@ -31,6 +31,11 @@ export interface TodoItem {
   done: boolean;
   /** Marcado como "Não vou fazer hoje" (resolvido, mas não conta como feito). */
   skipped?: boolean;
+  /**
+   * A coruja esgotou as insistências e deu como NÃO FEITO. Diferente de
+   * `skipped`: ali foi decisão sua, aqui foi desistência dela.
+   */
+  missed?: boolean;
 }
 
 function todayISO(): string {
@@ -132,8 +137,13 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
         subtitle: n.body || undefined,
         time: n.scheduleTime,
         icon: iconForEmoji(n.emoji, 'nudge'),
-        done: done.has(n.type) || done.has(`${n.type}:skip`),
+        done:
+          done.has(n.type) || done.has(`${n.type}:skip`) || done.has(`${n.type}:missed`),
         skipped: done.has(`${n.type}:skip`) && !done.has(n.type),
+        missed:
+          done.has(`${n.type}:missed`) &&
+          !done.has(n.type) &&
+          !done.has(`${n.type}:skip`),
       });
     }
   } catch {

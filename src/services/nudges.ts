@@ -26,10 +26,30 @@ import type { Nudge } from '../types';
  */
 const NON_VERIFY_NUDGE_TYPES = new Set<string>();
 
-/** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial. */
-// Alto de propósito: insiste até o usuário resolver (a corrente é cancelada ao
-// marcar Já fiz / Não vou fazer / Me dê mais tempo, e re-armada ao abrir o app).
-const NUDGE_MAX_REPEATS = 20;
+/** Teto de insistências quando a configuração não puder ser lida. */
+const DEFAULT_MAX_INSISTENCES = 5;
+
+/**
+ * Minutos, contados do horário do lembrete, em que cai cada insistência.
+ *
+ * O ESPAÇAMENTO DOBRA: 10, 20, 40, 80, 160 min — ou seja, as insistências caem
+ * aos 10, 30, 70, 150 e 310 minutos. A ideia é cobrar de perto logo depois do
+ * horário, quando ainda dá para fazer, e ir afrouxando em vez de martelar no
+ * mesmo ritmo o dia inteiro.
+ *
+ * `base` é o intervalo configurado em Lembretes (padrão 10, mínimo 5).
+ */
+function insistenceOffsetsMin(base: number, count: number): number[] {
+  const out: number[] = [];
+  let gap = base;
+  let acc = 0;
+  for (let i = 0; i < count; i++) {
+    acc += gap;
+    out.push(acc);
+    gap *= 2;
+  }
+  return out;
+}
 /** Espaçamento mínimo (min) entre as insistências, mesmo se o intervalo for menor. */
 const MIN_NUDGE_INTERVAL_MIN = 5;
 
@@ -69,18 +89,93 @@ export async function cancelAllNudges(): Promise<void> {
  * "Já fiz ✅" / "Lembrar depois". Idempotente — seguro chamar a cada save /
  * ao abrir o app (re-arma a corrente do dia).
  */
+/**
+ * Esgotadas as insistências sem nenhuma resposta, o item é dado como NÃO FEITO
+ * (chave `:missed`, separada de `:skip` — uma é desistência da coruja, a outra é
+ * decisão sua).
+ *
+ * Roda de forma preguiçosa: ao abrir o app e a cada reagendamento, olha o que já
+ * venceu. Não depende de execução em segundo plano no horário exato, que o
+ * Android não garante para nenhum app.
+ */
+export async function finalizeExpiredNudgeChains(): Promise<void> {
+  const today = todayISO();
+  let intervalMin = 10;
+  let maxInsistences = DEFAULT_MAX_INSISTENCES;
+  try {
+    const config = await getUserConfig();
+    intervalMin = Math.max(MIN_NUDGE_INTERVAL_MIN, config.reminderIntervalMinutes ?? 10);
+    maxInsistences = Math.max(
+      0,
+      Math.min(10, config.nudgeMaxInsistences ?? DEFAULT_MAX_INSISTENCES),
+    );
+  } catch {
+    /* keep defaults */
+  }
+  if (maxInsistences <= 0) return; // insistência desligada: nunca desiste sozinha
+
+  const offsets = insistenceOffsetsMin(intervalMin, maxInsistences);
+  const lastOffset = offsets[offsets.length - 1];
+
+  let doneTypes: string[] = [];
+  try {
+    doneTypes = await getDoneNudgeTypes(today);
+  } catch {
+    return; // sem saber o que já foi resolvido, não marca nada
+  }
+
+  let nudges: Nudge[] = [];
+  try {
+    nudges = await listNudges();
+  } catch {
+    return;
+  }
+
+  for (const n of nudges) {
+    if (!n.enabled) continue;
+    if (NON_VERIFY_NUDGE_TYPES.has(n.type)) continue;
+    if (
+      doneTypes.includes(n.type) ||
+      doneTypes.includes(`${n.type}:skip`) ||
+      doneTypes.includes(`${n.type}:missed`)
+    ) {
+      continue;
+    }
+    const parts = n.scheduleTime.split(':').map((s) => parseInt(s, 10));
+    const h = parts[0];
+    const m = parts[1] ?? 0;
+    if (!Number.isFinite(h) || !Number.isFinite(m)) continue;
+    const base = buildTodayAt(Math.min(23, Math.max(0, h)), Math.min(59, Math.max(0, m)));
+    if (Date.now() <= base.getTime() + lastOffset * 60_000) continue;
+    try {
+      await markNudgeDone(`${n.type}:missed`, today);
+    } catch (err) {
+      console.warn(`failed to mark nudge missed ${n.type}:`, err);
+    }
+  }
+}
+
 export async function scheduleAllNudges(): Promise<string[]> {
+  // Antes de reagendar: fecha o que já venceu, para não re-armar corrente de
+  // item que a coruja já desistiu de cobrar hoje.
+  await finalizeExpiredNudgeChains();
+
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
   await cancelAllNudges();
 
   let sound: string = 'default';
   let intervalMin = 10;
+  let maxInsistences = DEFAULT_MAX_INSISTENCES;
   let userName: string | null = null;
   try {
     const config = await getUserConfig();
     sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
     intervalMin = Math.max(MIN_NUDGE_INTERVAL_MIN, config.reminderIntervalMinutes ?? 10);
+    maxInsistences = Math.max(
+      0,
+      Math.min(10, config.nudgeMaxInsistences ?? DEFAULT_MAX_INSISTENCES),
+    );
     userName = config.name;
   } catch {
     /* keep defaults */
@@ -133,10 +228,16 @@ export async function scheduleAllNudges(): Promise<string[]> {
 
     // Corrente de insistências de hoje — só para nudges "verify" ainda não
     // confirmados. A coruja re-notifica até o usuário tocar "Já fiz ✅".
-    if (isVerify && !doneTypes.includes(n.type) && !doneTypes.includes(`${n.type}:skip`)) {
+    if (
+      isVerify &&
+      !doneTypes.includes(n.type) &&
+      !doneTypes.includes(`${n.type}:skip`) &&
+      !doneTypes.includes(`${n.type}:missed`)
+    ) {
       const base = buildTodayAt(safeHour, safeMinute);
-      for (let k = 1; k <= NUDGE_MAX_REPEATS; k++) {
-        const fireAt = new Date(base.getTime() + k * intervalMin * 60_000);
+      const offsets = insistenceOffsetsMin(intervalMin, maxInsistences);
+      for (let k = 1; k <= offsets.length; k++) {
+        const fireAt = new Date(base.getTime() + offsets[k - 1] * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
         try {
           const id = await gatedSchedule({

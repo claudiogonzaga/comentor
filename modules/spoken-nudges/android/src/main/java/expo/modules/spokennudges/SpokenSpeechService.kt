@@ -82,10 +82,19 @@ class SpokenSpeechService : Service() {
 
     // Com fone, o áudio sai como MÍDIA (STREAM_MUSIC). Se a mídia estiver no zero,
     // o aviso ficaria mudo — subimos temporariamente e restauramos ao terminar.
+    // Em chamada/reunião a coruja fica CALADA: não interrompe e não fala por
+    // cima. O lembrete já chegou como notificação — quando a pessoa sair da
+    // chamada, a corrente de insistências volta a cobrar.
+    if (isOnCall()) {
+      Log.i(SpokenScheduler.TAG, "chamada/reuniao em andamento — nao fala")
+      stopEverything()
+      return START_NOT_STICKY
+    }
+
     if (routeToHeadphones) ensureMediaAudible()
 
-    // Pausa o que estiver tocando (exceto chamadas/reuniões) — o player retoma
-    // sozinho quando devolvermos o foco, no stopEverything().
+    // Pausa o que estiver tocando — o player retoma sozinho quando devolvermos
+    // o foco, no stopEverything().
     requestSpeechFocus()
 
     acquireWake()
@@ -250,6 +259,22 @@ class SpokenSpeechService : Service() {
   }
 
   /**
+   * Há chamada ou reunião em andamento? Teams, Meet, Zoom, WhatsApp e o telefone
+   * põem o aparelho em MODE_IN_COMMUNICATION (VoIP) ou MODE_IN_CALL (celular).
+   * Na dúvida (exceção ao ler o modo) devolve false: é melhor falar de mais do
+   * que emudecer a coruja por um erro de leitura.
+   */
+  private fun isOnCall(): Boolean {
+    return try {
+      val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      am.mode == AudioManager.MODE_IN_COMMUNICATION || am.mode == AudioManager.MODE_IN_CALL
+    } catch (e: Exception) {
+      Log.w(SpokenScheduler.TAG, "isOnCall falhou: ${e.message}")
+      false
+    }
+  }
+
+  /**
    * Pede foco de áudio TRANSIENTE antes de falar. Quem estiver tocando (música,
    * vídeo, podcast, audiolivro) PAUSA sozinho, e retoma quando devolvemos o foco
    * no fim da fala — é o mecanismo padrão do Android, não precisa saber quem é o
@@ -267,11 +292,7 @@ class SpokenSpeechService : Service() {
   private fun requestSpeechFocus() {
     try {
       val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-      val mode = am.mode
-      if (mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_IN_CALL) {
-        Log.i(SpokenScheduler.TAG, "chamada/reuniao em andamento — nao pede foco")
-        return
-      }
+      if (isOnCall()) return // defesa: em chamada nem chegamos aqui
       val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         .setAudioAttributes(speechAttrs())
         .build()

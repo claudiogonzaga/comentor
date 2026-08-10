@@ -40,9 +40,13 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Sem isto, um Gradle travado fica pendurado até o teto de 6 h do GitHub —
-    # foi o que aconteceu em 13 runs seguidos. O build saudável leva ~10 min.
-    timeout-minutes: 45
+    # Sem isto, um job travado fica pendurado até o teto de 6 h do GitHub — foi o
+    # que aconteceu em 13 runs seguidos.
+    #
+    # 45 min era apertado demais: o build da v1.99.0 foi morto por este timeout
+    # depois de 45 min INTEIROS NA FILA da EAS, sem nem ter começado a compilar.
+    # O build em si leva ~11 min; a fila do plano gratuito é que é imprevisível.
+    timeout-minutes: 120
     permissions:
       contents: write
     steps:

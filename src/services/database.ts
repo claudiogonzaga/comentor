@@ -476,6 +476,13 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!colNames.includes('nudge_volume')) {
     await database.execAsync(`ALTER TABLE user_config ADD COLUMN nudge_volume REAL NOT NULL DEFAULT 1`);
   }
+  // v1.100: quantas vezes a coruja re-insiste antes de desistir e marcar como
+  // não feito. Antes era fixo em 20, com espaçamento constante.
+  if (!colNames.includes('nudge_max_insistences')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN nudge_max_insistences INTEGER NOT NULL DEFAULT 5`,
+    );
+  }
   // v1.66: Ioga Nidra — tabela de áudios próprios + áudio selecionado na config.
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS yoga_nidra_sounds (
@@ -741,6 +748,7 @@ interface UserConfigRow {
   sex: string | null;
   silent_mode: number | null;
   nudge_volume: number | null;
+  nudge_max_insistences: number | null;
   yoga_nidra_sound_id: number | null;
 }
 
@@ -799,6 +807,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   sex: (r.sex ?? null) as UserConfig['sex'],
   silentMode: (r.silent_mode ?? 0) === 1,
   nudgeVolume: r.nudge_volume ?? 1,
+  nudgeMaxInsistences: r.nudge_max_insistences ?? 5,
   yogaNidraSoundId: r.yoga_nidra_sound_id ?? null,
 });
 
@@ -869,6 +878,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     sex: 'sex',
     silentMode: 'silent_mode',
     nudgeVolume: 'nudge_volume',
+    nudgeMaxInsistences: 'nudge_max_insistences',
     yogaNidraSoundId: 'yoga_nidra_sound_id',
   };
 

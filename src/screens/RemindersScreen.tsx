@@ -134,11 +134,14 @@ export function RemindersScreen() {
   // Sono (veio de Configurações): horário de dormir + intervalo de insistência.
   const [bedtime, setBedtime] = useState(config?.bedtime ?? '23:00');
   const [intervalStr, setIntervalStr] = useState(String(config?.reminderIntervalMinutes ?? 10));
+  // Teto de insistências por TODO não marcado (0 = não insiste).
+  const [maxInsistStr, setMaxInsistStr] = useState(String(config?.nudgeMaxInsistences ?? 5));
 
   useEffect(() => {
     if (config) {
       setBedtime(config.bedtime);
       setIntervalStr(String(config.reminderIntervalMinutes));
+      setMaxInsistStr(String(config.nudgeMaxInsistences ?? 5));
     }
   }, [config]);
 
@@ -162,6 +165,18 @@ export function RemindersScreen() {
       }
     } catch (err) {
       console.warn('saveSleep failed:', err);
+    }
+  };
+
+  /** Salva o teto de insistências e re-arma as correntes com o novo valor. */
+  const saveMaxInsistences = async (raw: string) => {
+    const n = Math.max(0, Math.min(10, parseInt(raw, 10) || 0));
+    setMaxInsistStr(String(n));
+    try {
+      await setConfig({ nudgeMaxInsistences: n });
+      await scheduleAllNudges();
+    } catch (err) {
+      console.warn('saveMaxInsistences failed:', err);
     }
   };
 
@@ -335,6 +350,29 @@ export function RemindersScreen() {
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
             Perto do horário, a coruja lembra e insiste nesse intervalo até você
             confirmar que foi dormir. Salva automaticamente.
+          </Text>
+        </Card>
+
+        {/* Escalada das insistências nos TODOs da lista da Home. */}
+        <Card style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>Insistência nos lembretes</Text>
+          <Text style={[typography.small, { color: colors.text.secondary }]}>
+            Quantas vezes ela cobra (0–10)
+          </Text>
+          <TextInput
+            value={maxInsistStr}
+            onChangeText={(v) => setMaxInsistStr(v.replace(/[^0-9]/g, '').slice(0, 2))}
+            onEndEditing={() => void saveMaxInsistences(maxInsistStr)}
+            style={styles.sleepIntervalInput}
+            keyboardType="number-pad"
+          />
+          <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
+            O espaço entre as cobranças DOBRA a cada vez: {intervalStr || '10'} min,
+            depois {Number(intervalStr || 10) * 2}, {Number(intervalStr || 10) * 4}, e
+            assim por diante. Cobra de perto logo depois do horário e vai afrouxando.
+            {'\n\n'}
+            Esgotadas as cobranças sem você marcar nada, ela desiste e registra o item
+            como não feito. 0 desliga a insistência.
           </Text>
         </Card>
 

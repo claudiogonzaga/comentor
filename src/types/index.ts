@@ -186,6 +186,13 @@ export interface UserConfig {
    * silencioso.
    */
   nudgeVolume: number;
+  /**
+   * Quantas vezes a coruja re-insiste num TODO não marcado antes de desistir.
+   * O espaçamento DOBRA a cada insistência (10, 20, 40, 80, 160 min…), então
+   * subir este número estica a cobrança por muitas horas, não por minutos.
+   * Esgotadas as insistências, o item é marcado como NÃO FEITO.
+   */
+  nudgeMaxInsistences: number;
   /** Áudio de Ioga Nidra selecionado (id em yoga_nidra_sounds), ou null. */
   yogaNidraSoundId: number | null;
 }
