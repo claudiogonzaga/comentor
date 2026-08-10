@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
@@ -43,6 +44,10 @@ class SpokenSpeechService : Service() {
   // Se subimos o volume de MÍDIA (estava 0) para o aviso ser ouvido no fone,
   // guardamos o valor original para restaurar ao terminar.
   private var savedMusicVolume = -1
+  // Foco de áudio transitório: pausa quem estiver tocando enquanto a coruja fala
+  // e devolve o foco no fim, para o player retomar sozinho. null = não pedimos
+  // (caso de chamada/reunião em andamento).
+  private var focusRequest: AudioFocusRequest? = null
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -78,6 +83,10 @@ class SpokenSpeechService : Service() {
     // Com fone, o áudio sai como MÍDIA (STREAM_MUSIC). Se a mídia estiver no zero,
     // o aviso ficaria mudo — subimos temporariamente e restauramos ao terminar.
     if (routeToHeadphones) ensureMediaAudible()
+
+    // Pausa o que estiver tocando (exceto chamadas/reuniões) — o player retoma
+    // sozinho quando devolvermos o foco, no stopEverything().
+    requestSpeechFocus()
 
     acquireWake()
 
@@ -240,6 +249,52 @@ class SpokenSpeechService : Service() {
     }
   }
 
+  /**
+   * Pede foco de áudio TRANSIENTE antes de falar. Quem estiver tocando (música,
+   * vídeo, podcast, audiolivro) PAUSA sozinho, e retoma quando devolvemos o foco
+   * no fim da fala — é o mecanismo padrão do Android, não precisa saber quem é o
+   * outro app.
+   *
+   * EXCEÇÃO — chamadas e reuniões: Teams, Meet, Zoom, WhatsApp e o telefone põem
+   * o aparelho em MODE_IN_COMMUNICATION / MODE_IN_CALL. Nesses modos NÃO pedimos
+   * foco: cortar o áudio de uma reunião no meio de uma frase é pior do que o
+   * aviso que estamos tentando dar. A fala sai por cima, sem pausar ninguém.
+   *
+   * Nota: isto é o oposto do que a respiração faz de propósito (v1.95.0). Lá o
+   * exercício acompanha o que você já ouve; aqui é uma frase curta que precisa
+   * ser entendida, e disputar o áudio com uma música deixaria as duas ininteligíveis.
+   */
+  private fun requestSpeechFocus() {
+    try {
+      val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      val mode = am.mode
+      if (mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_IN_CALL) {
+        Log.i(SpokenScheduler.TAG, "chamada/reuniao em andamento — nao pede foco")
+        return
+      }
+      val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        .setAudioAttributes(speechAttrs())
+        .build()
+      am.requestAudioFocus(req)
+      focusRequest = req
+    } catch (e: Exception) {
+      Log.w(SpokenScheduler.TAG, "requestSpeechFocus falhou: ${e.message}")
+      focusRequest = null
+    }
+  }
+
+  /** Devolve o foco — é isto que faz o player do usuário voltar a tocar. */
+  private fun abandonSpeechFocus() {
+    val req = focusRequest ?: return
+    focusRequest = null
+    try {
+      val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      am.abandonAudioFocusRequest(req)
+    } catch (e: Exception) {
+      Log.w(SpokenScheduler.TAG, "abandonSpeechFocus falhou: ${e.message}")
+    }
+  }
+
   private fun restoreMediaVolume() {
     if (savedMusicVolume < 0) return
     try {
@@ -299,6 +354,9 @@ class SpokenSpeechService : Service() {
   }
 
   private fun stopEverything() {
+    // Antes de restaurar o volume: devolver o foco é o que faz o player do
+    // usuário retomar de onde parou.
+    abandonSpeechFocus()
     restoreMediaVolume()
     preferredDevice = null
     try { player?.release() } catch (_: Exception) {}

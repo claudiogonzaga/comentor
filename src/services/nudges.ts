@@ -13,11 +13,18 @@ import { getOwlSpecies } from '../constants/owlSpecies';
 import type { Nudge } from '../types';
 
 /**
- * Comportamentos que a coruja VERIFICA: ela insiste (re-notifica) até o
- * usuário confirmar com "Já fiz ✅". Os demais nudges (ex.: respiração, que
- * abre uma tela própria) continuam sendo um lembrete diário único.
+ * TODO item da Home = item que a coruja VERIFICA: ela insiste (re-notifica) a
+ * cada `reminderIntervalMinutes` até você marcar "Já fiz" ou "Não vou fazer".
+ *
+ * Antes só 'bluelight' insistia; todo o resto dava um único lembrete diário e
+ * sumia — se você estivesse ocupado no horário marcado, o hábito passava batido
+ * e a coruja nunca mais tocava no assunto. Como todo item da lista da Home é
+ * marcável, todos passam a insistir.
+ *
+ * Este conjunto é a exceção, não a regra: tipos aqui dentro voltam a ser
+ * lembrete único. Vazio de propósito.
  */
-const VERIFY_NUDGE_TYPES = new Set(['bluelight']);
+const NON_VERIFY_NUDGE_TYPES = new Set<string>();
 
 /** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial. */
 // Alto de propósito: insiste até o usuário resolver (a corrente é cancelada ao
@@ -99,7 +106,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
     const safeHour = Math.min(23, Math.max(0, h));
     const safeMinute = Math.min(59, Math.max(0, m));
 
-    const isVerify = VERIFY_NUDGE_TYPES.has(n.type);
+    const isVerify = !NON_VERIFY_NUDGE_TYPES.has(n.type);
     const title = `${n.emoji ?? '🦉'} ${n.title}`;
 
     // Lembrete diário (âncora) — sempre presente, dispara todo dia no horário.
