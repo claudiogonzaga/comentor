@@ -49,12 +49,47 @@ class SpokenSpeechService : Service() {
   // (caso de chamada/reunião em andamento).
   private var focusRequest: AudioFocusRequest? = null
 
+  /** Uma fala pendente. */
+  private data class Utterance(val audioPath: String?, val title: String, val body: String)
+
+  // FILA DE FALAS. O serviço é único: quando dois alarmes caem quase juntos (ex.:
+  // um lembrete e uma inspiração), o segundo Intent chegava no onStartCommand
+  // enquanto o primeiro ainda falava e abria um SEGUNDO player/TTS por cima —
+  // as duas vozes saíam emboladas. Agora a segunda espera a primeira terminar.
+  private val pending = ArrayDeque<Utterance>()
+  @Volatile private var speaking = false
+  /** Teto da fila: acima disso, descarta (a notificação já foi mostrada). */
+  private val maxQueued = 4
+
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     val audioPath = intent?.getStringExtra("audioPath")
     val title = intent?.getStringExtra("title")?.ifEmpty { "Comentora" } ?: "Comentora"
     val body = intent?.getStringExtra("body") ?: ""
+    val u = Utterance(audioPath, title, body)
+
+    // Já falando? Entra na fila em vez de sobrepor.
+    if (speaking) {
+      if (pending.size < maxQueued) {
+        pending.addLast(u)
+        Log.i(SpokenScheduler.TAG, "ja falando — enfileirada (${pending.size} na fila)")
+      } else {
+        Log.w(SpokenScheduler.TAG, "fila cheia — fala descartada (a notificacao ja apareceu)")
+      }
+      return START_NOT_STICKY
+    }
+    speaking = true
+    startUtterance(u)
+    return START_NOT_STICKY
+  }
+
+  /** Executa uma fala. Os portões são reavaliados a cada uma: a situação pode
+   *  ter mudado entre a primeira e a segunda (entrou numa chamada, tirou o fone). */
+  private fun startUtterance(u: Utterance) {
+    val audioPath = u.audioPath
+    val title = u.title
+    val body = u.body
 
     startInForeground(title, body)
 
@@ -68,7 +103,7 @@ class SpokenSpeechService : Service() {
     preferredDevice = device
     if (SpokenStore.getHeadphonesOnly(this) && device == null) {
       Log.d(SpokenScheduler.TAG, "service: 'só com fone' ligado e sem fone — não fala")
-      stopEverything()
+      stopEverything() // condição global: descarta a fila inteira
       return START_NOT_STICKY
     }
     // Horário silencioso: dentro da janela/dia escolhidos, não fala (só a
@@ -76,7 +111,7 @@ class SpokenSpeechService : Service() {
     // com fone conectado: aí a fala sai pelo fone, sem constranger ninguém.
     if (device == null && isQuietNow(this)) {
       Log.d(SpokenScheduler.TAG, "service: horário silencioso (sem fone) — não fala")
-      stopEverything()
+      stopEverything() // condição global: descarta a fila inteira
       return START_NOT_STICKY
     }
 
@@ -87,7 +122,7 @@ class SpokenSpeechService : Service() {
     // chamada, a corrente de insistências volta a cobrar.
     if (isOnCall()) {
       Log.i(SpokenScheduler.TAG, "chamada/reuniao em andamento — nao fala")
-      stopEverything()
+      stopEverything() // condição global: descarta a fila inteira
       return START_NOT_STICKY
     }
 
@@ -142,7 +177,7 @@ class SpokenSpeechService : Service() {
       speakWithSystemTts(body)
     } else {
       Log.w(SpokenScheduler.TAG, "service: sem áudio nem texto")
-      stopEverything()
+      finishCurrent()
     }
   }
 
@@ -165,10 +200,10 @@ class SpokenSpeechService : Service() {
         try { it.setVolume(vol, vol) } catch (_: Exception) {}
         it.start()
       }
-      mp.setOnCompletionListener { stopEverything() }
+      mp.setOnCompletionListener { finishCurrent() }
       mp.setOnErrorListener { _, what, extra ->
         Log.e(SpokenScheduler.TAG, "MediaPlayer error what=$what extra=$extra")
-        stopEverything()
+        finishCurrent()
         true
       }
       mp.prepareAsync()
@@ -176,7 +211,7 @@ class SpokenSpeechService : Service() {
       Log.d(SpokenScheduler.TAG, "service: tocando WAV $path")
     } catch (e: Exception) {
       Log.e(SpokenScheduler.TAG, "service: WAV falhou ${e.message}; tentando voz do sistema")
-      stopEverything()
+      finishCurrent()
     }
   }
 
@@ -186,7 +221,7 @@ class SpokenSpeechService : Service() {
         val t = tts
         if (status != TextToSpeech.SUCCESS || t == null) {
           Log.e(SpokenScheduler.TAG, "TTS init falhou ($status)")
-          stopEverything()
+          finishCurrent()
           return@TextToSpeech
         }
         try {
@@ -198,17 +233,17 @@ class SpokenSpeechService : Service() {
         } catch (_: Exception) {}
         t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
           override fun onStart(utteranceId: String?) {}
-          override fun onDone(utteranceId: String?) { stopEverything() }
+          override fun onDone(utteranceId: String?) { finishCurrent() }
           @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
-          override fun onError(utteranceId: String?) { stopEverything() }
-          override fun onError(utteranceId: String?, errorCode: Int) { stopEverything() }
+          override fun onError(utteranceId: String?) { finishCurrent() }
+          override fun onError(utteranceId: String?, errorCode: Int) { finishCurrent() }
         })
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "nudge")
         val res = t.speak(text, TextToSpeech.QUEUE_FLUSH, params, "nudge")
         if (res == TextToSpeech.ERROR) {
           Log.e(SpokenScheduler.TAG, "TTS speak retornou ERROR")
-          stopEverything()
+          finishCurrent()
         } else {
           Log.d(SpokenScheduler.TAG, "service: falando via sistema (TTS)")
         }
@@ -216,7 +251,7 @@ class SpokenSpeechService : Service() {
       tts = engine
     } catch (e: Exception) {
       Log.e(SpokenScheduler.TAG, "TTS falhou: ${e.message}")
-      stopEverything()
+      finishCurrent()
     }
   }
 
@@ -291,6 +326,7 @@ class SpokenSpeechService : Service() {
    */
   private fun requestSpeechFocus() {
     try {
+      if (focusRequest != null) return // já temos foco (fala emendada da fila)
       val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
       if (isOnCall()) return // defesa: em chamada nem chegamos aqui
       val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -364,6 +400,11 @@ class SpokenSpeechService : Service() {
 
   private fun acquireWake() {
     try {
+      // Solta o anterior antes de criar outro: com a fila, isto é chamado uma vez
+      // por fala, e sem isto o wakelock antigo ficaria pendurado até o timeout.
+      // Recriar também renova o teto de 2 min para a fala que está começando.
+      try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+      wakeLock = null
       val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
       val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "comentor:spoken")
       wl.setReferenceCounted(false)
@@ -374,7 +415,44 @@ class SpokenSpeechService : Service() {
     }
   }
 
+  /**
+   * Terminou UMA fala. Se há outra na fila, solta os recursos dela e emenda a
+   * próxima — sem derrubar o serviço, sem devolver o foco de áudio e sem soltar
+   * o wakelock, para o player do usuário não voltar a tocar por um segundo entre
+   * uma fala e outra. Fila vazia: encerra tudo de verdade.
+   *
+   * Sempre na main thread: alguns callbacks (init do TTS) chegam de outra.
+   */
+  private fun finishCurrent() {
+    android.os.Handler(android.os.Looper.getMainLooper()).post {
+      val next = if (pending.isEmpty()) null else pending.removeFirst()
+      if (next == null) {
+        speaking = false
+        stopEverything()
+        return@post
+      }
+      releaseSpeechResources()
+      Log.i(SpokenScheduler.TAG, "proxima fala da fila (${pending.size} restantes)")
+      // Respiro entre as duas, para não soarem coladas.
+      android.os.Handler(android.os.Looper.getMainLooper())
+        .postDelayed({ startUtterance(next) }, 900)
+    }
+  }
+
+  /** Solta player e TTS da fala que acabou, mantendo serviço, foco e wakelock. */
+  private fun releaseSpeechResources() {
+    try { player?.release() } catch (_: Exception) {}
+    player = null
+    try {
+      tts?.stop()
+      tts?.shutdown()
+    } catch (_: Exception) {}
+    tts = null
+  }
+
   private fun stopEverything() {
+    pending.clear()
+    speaking = false
     // Antes de restaurar o volume: devolver o foco é o que faz o player do
     // usuário retomar de onde parou.
     abandonSpeechFocus()
