@@ -104,7 +104,7 @@ class SpokenSpeechService : Service() {
     if (SpokenStore.getHeadphonesOnly(this) && device == null) {
       Log.d(SpokenScheduler.TAG, "service: 'só com fone' ligado e sem fone — não fala")
       stopEverything() // condição global: descarta a fila inteira
-      return START_NOT_STICKY
+      return
     }
     // Horário silencioso: dentro da janela/dia escolhidos, não fala (só a
     // notificação paralela aparece) — evita voz no trabalho/academia. EXCETO
@@ -112,7 +112,7 @@ class SpokenSpeechService : Service() {
     if (device == null && isQuietNow(this)) {
       Log.d(SpokenScheduler.TAG, "service: horário silencioso (sem fone) — não fala")
       stopEverything() // condição global: descarta a fila inteira
-      return START_NOT_STICKY
+      return
     }
 
     // Com fone, o áudio sai como MÍDIA (STREAM_MUSIC). Se a mídia estiver no zero,
@@ -123,7 +123,7 @@ class SpokenSpeechService : Service() {
     if (isOnCall()) {
       Log.i(SpokenScheduler.TAG, "chamada/reuniao em andamento — nao fala")
       stopEverything() // condição global: descarta a fila inteira
-      return START_NOT_STICKY
+      return
     }
 
     if (routeToHeadphones) ensureMediaAudible()
@@ -138,7 +138,7 @@ class SpokenSpeechService : Service() {
     // então fala o aviso/nudge (coruja → pausa → voz). Não depende mais do piado
     // da notificação (que podia não soar). Se o piado falhar, fala direto.
     playOwlThenVoice(audioPath, body)
-    return START_NOT_STICKY
+    return
   }
 
   /** Toca o canto da coruja (res/raw) e, ao terminar, espera 1,5s e fala. */
