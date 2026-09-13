@@ -56,7 +56,12 @@ jobs:
       - name: Instalar Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22, não 20: o eas-cli atual (via 'eas-version: latest') depende de
+          # @oclif/plugin-autocomplete@3.3.0, que exige Node >= 22. Com Node 20 o
+          # passo "Configurar a EAS CLI" falhava antes de qualquer build (run
+          # 34729084108). O Node 20 também já estava marcado como descontinuado
+          # nos runners do GitHub.
+          node-version: 22
 
       - name: Ler a versão e checar se a release já existe
         id: ver
