@@ -29,6 +29,8 @@ import {
   SLEEP_WHY_ACTION,
   NUDGE_DONE_ACTION,
   NUDGE_SNOOZE_ACTION,
+  NUDGE_NOT_DONE_ACTION,
+  NUDGE_WHY_ACTION,
   MED_DONE_ACTION,
   MED_SNOOZE_ACTION,
   MED_SKIP_ACTION,
@@ -36,8 +38,10 @@ import {
   SAMPLE_NO_ACTION,
   cancelSleepEscalationReminders,
 } from '../services/notifications';
-import { confirmNudge, snoozeNudge } from '../services/nudges';
+import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
 import { handleMorningResponse, MORNING_TYPE } from '../services/morning';
+import { REVIEW_TYPE } from '../services/review';
+import { ReviewScreen } from '../screens/ReviewScreen';
 import { recordSampleAnswer, todayISO as formationToday } from '../services/habitFormation';
 import { addChatMessage, addSnoozeFeedback, bumpTechnique } from '../services/database';
 import { confirmMedication, snoozeMedication, skipMedicationToday } from '../services/medications';
@@ -61,6 +65,7 @@ export type RootStackParamList = {
   Chat: { mode?: 'convince' } | undefined;
   Settings: undefined;
   History: undefined;
+  Review: undefined;
   ChatHistory: undefined;
   Breathing: undefined;
   ReadAloud: { autostart?: boolean } | undefined;
@@ -115,6 +120,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         technique?: string;
         /** Notificação de AMOSTRA de hábito formado ("ainda fazendo?"). */
         sample?: boolean;
+        /** k-ésima cobrança (para os eventos de hábito). */
+        k?: number;
         logDate?: string;
         lateMinutes?: number;
       };
@@ -188,12 +195,28 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           }
           return;
         }
+        const meta = { via: 'notification' as const, k: data.k, technique: data.technique };
         if (action === NUDGE_DONE_ACTION && data.nudgeType) {
           // A técnica que precedeu o "Já fiz" pontua: é assim que a coruja
           // aprende o que convence ESTA pessoa.
           if (data.technique) void bumpTechnique(data.technique, 'converted').catch(() => {});
           try {
-            await confirmNudge(data.nudgeType);
+            await confirmNudge(data.nudgeType, meta);
+          } catch {
+            /* best-effort */
+          }
+          return;
+        } else if (action === NUDGE_NOT_DONE_ACTION && data.nudgeType) {
+          // "Não fiz" é dado válido — melhor que ficar sem resposta.
+          try {
+            await skipNudgeToday(data.nudgeType, meta);
+          } catch {
+            /* best-effort */
+          }
+          return;
+        } else if (action === NUDGE_WHY_ACTION && data.nudgeType) {
+          try {
+            await skipNudgeToday(data.nudgeType, { ...meta, reason: (response.userText ?? '').trim() || null });
           } catch {
             /* best-effort */
           }
@@ -211,7 +234,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         const snoozeMin = useAppStore.getState().config?.snoozeMinutes ?? 20;
         if (action === MED_DONE_ACTION && typeof data.medId === 'number') {
           try {
-            await confirmMedication(data.medId);
+            await confirmMedication(data.medId, { via: 'notification' });
           } catch {
             /* best-effort */
           }
@@ -225,13 +248,15 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           return;
         } else if (action === MED_SKIP_ACTION && typeof data.medId === 'number') {
           try {
-            await skipMedicationToday(data.medId);
+            await skipMedicationToday(data.medId, { via: 'notification' });
           } catch {
             /* best-effort */
           }
           return;
         }
         nav.navigate('Home');
+      } else if (type === REVIEW_TYPE) {
+        nav.navigate('Review');
       }
     };
 
@@ -392,6 +417,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen name="Chat" component={ChatScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
+        <Stack.Screen name="Review" component={ReviewScreen} />
         <Stack.Screen
           name="ChatHistory"
           component={ChatHistoryScreen}

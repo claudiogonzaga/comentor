@@ -12,12 +12,15 @@ import {
 } from './database';
 import {
   NUDGE_CATEGORY,
+  NUDGE_CLOSE_CATEGORY,
   SAMPLE_CATEGORY,
   ensureChannel,
   ensureNotificationCategories,
   gatedSchedule,
 } from './notifications';
 import { getDailyInsistenceLines } from './insistenceLines';
+import { recordHabitEvent, type ConfirmMeta } from './habitEvents';
+import { refreshReviewNotification } from './review';
 import {
   evaluateFormation,
   formedAnnouncement,
@@ -133,6 +136,15 @@ function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
+/** Horário programado do nudge (para o atraso nos eventos); null se não achar. */
+async function scheduleTimeOf(nudgeType: string): Promise<string | null> {
+  try {
+    return (await listNudges()).find((x) => x.type === nudgeType)?.scheduleTime ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Constrói a data de hoje no horário HH:MM (pode estar no passado). */
 function buildTodayAt(hour: number, minute: number): Date {
   const d = new Date();
@@ -230,6 +242,8 @@ export async function finalizeExpiredNudgeChains(): Promise<void> {
     if (Date.now() <= base.getTime() + lastOffset * 1.2 * 60_000) continue;
     try {
       await markNudgeDone(`${n.type}:missed`, today);
+      // Para a análise, isto é SEM RESPOSTA — não "não fez".
+      void recordHabitEvent(n.type, 'no_answer', { via: 'auto' }, n.scheduleTime);
     } catch (err) {
       console.warn(`failed to mark nudge missed ${n.type}:`, err);
     }
@@ -415,6 +429,8 @@ export async function scheduleAllNudges(): Promise<string[]> {
       const base = buildTodayAt(safeHour, safeMinute);
       const offsets = jitteredOffsetsMin(intervalMin, maxInsistences, `${today}|${n.type}`);
       if (offsets.length === 0) continue;
+      // A última batida não convence: só pede o registro (Fiz / Não fiz / Por quê).
+      const lastK = offsets.reduce((acc, o, i) => (o !== null ? i + 1 : acc), 0);
       const lines =
         linesByType.get(n.type) ??
         (
@@ -431,15 +447,19 @@ export async function scheduleAllNudges(): Promise<string[]> {
         if (fireAt.getTime() <= Date.now()) continue;
         const line = lines[k - 1] ?? lines[lines.length - 1];
         if (!line) continue;
-        void bumpTechnique(line.technique, 'shown').catch(() => {});
+        const isLast = k === lastK && lastK > 1;
+        const technique = isLast ? 'fechamento' : line.technique;
+        void bumpTechnique(technique, 'shown').catch(() => {});
         try {
           const id = await gatedSchedule({
             content: {
               title,
-              body: withActionLine(line.text),
-              data: { ...baseData, verify: true, followup: true, technique: line.technique, k },
+              body: isLast
+                ? `Não precisa fazer agora. Só me diz: “${n.title}” — fez ou não fez?`
+                : withActionLine(line.text),
+              data: { ...baseData, verify: true, followup: true, technique, k },
               sound,
-              categoryIdentifier: NUDGE_CATEGORY,
+              categoryIdentifier: isLast ? NUDGE_CLOSE_CATEGORY : NUDGE_CATEGORY,
             },
             trigger: {
               type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -455,21 +475,26 @@ export async function scheduleAllNudges(): Promise<string[]> {
     }
   }
 
+  // "Fechar o dia": só existe se sobrou item sem resposta.
+  await refreshReviewNotification();
+
   return ids;
 }
 
 /**
  * Marca um comportamento como feito hoje, encerra a corrente de insistências
  * de hoje e dispensa as notificações já visíveis daquele nudge. A âncora
- * diária permanece para o dia seguinte.
+ * diária permanece para o dia seguinte. `meta` diz por onde veio a resposta.
  */
-export async function confirmNudge(nudgeType: string): Promise<void> {
+export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
   const today = todayISO();
   try {
     await markNudgeDone(nudgeType, today);
   } catch (err) {
     console.warn(`failed to mark nudge done ${nudgeType}:`, err);
   }
+  void recordHabitEvent(nudgeType, 'done', meta, await scheduleTimeOf(nudgeType));
+  void refreshReviewNotification();
 
   // Cancela as insistências futuras (follow-ups) deste nudge.
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -498,13 +523,15 @@ export async function confirmNudge(nudgeType: string): Promise<void> {
  * "Não vou fazer hoje": encerra a insistência de hoje SEM contar como feito
  * (chave `:skip`, separada para não inflar estatísticas). Volta a lembrar amanhã.
  */
-export async function skipNudgeToday(nudgeType: string): Promise<void> {
+export async function skipNudgeToday(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
   const today = todayISO();
   try {
     await markNudgeDone(`${nudgeType}:skip`, today);
   } catch (err) {
     console.warn(`failed to mark nudge skipped ${nudgeType}:`, err);
   }
+  void recordHabitEvent(nudgeType, 'not_done', meta, await scheduleTimeOf(nudgeType));
+  void refreshReviewNotification();
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
     const data = s.content.data as { nudgeType?: string; followup?: boolean };

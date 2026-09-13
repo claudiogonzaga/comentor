@@ -108,8 +108,8 @@ export async function askAndHandleVoiceAnswer(
 
   try {
     if (answer === 'done') {
-      if (ref.kind === 'med') await confirmMedication(ref.medId);
-      else await confirmNudge(ref.nudgeType);
+      if (ref.kind === 'med') await confirmMedication(ref.medId, { via: 'voice' });
+      else await confirmNudge(ref.nudgeType, { via: 'voice' });
       await speakAsync('Perfeito! Marquei como feito.', vol);
     } else if (answer === 'snooze') {
       const min = Math.max(1, opts.snoozeMinutes);
@@ -117,8 +117,8 @@ export async function askAndHandleVoiceAnswer(
       else await snoozeNudge(ref.nudgeType, min);
       await speakAsync(`Combinado, te lembro de novo em ${min} minutos.`, vol);
     } else {
-      if (ref.kind === 'med') await skipMedicationToday(ref.medId);
-      else await skipNudgeToday(ref.nudgeType);
+      if (ref.kind === 'med') await skipMedicationToday(ref.medId, { via: 'voice' });
+      else await skipNudgeToday(ref.nudgeType, { via: 'voice' });
       await speakAsync('Tudo bem, fica para amanhã.', vol);
     }
   } catch {

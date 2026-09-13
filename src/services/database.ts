@@ -523,6 +523,61 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // v1.103: COLETORA DE SINAIS.
+  // - habit_events: CADA confirmação/negação com metadados (via, k-ésima
+  //   cobrança, técnica, atraso, motivo). nudge_completions segue sendo o
+  //   estado do dia; isto é o histórico do COMO — o que uma IA externa precisa
+  //   para dizer o que funciona com esta pessoa.
+  // - health_daily: um instantâneo de saúde por dia, persistido. O Health
+  //   Connect era só lido ao vivo; sem série histórica não há o que exportar.
+  // - experiments: intervenções com início e fim, para a exportação comparar
+  //   antes e durante.
+  // - user_config.review_time/review_enabled: fechamento do dia.
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS habit_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL,
+      date TEXT NOT NULL,
+      status TEXT NOT NULL,
+      via TEXT,
+      k INTEGER,
+      technique TEXT,
+      latency_min INTEGER,
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_habit_events_date ON habit_events(date, key);
+    CREATE TABLE IF NOT EXISTS health_daily (
+      date TEXT PRIMARY KEY,
+      steps INTEGER,
+      sleep_start TEXT,
+      sleep_end TEXT,
+      sleep_minutes INTEGER,
+      exercise_minutes INTEGER,
+      resting_hr INTEGER,
+      weight_kg REAL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS experiments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      hypothesis TEXT,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  if (!colNames.includes('review_time')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN review_time TEXT NOT NULL DEFAULT '21:30'`,
+    );
+  }
+  if (!colNames.includes('review_enabled')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN review_enabled INTEGER NOT NULL DEFAULT 1`,
+    );
+  }
   // v1.66: Ioga Nidra — tabela de áudios próprios + áudio selecionado na config.
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS yoga_nidra_sounds (
@@ -789,6 +844,8 @@ interface UserConfigRow {
   silent_mode: number | null;
   nudge_volume: number | null;
   nudge_max_insistences: number | null;
+  review_time: string | null;
+  review_enabled: number | null;
   yoga_nidra_sound_id: number | null;
 }
 
@@ -848,6 +905,8 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   silentMode: (r.silent_mode ?? 0) === 1,
   nudgeVolume: r.nudge_volume ?? 1,
   nudgeMaxInsistences: r.nudge_max_insistences ?? 5,
+  reviewTime: r.review_time ?? '21:30',
+  reviewEnabled: (r.review_enabled ?? 1) === 1,
   yogaNidraSoundId: r.yoga_nidra_sound_id ?? null,
 });
 
@@ -919,6 +978,8 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     silentMode: 'silent_mode',
     nudgeVolume: 'nudge_volume',
     nudgeMaxInsistences: 'nudge_max_insistences',
+    reviewTime: 'review_time',
+    reviewEnabled: 'review_enabled',
     yogaNidraSoundId: 'yoga_nidra_sound_id',
   };
 
@@ -1600,6 +1661,237 @@ export async function setHabitState(s: HabitState): Promise<void> {
        updated_at = datetime('now')`,
     [s.nudgeType, s.state, s.formedAt, s.lastSampleAt, s.sampleMisses],
   );
+}
+
+// --------- Coletora de sinais (v1.103): eventos, saúde diária, experimentos ---------
+
+export type HabitEventStatus = 'done' | 'not_done' | 'no_answer';
+
+export interface HabitEvent {
+  id: number;
+  /** Chave do item: o `type` do nudge ou `med:<id>`. */
+  key: string;
+  date: string;
+  status: HabitEventStatus;
+  /** notification | home | voice | review | auto */
+  via: string | null;
+  /** k-ésima cobrança em que a resposta veio (0 = âncora / sem cobrança). */
+  k: number | null;
+  technique: string | null;
+  /** Minutos entre o horário programado e a resposta. */
+  latencyMin: number | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+interface HabitEventRow {
+  id: number;
+  key: string;
+  date: string;
+  status: string;
+  via: string | null;
+  k: number | null;
+  technique: string | null;
+  latency_min: number | null;
+  reason: string | null;
+  created_at: string;
+}
+
+const rowToHabitEvent = (r: HabitEventRow): HabitEvent => ({
+  id: r.id,
+  key: r.key,
+  date: r.date,
+  status: r.status as HabitEventStatus,
+  via: r.via,
+  k: r.k,
+  technique: r.technique,
+  latencyMin: r.latency_min,
+  reason: r.reason,
+  createdAt: r.created_at,
+});
+
+export async function addHabitEvent(e: Omit<HabitEvent, 'id' | 'createdAt'>): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO habit_events (key, date, status, via, k, technique, latency_min, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [e.key, e.date, e.status, e.via, e.k, e.technique, e.latencyMin, e.reason],
+  );
+}
+
+export async function getHabitEventsBetween(fromISO: string, toISO: string): Promise<HabitEvent[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<HabitEventRow>(
+    'SELECT * FROM habit_events WHERE date >= ? AND date <= ? ORDER BY date, id',
+    [fromISO, toISO],
+  );
+  return rows.map(rowToHabitEvent);
+}
+
+export interface CompletionRow {
+  nudgeType: string;
+  date: string;
+  completedAt: string;
+}
+
+/** Todas as marcas de nudge_completions no período (inclui :skip, :missed, med:<id>…). */
+export async function getCompletionsBetween(fromISO: string, toISO: string): Promise<CompletionRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ nudge_type: string; date: string; completed_at: string }>(
+    'SELECT nudge_type, date, completed_at FROM nudge_completions WHERE date >= ? AND date <= ? ORDER BY date',
+    [fromISO, toISO],
+  );
+  return rows.map((r) => ({ nudgeType: r.nudge_type, date: r.date, completedAt: r.completed_at }));
+}
+
+export interface HealthDaily {
+  date: string;
+  steps: number | null;
+  sleepStart: string | null;
+  sleepEnd: string | null;
+  sleepMinutes: number | null;
+  exerciseMinutes: number | null;
+  restingHr: number | null;
+  weightKg: number | null;
+}
+
+interface HealthDailyRow {
+  date: string;
+  steps: number | null;
+  sleep_start: string | null;
+  sleep_end: string | null;
+  sleep_minutes: number | null;
+  exercise_minutes: number | null;
+  resting_hr: number | null;
+  weight_kg: number | null;
+}
+
+/** Grava/atualiza o dia; campos null NÃO apagam valores já gravados (COALESCE). */
+export async function upsertHealthDaily(h: HealthDaily): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO health_daily (date, steps, sleep_start, sleep_end, sleep_minutes, exercise_minutes, resting_hr, weight_kg)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(date) DO UPDATE SET
+       steps = COALESCE(excluded.steps, health_daily.steps),
+       sleep_start = COALESCE(excluded.sleep_start, health_daily.sleep_start),
+       sleep_end = COALESCE(excluded.sleep_end, health_daily.sleep_end),
+       sleep_minutes = COALESCE(excluded.sleep_minutes, health_daily.sleep_minutes),
+       exercise_minutes = COALESCE(excluded.exercise_minutes, health_daily.exercise_minutes),
+       resting_hr = COALESCE(excluded.resting_hr, health_daily.resting_hr),
+       weight_kg = COALESCE(excluded.weight_kg, health_daily.weight_kg),
+       updated_at = datetime('now')`,
+    [h.date, h.steps, h.sleepStart, h.sleepEnd, h.sleepMinutes, h.exerciseMinutes, h.restingHr, h.weightKg],
+  );
+}
+
+export async function getHealthDailyBetween(fromISO: string, toISO: string): Promise<HealthDaily[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<HealthDailyRow>(
+    'SELECT * FROM health_daily WHERE date >= ? AND date <= ? ORDER BY date',
+    [fromISO, toISO],
+  );
+  return rows.map((r) => ({
+    date: r.date,
+    steps: r.steps,
+    sleepStart: r.sleep_start,
+    sleepEnd: r.sleep_end,
+    sleepMinutes: r.sleep_minutes,
+    exerciseMinutes: r.exercise_minutes,
+    restingHr: r.resting_hr,
+    weightKg: r.weight_kg,
+  }));
+}
+
+export interface Experiment {
+  id: number;
+  name: string;
+  hypothesis: string | null;
+  startDate: string;
+  endDate: string | null;
+  createdAt: string;
+}
+
+interface ExperimentRow {
+  id: number;
+  name: string;
+  hypothesis: string | null;
+  start_date: string;
+  end_date: string | null;
+  created_at: string;
+}
+
+const rowToExperiment = (r: ExperimentRow): Experiment => ({
+  id: r.id,
+  name: r.name,
+  hypothesis: r.hypothesis,
+  startDate: r.start_date,
+  endDate: r.end_date,
+  createdAt: r.created_at,
+});
+
+export async function listExperiments(): Promise<Experiment[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<ExperimentRow>('SELECT * FROM experiments ORDER BY start_date DESC, id DESC');
+  return rows.map(rowToExperiment);
+}
+
+export async function addExperiment(name: string, hypothesis: string | null, startDate: string): Promise<number> {
+  const d = await getDb();
+  const r = await d.runAsync('INSERT INTO experiments (name, hypothesis, start_date) VALUES (?, ?, ?)', [
+    name.trim(),
+    hypothesis?.trim() || null,
+    startDate,
+  ]);
+  return r.lastInsertRowId as number;
+}
+
+export async function endExperiment(id: number, endDate: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE experiments SET end_date = ? WHERE id = ?', [endDate, id]);
+}
+
+export async function deleteExperiment(id: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('DELETE FROM experiments WHERE id = ?', [id]);
+}
+
+/** Noites do hábito no período, em ordem cronológica. */
+export async function getLogsBetween(habitId: number, fromISO: string, toISO: string): Promise<DailyLog[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<DailyLogRow>(
+    'SELECT * FROM daily_log WHERE habit_id = ? AND date >= ? AND date <= ? ORDER BY date',
+    [habitId, fromISO, toISO],
+  );
+  return rows.map(rowToLog);
+}
+
+/** Mensagens do chat a partir de uma data (created_at é 'YYYY-MM-DD HH:MM:SS'). */
+export async function getChatSince(habitId: number, fromISO: string): Promise<ChatMessage[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<ChatRow>(
+    'SELECT * FROM chat_messages WHERE habit_id = ? AND created_at >= ? ORDER BY id ASC',
+    [habitId, `${fromISO} 00:00:00`],
+  );
+  return rows.map(rowToChat);
+}
+
+/** Motivos de adiamento / respostas inline a partir de uma data. */
+export async function getSnoozeFeedbackSince(habitId: number, fromISO: string): Promise<SnoozeFeedback[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<SnoozeFeedbackRow>(
+    'SELECT * FROM snooze_feedback WHERE habit_id = ? AND created_at >= ? ORDER BY id ASC',
+    [habitId, `${fromISO} 00:00:00`],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    habitId: r.habit_id,
+    logId: r.log_id,
+    snoozeMinutes: r.snooze_minutes,
+    reason: r.reason,
+    customText: r.custom_text,
+    createdAt: r.created_at,
+  }));
 }
 
 // --------- Medications / supplements (lembretes do usuário) ---------

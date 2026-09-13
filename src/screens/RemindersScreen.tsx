@@ -31,6 +31,7 @@ import {
 } from '../services/database';
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleAllNudges } from '../services/nudges';
+import { refreshReviewNotification } from '../services/review';
 import { isSleepHabitFormed } from '../services/habitFormation';
 import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
 import { ensureSleepHabit } from '../services/coach';
@@ -376,6 +377,47 @@ export function RemindersScreen() {
             Esgotadas as cobranças sem você marcar nada, ela desiste e registra o item
             como não feito. 0 desliga a insistência.
           </Text>
+        </Card>
+
+        {/* Fechamento do dia: a notificação que pede resposta ao que ficou sem registro. */}
+        <Card style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>Fechamento do dia</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                Pedir resposta ao que ficou sem registro
+              </Text>
+              <Text style={[typography.small, { color: colors.text.secondary }]}>
+                À noite, se algum hábito ou remédio ficou sem “fiz / não fiz”, a coruja pede
+                só o registro — um toque por item. Um dia sem resposta não serve para análise.
+              </Text>
+            </View>
+            <Switch
+              value={config?.reviewEnabled ?? true}
+              onValueChange={async (next) => {
+                try {
+                  await setConfig({ reviewEnabled: next });
+                  await refreshReviewNotification();
+                } catch (err) {
+                  console.warn('toggle review failed:', err);
+                }
+              }}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={config?.reviewEnabled ?? true ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+          <TimePickerInput
+            label="Horário do fechamento"
+            value={config?.reviewTime ?? '21:30'}
+            onChange={async (hhmm) => {
+              try {
+                await setConfig({ reviewTime: hhmm });
+                await refreshReviewNotification();
+              } catch (err) {
+                console.warn('set review time failed:', err);
+              }
+            }}
+          />
         </Card>
 
         {/* "Me dê mais tempo" — minutos do snooze dos lembretes (default 20). */}

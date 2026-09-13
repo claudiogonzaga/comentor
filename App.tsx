@@ -25,6 +25,7 @@ import { scheduleAllNudges } from './src/services/nudges';
 import { scheduleSleepAwarenessNotifications } from './src/services/sleepAwareness';
 import { scheduleInspirationNotifications } from './src/services/inspiration';
 import { rearmSpoken } from './src/services/spokenNudges';
+import { captureHealthDaily } from './src/services/health';
 import { colors } from './src/theme';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
@@ -59,6 +60,9 @@ export default function App() {
         // Re-arma os alarmes falados persistidos (sobrevive a reboot via boot
         // receiver nativo; aqui é o belt-and-suspenders no launch do app).
         await rearmSpoken().catch(() => {});
+        // Série histórica de saúde (health_daily) para a exportação. Sem await:
+        // é telemetria, não pode segurar o boot.
+        void captureHealthDaily().catch(() => {});
       }
     })();
   }, []);

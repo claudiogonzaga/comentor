@@ -373,6 +373,145 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
   }
 }
 
+// ————————————— Série histórica (v1.103) —————————————
+
+function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Persiste um instantâneo POR DIA dos últimos `daysBack` dias em health_daily.
+ * Até aqui o Health Connect era só lido ao vivo; sem série histórica não há o
+ * que exportar. Chamado ao abrir o app e no check-in da manhã. Best-effort e
+ * idempotente: campos ausentes não apagam o que já foi gravado (COALESCE).
+ *
+ * Relógio Huawei: os dados só chegam ao Health Connect se o Huawei Health
+ * estiver sincronizando com ele. Sem isso, os dias ficam sem estes campos — e
+ * a exportação diz isso explicitamente, em vez de tratar como zero.
+ */
+export async function captureHealthDaily(daysBack = 3): Promise<void> {
+  const m = getModule();
+  if (!m || !(await ensureInit(m))) return;
+  if (!(await hasHealthPermissions())) return;
+  try {
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - daysBack);
+    const startISO = start.toISOString();
+    const nowISO = now.toISOString();
+
+    const steps = new Map<string, number>();
+    try {
+      const recs = (await readAllRecords(m, 'Steps' as never, startISO, nowISO)) as {
+        startTime: string;
+        count?: number;
+      }[];
+      for (const r of recs) {
+        const k = localDayKey(new Date(r.startTime));
+        steps.set(k, (steps.get(k) ?? 0) + (r.count ?? 0));
+      }
+    } catch {
+      /* sem passos */
+    }
+
+    const exercise = new Map<string, number>();
+    try {
+      const recs = (await readAllRecords(m, 'ExerciseSession' as never, startISO, nowISO)) as {
+        startTime: string;
+        endTime: string;
+      }[];
+      for (const r of recs) {
+        const k = localDayKey(new Date(r.startTime));
+        exercise.set(k, (exercise.get(k) ?? 0) + durationMinutes(r.startTime, r.endTime));
+      }
+    } catch {
+      /* sem exercício */
+    }
+
+    // Sono: a sessão pertence ao dia em que TERMINOU (a noite de ontem conta
+    // para hoje de manhã). Guarda a mais longa do dia.
+    const sleep = new Map<string, { start: string; end: string; minutes: number }>();
+    try {
+      const res = await m.readRecords('SleepSession', {
+        timeRangeFilter: {
+          operator: 'between',
+          startTime: new Date(start.getTime() - 12 * 3600_000).toISOString(),
+          endTime: nowISO,
+        },
+      });
+      for (const r of res.records) {
+        const k = localDayKey(new Date(r.endTime));
+        const minutes = Math.round(durationMinutes(r.startTime, r.endTime));
+        const prev = sleep.get(k);
+        if (!prev || minutes > prev.minutes) sleep.set(k, { start: r.startTime, end: r.endTime, minutes });
+      }
+    } catch {
+      /* sem sono */
+    }
+
+    // FC de repouso ≈ percentil 10 das amostras do dia (robusto a artefatos).
+    const restingHr = new Map<string, number>();
+    try {
+      const recs = (await readAllRecords(m, 'HeartRate' as never, startISO, nowISO)) as {
+        samples?: { time: string; beatsPerMinute: number }[];
+      }[];
+      const byDay = new Map<string, number[]>();
+      for (const rec of recs) {
+        for (const s of rec.samples ?? []) {
+          if (!(s.beatsPerMinute > 25 && s.beatsPerMinute < 220)) continue;
+          const k = localDayKey(new Date(s.time));
+          if (!byDay.has(k)) byDay.set(k, []);
+          byDay.get(k)!.push(s.beatsPerMinute);
+        }
+      }
+      for (const [k, arr] of byDay) {
+        if (arr.length < 20) continue;
+        arr.sort((a, b) => a - b);
+        restingHr.set(k, Math.round(arr[Math.floor(arr.length * 0.1)]));
+      }
+    } catch {
+      /* sem FC */
+    }
+
+    const weight = new Map<string, number>();
+    try {
+      const res = (await m.readRecords('Weight' as never, {
+        timeRangeFilter: { operator: 'between', startTime: startISO, endTime: nowISO },
+      })) as { records: { time?: string; weight?: { inKilograms?: number } }[] };
+      for (const r of res.records) {
+        const kg = r.weight?.inKilograms;
+        if (!r.time || typeof kg !== 'number' || kg <= 0) continue;
+        weight.set(localDayKey(new Date(r.time)), Math.round(kg * 10) / 10);
+      }
+    } catch {
+      /* sem peso */
+    }
+
+    const { upsertHealthDaily } = await import('./database');
+    for (let i = 0; i <= daysBack; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const k = localDayKey(d);
+      const s = sleep.get(k);
+      const row = {
+        date: k,
+        steps: steps.has(k) ? steps.get(k)! : null,
+        sleepStart: s?.start ?? null,
+        sleepEnd: s?.end ?? null,
+        sleepMinutes: s?.minutes ?? null,
+        exerciseMinutes: exercise.has(k) ? Math.round(exercise.get(k)!) : null,
+        restingHr: restingHr.get(k) ?? null,
+        weightKg: weight.get(k) ?? null,
+      };
+      const hasAny = Object.entries(row).some(([key, v]) => key !== 'date' && v !== null);
+      if (hasAny) await upsertHealthDaily(row);
+    }
+  } catch (err) {
+    console.warn('[health] captureHealthDaily falhou:', err);
+  }
+}
+
 /**
  * Diagnóstico (long-press no título "Saúde"): para cada tipo, quantos registros
  * o Health Connect devolveu, se a permissão foi concedida e eventual erro.

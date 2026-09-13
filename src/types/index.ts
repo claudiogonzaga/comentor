@@ -193,6 +193,9 @@ export interface UserConfig {
    * Esgotadas as insistências, o item é marcado como NÃO FEITO.
    */
   nudgeMaxInsistences: number;
+  /** Horário (HH:MM) da notificação "fechar o dia" — pede resposta aos itens sem registro. */
+  reviewTime: string;
+  reviewEnabled: boolean;
   /** Áudio de Ioga Nidra selecionado (id em yoga_nidra_sounds), ou null. */
   yogaNidraSoundId: number | null;
 }

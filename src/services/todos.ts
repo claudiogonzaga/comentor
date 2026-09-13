@@ -209,10 +209,10 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
 export async function toggleTodo(item: TodoItem): Promise<boolean> {
   const next = !item.done;
   if (item.kind === 'nudge' && item.nudgeType) {
-    if (next) await confirmNudge(item.nudgeType);
+    if (next) await confirmNudge(item.nudgeType, { via: 'home' });
     else await unconfirmNudge(item.nudgeType);
   } else if (item.kind === 'med' && item.medId != null) {
-    if (next) await confirmMedication(item.medId);
+    if (next) await confirmMedication(item.medId, { via: 'home' });
     else await unconfirmMedication(item.medId);
   }
   return next;

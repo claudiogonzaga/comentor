@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
-import { getActiveHabits, getRecentLogs, getStreak } from '../services/database';
+import {
+  addExperiment,
+  deleteExperiment,
+  endExperiment,
+  getActiveHabits,
+  getRecentLogs,
+  getStreak,
+  listExperiments,
+  type Experiment,
+} from '../services/database';
+import { copyMarkdownToClipboard, shareExport, type ExportOptions } from '../services/exportData';
 import type { DailyLog } from '../types';
 
 interface Stats {
@@ -22,6 +32,62 @@ export function HistoryScreen() {
   const [stats, setStats] = useState<Stats>({ total: 0, completed: 0, avgRemindersBeforeSleep: 0, weekly: [] });
   const [streak, setStreak] = useState({ current: 0, best: 0 });
   const [loading, setLoading] = useState(true);
+
+  // Exportar para a IA
+  const [exportOpts, setExportOpts] = useState<ExportOptions>({ days: 30, includeChat: true, includeInterview: true });
+  const [exporting, setExporting] = useState(false);
+  const runExport = async (kind: 'copy' | 'md' | 'csv' | 'json') => {
+    setExporting(true);
+    try {
+      if (kind === 'copy') {
+        const r = await copyMarkdownToClipboard(exportOpts);
+        Alert.alert(
+          r.ok ? 'Copiado' : 'Não deu para copiar',
+          r.ok
+            ? `${Math.round(r.chars / 1000)} mil caracteres no clipboard. Cole no chat da IA — o texto já começa com as instruções de análise.`
+            : r.error ?? '',
+        );
+      } else {
+        const r = await shareExport(kind, exportOpts);
+        if (!r.ok && r.error) Alert.alert('Não deu para exportar', r.error);
+      }
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Experimentos (intervenções)
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [expName, setExpName] = useState('');
+  const [expHyp, setExpHyp] = useState('');
+  const reloadExperiments = useCallback(async () => {
+    setExperiments(await listExperiments().catch(() => []));
+  }, []);
+  useEffect(() => {
+    void reloadExperiments();
+  }, [reloadExperiments]);
+  const startExperiment = async () => {
+    if (!expName.trim()) return;
+    await addExperiment(expName, expHyp, format(new Date(), 'yyyy-MM-dd'));
+    setExpName('');
+    setExpHyp('');
+    await reloadExperiments();
+  };
+  const finishExperiment = (e: Experiment) => {
+    Alert.alert('Encerrar experimento', `Encerrar “${e.name}” hoje? Os dias seguintes deixam de contar como “durante”.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Encerrar',
+        onPress: () => void endExperiment(e.id, format(new Date(), 'yyyy-MM-dd')).then(reloadExperiments),
+      },
+    ]);
+  };
+  const removeExperiment = (e: Experiment) => {
+    Alert.alert('Apagar experimento', `Apagar “${e.name}”? Os dados dos dias continuam; só a marcação some.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Apagar', style: 'destructive', onPress: () => void deleteExperiment(e.id).then(reloadExperiments) },
+    ]);
+  };
 
   useEffect(() => {
     (async () => {
@@ -83,6 +149,103 @@ export function HistoryScreen() {
             <Text style={styles.statLabel}>30 dias</Text>
           </Card>
         </View>
+
+        {/* EXPORTAR PARA A IA — o que fecha o loop pessoa + IA externa. */}
+        <Card style={styles.card}>
+          <Text style={[typography.label, styles.sectionLabel]}>EXPORTAR PARA A IA</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
+            Tudo o que a coruja coletou, com as instruções de análise no começo. Copie e cole no
+            chat da sua IA.
+          </Text>
+          <View style={styles.chips}>
+            {([14, 30, 90] as const).map((d) => (
+              <Pressable
+                key={d}
+                style={[styles.chip, exportOpts.days === d && styles.chipOn]}
+                onPress={() => setExportOpts((o) => ({ ...o, days: d }))}
+              >
+                <Text style={[styles.chipText, exportOpts.days === d && styles.chipTextOn]}>{d} dias</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={[typography.small, { color: colors.text.primary, flex: 1 }]}>Incluir conversas com a coruja</Text>
+            <Switch
+              value={exportOpts.includeChat}
+              onValueChange={(v) => setExportOpts((o) => ({ ...o, includeChat: v }))}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={exportOpts.includeChat ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={[typography.small, { color: colors.text.primary, flex: 1 }]}>Incluir entrevista (causas e gatilhos)</Text>
+            <Switch
+              value={exportOpts.includeInterview}
+              onValueChange={(v) => setExportOpts((o) => ({ ...o, includeInterview: v }))}
+              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+              thumbColor={exportOpts.includeInterview ? colors.text.onGold : colors.text.tertiary}
+            />
+          </View>
+          <Pressable style={[styles.primaryBtn, exporting && { opacity: 0.6 }]} disabled={exporting} onPress={() => void runExport('copy')}>
+            <Text style={styles.primaryBtnText}>Copiar para colar na IA</Text>
+          </Pressable>
+          <View style={styles.chips}>
+            <Pressable style={styles.chip} disabled={exporting} onPress={() => void runExport('md')}>
+              <Text style={styles.chipText}>Arquivo .md</Text>
+            </Pressable>
+            <Pressable style={styles.chip} disabled={exporting} onPress={() => void runExport('csv')}>
+              <Text style={styles.chipText}>Planilha .csv</Text>
+            </Pressable>
+            <Pressable style={styles.chip} disabled={exporting} onPress={() => void runExport('json')}>
+              <Text style={styles.chipText}>Dados .json</Text>
+            </Pressable>
+          </View>
+        </Card>
+
+        {/* EXPERIMENTOS — a intervenção proposta pela IA vira um objeto com início e fim. */}
+        <Card style={styles.card}>
+          <Text style={[typography.label, styles.sectionLabel]}>EXPERIMENTOS</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
+            Uma intervenção que você vai testar. A exportação compara o antes e o durante.
+          </Text>
+          {experiments.map((e) => (
+            <View key={e.id} style={styles.expRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>{e.name}</Text>
+                <Text style={[typography.small, { color: colors.text.tertiary }]}>
+                  {e.startDate} → {e.endDate ?? 'em andamento'}
+                  {e.hypothesis ? ` · ${e.hypothesis}` : ''}
+                </Text>
+              </View>
+              {!e.endDate ? (
+                <Pressable onPress={() => finishExperiment(e)} hitSlop={8}>
+                  <Text style={[typography.small, { color: colors.accent.gold }]}>Encerrar</Text>
+                </Pressable>
+              ) : (
+                <Pressable onPress={() => removeExperiment(e)} hitSlop={8}>
+                  <Text style={[typography.small, { color: colors.text.tertiary }]}>Apagar</Text>
+                </Pressable>
+              )}
+            </View>
+          ))}
+          <TextInput
+            value={expName}
+            onChangeText={setExpName}
+            placeholder="Nome (ex.: cafeína só até 14h)"
+            placeholderTextColor={colors.text.tertiary}
+            style={styles.input}
+          />
+          <TextInput
+            value={expHyp}
+            onChangeText={setExpHyp}
+            placeholder="Hipótese (opcional): o que deve mudar?"
+            placeholderTextColor={colors.text.tertiary}
+            style={styles.input}
+          />
+          <Pressable style={[styles.primaryBtn, !expName.trim() && { opacity: 0.5 }]} disabled={!expName.trim()} onPress={() => void startExperiment()}>
+            <Text style={styles.primaryBtnText}>Começar hoje</Text>
+          </Pressable>
+        </Card>
 
         <Card style={styles.card}>
           <Text style={[typography.label, styles.sectionLabel]}>ÚLTIMOS 7 DIAS</Text>
@@ -235,5 +398,43 @@ const styles = StyleSheet.create({
   logRight: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.bg.surfaceStrong,
+  },
+  chipOn: { backgroundColor: colors.accent.gold, borderColor: colors.accent.gold },
+  chipText: { ...typography.small, color: colors.text.primary },
+  chipTextOn: { color: colors.text.onGold },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
+  primaryBtn: {
+    backgroundColor: colors.accent.gold,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    marginVertical: spacing.sm,
+  },
+  primaryBtnText: { ...typography.bodyMedium, color: colors.text.onGold },
+  expRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  input: {
+    ...typography.body,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.bg.surfaceStrong,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginTop: spacing.xs,
   },
 });

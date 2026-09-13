@@ -64,6 +64,16 @@ export const SAMPLE_NO_ACTION = 'sample-no';
 export const NUDGE_CATEGORY = 'comentor-nudge-actions';
 export const NUDGE_DONE_ACTION = 'nudge-done';
 export const NUDGE_SNOOZE_ACTION = 'nudge-snooze';
+/** "Não fiz": registra a negativa (dado válido) em vez de deixar sem resposta. */
+export const NUDGE_NOT_DONE_ACTION = 'nudge-notdone';
+/** "Por quê?": campo de texto — não fez, e o motivo, direto na notificação. */
+export const NUDGE_WHY_ACTION = 'nudge-why';
+/**
+ * ÚLTIMA cobrança da corrente: muda de objetivo. Deixa de tentar convencer e
+ * pede só o registro — Fiz / Não fiz / Por quê. Um dia sem resposta é falha de
+ * coleta; esta categoria existe para fechar esse buraco.
+ */
+export const NUDGE_CLOSE_CATEGORY = 'comentor-nudge-close-actions';
 
 /**
  * Category for medication/supplement reminders. The owl keeps insisting until
@@ -156,6 +166,17 @@ export async function ensureNotificationCategories() {
   await Notifications.setNotificationCategoryAsync(NUDGE_CATEGORY, [
     { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
     { identifier: NUDGE_SNOOZE_ACTION, buttonTitle: snoozeLabel, options: bg },
+    { identifier: NUDGE_NOT_DONE_ACTION, buttonTitle: 'Não fiz', options: bg },
+  ]);
+  await Notifications.setNotificationCategoryAsync(NUDGE_CLOSE_CATEGORY, [
+    { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Fiz ✅', options: bg },
+    { identifier: NUDGE_NOT_DONE_ACTION, buttonTitle: 'Não fiz', options: bg },
+    {
+      identifier: NUDGE_WHY_ACTION,
+      buttonTitle: 'Não fiz, porque…',
+      textInput: { submitButtonTitle: 'Enviar', placeholder: 'O que aconteceu?' },
+      options: bg,
+    },
   ]);
   // Medication/supplement reminders: the owl insists until "Já tomei 💊".
   await Notifications.setNotificationCategoryAsync(MED_CATEGORY, [

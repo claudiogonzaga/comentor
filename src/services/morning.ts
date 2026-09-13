@@ -22,6 +22,7 @@ import {
 } from './notifications';
 import { getLogsWithMorningFeedback, recordMorningCheckin } from './database';
 import { minutesLateOf } from './habitFormation';
+import { captureHealthDaily } from './health';
 import type { DailyLog } from '../types';
 
 export const MORNING_TYPE = 'morning-checkin';
@@ -134,6 +135,8 @@ export async function handleMorningResponse(
   } catch (err) {
     console.warn('[morning] record failed:', err);
   }
+  // Bom momento para o instantâneo de saúde: a noite já foi sincronizada.
+  void captureHealthDaily().catch(() => {});
 }
 
 /** Data ISO (yyyy-MM-dd) de hoje — para os chamadores que precisam da noite "de hoje". */

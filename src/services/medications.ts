@@ -15,6 +15,8 @@ import {
 } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenMedications } from './spokenNudges';
+import { recordHabitEvent, type ConfirmMeta } from './habitEvents';
+import { refreshReviewNotification } from './review';
 import { persuasiveBody, escalationBody } from './persuasion';
 import type { Medication } from '../types';
 
@@ -421,13 +423,24 @@ async function clearMedNotifications(medId: number): Promise<void> {
   }
 }
 
-export async function confirmMedication(medId: number): Promise<void> {
+/** Horário programado do remédio (para o atraso nos eventos). */
+async function medTimeOf(medId: number): Promise<string | null> {
+  try {
+    return (await listMedications()).find((m) => m.id === medId)?.time ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function confirmMedication(medId: number, meta: ConfirmMeta = {}): Promise<void> {
   const today = todayISO();
   try {
     await markNudgeDone(completionKey(medId), today);
   } catch (err) {
     console.warn(`failed to mark medication done ${medId}:`, err);
   }
+  void recordHabitEvent(completionKey(medId), 'done', meta, await medTimeOf(medId));
+  void refreshReviewNotification();
   await clearMedNotifications(medId);
 }
 
@@ -436,13 +449,15 @@ export async function confirmMedication(medId: number): Promise<void> {
  * Grava skipKey (separado de "feito" p/ estatísticas honestas), cancela os
  * follow-ups e dispensa a notificação atual. Volta a lembrar normalmente amanhã.
  */
-export async function skipMedicationToday(medId: number): Promise<void> {
+export async function skipMedicationToday(medId: number, meta: ConfirmMeta = {}): Promise<void> {
   const today = todayISO();
   try {
     await markNudgeDone(skipKey(medId), today);
   } catch (err) {
     console.warn(`failed to mark medication skipped ${medId}:`, err);
   }
+  void recordHabitEvent(completionKey(medId), 'not_done', meta, await medTimeOf(medId));
+  void refreshReviewNotification();
   await clearMedNotifications(medId);
 }
 

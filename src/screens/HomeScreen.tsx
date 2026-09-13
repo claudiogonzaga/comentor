@@ -43,6 +43,7 @@ import {
 import type { OwlMood } from '../types';
 import { cancelSleepEscalationReminders } from '../services/notifications';
 import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
+import { getCompleteDaysStreak } from '../services/review';
 
 interface Dashboard {
   config: { bedtime: string; name: string | null };
@@ -183,6 +184,8 @@ export function HomeScreen() {
   const [lastNotif, setLastNotif] = useState<LastNotification | null>(null);
   const [marking, setMarking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  // Completude da coleta: dias seguidos em que todo item teve resposta.
+  const [completeStreak, setCompleteStreak] = useState(0);
 
   useEffect(() => {
     // Throttled background check (only fires if 6h+ since last check).
@@ -199,6 +202,7 @@ export function HomeScreen() {
       todayLog: d.todayLog ? { completed: d.todayLog.completed } : null,
       sleepHabit: d.sleepHabit ? { id: d.sleepHabit.id } : null,
     });
+    getCompleteDaysStreak().then(setCompleteStreak).catch(() => {});
     try {
       setTodos(await getTodayTodos());
     } catch {
@@ -424,6 +428,20 @@ export function HomeScreen() {
             </View>
             <GreekIcon name="chevronRight" size={18} color={colors.text.tertiary} />
           </Pressable>
+          {/* Fechar o dia: aparece à noite enquanto houver item sem resposta. */}
+          {todos.some((t) => !t.done) && new Date().getHours() >= 18 && (
+            <Pressable style={styles.closeDayBtn} onPress={() => navigation.navigate('Review')}>
+              <Text style={styles.closeDayText}>
+                Fechar o dia · {todos.filter((t) => !t.done).length} sem resposta
+              </Text>
+            </Pressable>
+          )}
+          {completeStreak > 0 && (
+            <Text style={styles.streakLine}>
+              Registro completo: {completeStreak} dia{completeStreak > 1 ? 's' : ''} seguido
+              {completeStreak > 1 ? 's' : ''}
+            </Text>
+          )}
           {todos.length === 0 && (
             <Text style={styles.todoEmpty}>
               Nenhum lembrete para hoje. Toque para adicionar.
@@ -670,6 +688,15 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   todoStatusSkip: { color: colors.text.tertiary },
+  closeDayBtn: {
+    backgroundColor: colors.accent.gold,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  closeDayText: { ...typography.bodyMedium, color: colors.text.onGold },
+  streakLine: { ...typography.small, color: colors.text.secondary, marginBottom: spacing.sm },
   todoActions: {
     flexDirection: 'row',
     gap: spacing.xs,
