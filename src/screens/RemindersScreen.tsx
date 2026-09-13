@@ -31,6 +31,7 @@ import {
 } from '../services/database';
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleAllNudges } from '../services/nudges';
+import { isSleepHabitFormed } from '../services/habitFormation';
 import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
 import { ensureSleepHabit } from '../services/coach';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
@@ -157,7 +158,8 @@ export function RemindersScreen() {
         await scheduleNightReminders({
           bedtime: nextBedtime,
           intervalMinutes: intervalNum,
-          maxReminders: 12,
+          // Sono consolidado: uma cobrança só (mesma regra de rescheduleAllNotifications).
+          maxReminders: (await isSleepHabitFormed(habit.id)).formed ? 2 : 12,
           habitId: habit.id,
           prepRemindersEnabled: config?.prepRemindersEnabled ?? true,
         });

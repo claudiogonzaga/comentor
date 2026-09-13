@@ -26,14 +26,20 @@ import { useAppStore } from '../store/useAppStore';
 import {
   SLEEP_NOW_ACTION,
   SNOOZE_ACTION,
+  SLEEP_WHY_ACTION,
   NUDGE_DONE_ACTION,
   NUDGE_SNOOZE_ACTION,
   MED_DONE_ACTION,
   MED_SNOOZE_ACTION,
   MED_SKIP_ACTION,
+  SAMPLE_YES_ACTION,
+  SAMPLE_NO_ACTION,
   cancelSleepEscalationReminders,
 } from '../services/notifications';
 import { confirmNudge, snoozeNudge } from '../services/nudges';
+import { handleMorningResponse, MORNING_TYPE } from '../services/morning';
+import { recordSampleAnswer, todayISO as formationToday } from '../services/habitFormation';
+import { addChatMessage, addSnoozeFeedback, bumpTechnique } from '../services/database';
 import { confirmMedication, snoozeMedication, skipMedicationToday } from '../services/medications';
 import { askAndHandleVoiceAnswer } from '../services/reminderVoiceAnswer';
 import { saveLastNotification } from '../services/lastNotification';
@@ -105,6 +111,12 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         level?: number;
         nudgeType?: string;
         medId?: number;
+        /** Técnica de persuasão da cobrança (para o aprendizado do que convence). */
+        technique?: string;
+        /** Notificação de AMOSTRA de hábito formado ("ainda fazendo?"). */
+        sample?: boolean;
+        logDate?: string;
+        lateMinutes?: number;
       };
       const type = data.type ?? '';
       const action = response.actionIdentifier;
@@ -139,8 +151,27 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           }
           return;
         }
+        if (action === SLEEP_WHY_ACTION) {
+          // "O que te segura acordado?" respondido direto na notificação. Vira
+          // contexto do coach (adiamentos + histórico do chat) sem abrir o app.
+          const text = (response.userText ?? '').trim();
+          if (text && typeof data.habitId === 'number') {
+            try {
+              await addSnoozeFeedback(data.habitId, null, 0, 'resposta na notificação', text);
+              await addChatMessage(data.habitId, 'user', text);
+            } catch {
+              /* best-effort */
+            }
+          }
+          return;
+        }
         // Tap on the notification body.
         nav.navigate('Chat');
+      } else if (type === MORNING_TYPE) {
+        // Check-in da manhã: Bem / Mal / texto. Só o toque no corpo abre o app.
+        await handleMorningResponse(data, action, response.userText ?? undefined);
+        if (action === Notifications.DEFAULT_ACTION_IDENTIFIER) nav.navigate('Home');
+        return;
       } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
         nav.navigate('Breathing');
       } else if (type.startsWith('nudge:') || type === 'awareness') {
@@ -148,7 +179,19 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         // resolve em background e a notificação some). Só o toque no CORPO da
         // notificação navega para a Home.
         const snoozeMin = useAppStore.getState().config?.snoozeMinutes ?? 20;
+        // Amostra de hábito formado: "ainda fazendo?" Sim / Não.
+        if (data.sample && data.nudgeType && (action === SAMPLE_YES_ACTION || action === SAMPLE_NO_ACTION)) {
+          try {
+            await recordSampleAnswer(data.nudgeType, action === SAMPLE_YES_ACTION, formationToday());
+          } catch {
+            /* best-effort */
+          }
+          return;
+        }
         if (action === NUDGE_DONE_ACTION && data.nudgeType) {
+          // A técnica que precedeu o "Já fiz" pontua: é assim que a coruja
+          // aprende o que convence ESTA pessoa.
+          if (data.technique) void bumpTechnique(data.technique, 'converted').catch(() => {});
           try {
             await confirmNudge(data.nudgeType);
           } catch {

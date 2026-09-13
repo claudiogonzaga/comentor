@@ -269,6 +269,36 @@ export async function generateSnoozeArgument(
   }
 }
 
+/**
+ * Geração genérica, fora do chat: um system prompt + um pedido, sem histórico.
+ * Usada para gerar em lote as cobranças do dia. Timeout curto de propósito: a
+ * chamada acontece durante o agendamento e não pode segurar o app.
+ */
+export async function generateText(
+  model: GeminiModel,
+  systemPrompt: string,
+  userPrompt: string,
+  opts: { maxOutputTokens?: number; temperature?: number; timeoutMs?: number; json?: boolean } = {},
+): Promise<string> {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error('sem chave da API');
+  const { text } = await runGenerate(
+    model,
+    apiKey,
+    {
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+      generationConfig: {
+        maxOutputTokens: opts.maxOutputTokens ?? 900,
+        temperature: opts.temperature ?? 0.9,
+        ...(opts.json ? { responseMimeType: 'application/json' } : {}),
+      },
+    },
+    opts.timeoutMs ?? 12000,
+  );
+  return text;
+}
+
 export async function testApiKey(
   apiKey: string,
   model: GeminiModel = 'gemini-2.5-flash-lite',

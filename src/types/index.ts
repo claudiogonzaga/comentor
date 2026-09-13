@@ -300,7 +300,10 @@ export interface DailyLog {
   remindersSent: number;
   remindersDismissed: number;
   completed: boolean;
+  /** Texto livre do check-in da manhã seguinte ("acordei péssimo…"). */
   notes: string | null;
+  /** Como a pessoa acordou, 0–10, no check-in da manhã seguinte. null = não respondeu. */
+  morningFeeling: number | null;
 }
 
 export interface ChatMessage {

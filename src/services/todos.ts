@@ -2,6 +2,7 @@ import {
   getDoneNudgeTypes,
   listMedications,
   listNudges,
+  getAllHabitStates,
 } from './database';
 import { confirmNudge, unconfirmNudge } from './nudges';
 import { confirmMedication, unconfirmMedication } from './medications';
@@ -125,10 +126,22 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
 
   const items: TodoItem[] = [];
 
+  // Hábitos já FORMADOS saem da lista do dia: a coruja parou de cobrar e só
+  // confere de vez em quando, por notificação. Menos ruído na Home.
+  let formedTypes = new Set<string>();
+  try {
+    formedTypes = new Set(
+      (await getAllHabitStates()).filter((s) => s.state !== 'forming').map((s) => s.nudgeType),
+    );
+  } catch {
+    /* sem estados: mostra tudo */
+  }
+
   try {
     const nudges = await listNudges();
     for (const n of nudges) {
       if (!n.enabled) continue;
+      if (formedTypes.has(n.type)) continue;
       items.push({
         key: n.type,
         kind: 'nudge',

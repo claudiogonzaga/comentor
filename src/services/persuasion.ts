@@ -6,30 +6,46 @@
 // Ordenadas por intensidade crescente; ciclam por k para nunca repetir a
 // vizinha e voltar a escalar em chains longas.
 
-type Line = (name: string) => string;
+/**
+ * Frases FIXAS, rotuladas pela técnica que usam. São o fallback de
+ * insistenceLines.ts (quando não há modelo, rede ou chave) e a base do
+ * persuasiveBody. O rótulo alimenta technique_stats do mesmo jeito que as
+ * linhas geradas — assim o aprendizado sobre o que convence a pessoa não se
+ * perde quando ela está offline.
+ */
+export interface FallbackLine {
+  technique: string;
+  line: (name: string, userName?: string | null) => string;
+}
 
-const LINES: Line[] = [
-  // 1 — lembrete gentil
-  (n) => `“${n}” ainda está te esperando.`,
+export const FALLBACK_LINES: FallbackLine[] = [
+  // 1 — pergunta pessoal, com o nome
+  {
+    technique: 'pergunta-pessoal',
+    line: (n, u) => `${u?.trim() ? `${u.trim()}, ` : ''}você já fez “${n}”? Marque aqui, por favor: já fez ou precisa de mais tempo.`,
+  },
   // 2 — compromisso/consistência
-  (n) => `Você colocou “${n}” na sua rotina por um bom motivo — vale honrar isso agora.`,
+  { technique: 'compromisso', line: (n) => `Você colocou “${n}” na sua rotina por um bom motivo — vale honrar isso agora.` },
   // 3 — passo pequeno (reduz a barreira)
-  (n) => `É rapidinho: “${n}” leva menos tempo do que parece.`,
-  // 4 — eu-futuro
-  (n) => `Seu eu de amanhã vai agradecer por você ter feito “${n}” hoje.`,
-  // 5 — aversão à perda
-  (n) => `Não deixe o dia passar em branco — “${n}” ainda dá tempo.`,
-  // 6 — identidade
-  (n) => `Quem cuida de si não pula “${n}”. E você é dessas pessoas.`,
-  // 7 — prova social leve + consistência
-  (n) => `Você vem indo tão bem… não quebra o ritmo bem no “${n}”.`,
-  // 8 — reenquadre do esforço (alívio pós-tarefa)
-  (n) => `Depois de feito, “${n}” sai da sua cabeça e você relaxa.`,
-  // 9 — apelo direto e afetuoso
-  (n) => `Vou insistir com carinho 🙏 — “${n}” continua te chamando. Me responde?`,
-  // 10 — firme, mas gentil
-  (n) => `Última cobrança por agora: “${n}” merece um minutinho seu.`,
+  { technique: 'passo-pequeno', line: (n) => `É rapidinho: “${n}” leva menos tempo do que parece.` },
+  // 4 — muda o registro: pergunta curta
+  { technique: 'curto-e-seco', line: (n) => `E aí — “${n}” já foi?` },
+  // 5 — eu-futuro, curto
+  { technique: 'eu-futuro', line: (n) => `Seu eu de amanhã agradece por “${n}” hoje.` },
+  // 6 — aversão à perda
+  { technique: 'aversao-perda', line: (n) => `Não deixe o dia passar em branco — “${n}” ainda dá tempo.` },
+  // 7 — identidade
+  { technique: 'identidade', line: (n) => `Quem cuida de si não pula “${n}”. E você é dessas pessoas.` },
+  // 8 — ritmo/consistência
+  { technique: 'ritmo', line: (n) => `Você vem indo tão bem… não quebra o ritmo bem no “${n}”.` },
+  // 9 — reenquadre do esforço (alívio pós-tarefa)
+  { technique: 'alivio', line: (n) => `Depois de feito, “${n}” sai da sua cabeça e você relaxa.` },
+  // 10 — apelo direto e afetuoso
+  { technique: 'humor', line: (n) => `Vou insistir com carinho 🙏 — “${n}” continua te chamando. Me responde?` },
 ];
+
+/** Compatibilidade: as frases sem o rótulo. */
+const LINES = FALLBACK_LINES.map((f) => (n: string) => f.line(n));
 
 /**
  * Corpo da k-ésima insistência (k = 1, 2, 3…): um argumento persuasivo DIFERENTE

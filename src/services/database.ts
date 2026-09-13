@@ -483,6 +483,46 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN nudge_max_insistences INTEGER NOT NULL DEFAULT 5`,
     );
   }
+
+  // v1.102: interatividade.
+  // - daily_log.morning_feeling: como a pessoa acordou (0–10) na manhã seguinte.
+  //   `notes` (que existia sem uso) guarda o texto livre. Juntos são a voz do
+  //   "eu passado" que o coach cita de volta.
+  // - nudge_lines: as cobranças do dia, geradas pela IA para esta pessoa (cache).
+  // - technique_stats: quantas vezes cada técnica de persuasão foi mostrada e
+  //   quantas vezes precedeu um "Já fiz" — o que convence ESTA pessoa.
+  // - habit_state: máquina de estados por hábito (formando → formado →
+  //   amostrando); formado = a coruja para de cobrar e só confere de vez em quando.
+  const logCols = await database.getAllAsync<{ name: string }>("PRAGMA table_info('daily_log')");
+  if (!logCols.some((c) => c.name === 'morning_feeling')) {
+    await database.execAsync(`ALTER TABLE daily_log ADD COLUMN morning_feeling INTEGER`);
+  }
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS nudge_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nudge_type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      k INTEGER NOT NULL,
+      technique TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(nudge_type, date, k)
+    );
+    CREATE TABLE IF NOT EXISTS technique_stats (
+      technique TEXT PRIMARY KEY,
+      shown INTEGER NOT NULL DEFAULT 0,
+      converted INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS habit_state (
+      nudge_type TEXT PRIMARY KEY,
+      state TEXT NOT NULL DEFAULT 'forming',
+      formed_at TEXT,
+      last_sample_at TEXT,
+      sample_misses INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
   // v1.66: Ioga Nidra — tabela de áudios próprios + áudio selecionado na config.
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS yoga_nidra_sounds (
@@ -981,6 +1021,7 @@ interface DailyLogRow {
   reminders_dismissed: number;
   completed: number;
   notes: string | null;
+  morning_feeling: number | null;
 }
 
 const rowToLog = (r: DailyLogRow): DailyLog => ({
@@ -993,6 +1034,7 @@ const rowToLog = (r: DailyLogRow): DailyLog => ({
   remindersDismissed: r.reminders_dismissed,
   completed: r.completed === 1,
   notes: r.notes,
+  morningFeeling: r.morning_feeling ?? null,
 });
 
 export async function getOrCreateLog(habitId: number, date: string, targetTime: string) {
@@ -1391,6 +1433,173 @@ export async function getDoneNudgeTypes(date: string): Promise<string[]> {
     [date],
   );
   return rows.map((r) => r.nudge_type);
+}
+
+// --------- Interatividade (v1.102): manhã seguinte, linhas geradas, técnicas, hábito formado ---------
+
+/**
+ * Registra o check-in da manhã seguinte no log da noite indicada. `feeling`
+ * 0–10 (null = só texto); `text` é acrescentado às notas, não substitui, para
+ * que "Mal 😩" seguido de um texto livre não apague um ao outro.
+ */
+export async function recordMorningCheckin(
+  habitId: number,
+  date: string,
+  feeling: number | null,
+  text: string | null,
+): Promise<void> {
+  const d = await getDb();
+  const existing = await d.getFirstAsync<DailyLogRow>(
+    'SELECT * FROM daily_log WHERE habit_id = ? AND date = ?',
+    [habitId, date],
+  );
+  if (!existing) return; // sem noite registrada, não há a que atribuir a manhã
+  const cleaned = (text ?? '').trim();
+  const notes = cleaned
+    ? existing.notes
+      ? `${existing.notes}\n${cleaned}`
+      : cleaned
+    : existing.notes;
+  const nextFeeling = feeling ?? existing.morning_feeling ?? null;
+  await d.runAsync('UPDATE daily_log SET notes = ?, morning_feeling = ? WHERE id = ?', [
+    notes,
+    nextFeeling,
+    existing.id,
+  ]);
+}
+
+/** Noites que receberam check-in na manhã seguinte (nota ou texto), mais recentes primeiro. */
+export async function getLogsWithMorningFeedback(habitId: number, limit = 30): Promise<DailyLog[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<DailyLogRow>(
+    `SELECT * FROM daily_log
+       WHERE habit_id = ? AND (notes IS NOT NULL OR morning_feeling IS NOT NULL)
+       ORDER BY date DESC LIMIT ?`,
+    [habitId, limit],
+  );
+  return rows.map(rowToLog);
+}
+
+/** Dias, entre os últimos `days`, em que o comportamento foi confirmado (só "feito", não :skip/:missed). */
+export async function countNudgeDoneDays(nudgeType: string, days: number): Promise<number> {
+  const d = await getDb();
+  const since = new Date();
+  since.setDate(since.getDate() - (days - 1));
+  const sinceISO = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(
+    since.getDate(),
+  ).padStart(2, '0')}`;
+  const row = await d.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(DISTINCT date) AS n FROM nudge_completions WHERE nudge_type = ? AND date >= ?`,
+    [nudgeType, sinceISO],
+  );
+  return row?.n ?? 0;
+}
+
+export interface NudgeLine {
+  k: number;
+  technique: string;
+  text: string;
+}
+
+export async function getNudgeLines(nudgeType: string, date: string): Promise<NudgeLine[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ k: number; technique: string; text: string }>(
+    `SELECT k, technique, text FROM nudge_lines WHERE nudge_type = ? AND date = ? ORDER BY k`,
+    [nudgeType, date],
+  );
+  return rows;
+}
+
+export async function setNudgeLines(nudgeType: string, date: string, lines: NudgeLine[]): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('DELETE FROM nudge_lines WHERE nudge_type = ? AND date = ?', [nudgeType, date]);
+  for (const l of lines) {
+    await d.runAsync(
+      'INSERT OR REPLACE INTO nudge_lines (nudge_type, date, k, technique, text) VALUES (?, ?, ?, ?, ?)',
+      [nudgeType, date, l.k, l.technique, l.text],
+    );
+  }
+  // Não deixa o cache crescer para sempre: só os últimos 7 dias.
+  await d.runAsync(`DELETE FROM nudge_lines WHERE date < date('now', '-7 days')`);
+}
+
+export interface TechniqueStat {
+  technique: string;
+  shown: number;
+  converted: number;
+}
+
+export async function bumpTechnique(technique: string, field: 'shown' | 'converted'): Promise<void> {
+  const d = await getDb();
+  const col = field === 'shown' ? 'shown' : 'converted';
+  await d.runAsync(
+    `INSERT INTO technique_stats (technique, ${col}) VALUES (?, 1)
+     ON CONFLICT(technique) DO UPDATE SET ${col} = ${col} + 1, updated_at = datetime('now')`,
+    [technique],
+  );
+}
+
+export async function getTechniqueStats(): Promise<TechniqueStat[]> {
+  const d = await getDb();
+  return d.getAllAsync<TechniqueStat>(
+    'SELECT technique, shown, converted FROM technique_stats ORDER BY shown DESC',
+  );
+}
+
+export type HabitFormationState = 'forming' | 'formed' | 'sampling';
+
+export interface HabitState {
+  nudgeType: string;
+  state: HabitFormationState;
+  formedAt: string | null;
+  lastSampleAt: string | null;
+  sampleMisses: number;
+}
+
+interface HabitStateRow {
+  nudge_type: string;
+  state: string;
+  formed_at: string | null;
+  last_sample_at: string | null;
+  sample_misses: number;
+}
+
+const rowToHabitState = (r: HabitStateRow): HabitState => ({
+  nudgeType: r.nudge_type,
+  state: (r.state as HabitFormationState) ?? 'forming',
+  formedAt: r.formed_at,
+  lastSampleAt: r.last_sample_at,
+  sampleMisses: r.sample_misses ?? 0,
+});
+
+export async function getHabitState(nudgeType: string): Promise<HabitState> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<HabitStateRow>(
+    'SELECT * FROM habit_state WHERE nudge_type = ?',
+    [nudgeType],
+  );
+  return row
+    ? rowToHabitState(row)
+    : { nudgeType, state: 'forming', formedAt: null, lastSampleAt: null, sampleMisses: 0 };
+}
+
+export async function getAllHabitStates(): Promise<HabitState[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<HabitStateRow>('SELECT * FROM habit_state');
+  return rows.map(rowToHabitState);
+}
+
+export async function setHabitState(s: HabitState): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO habit_state (nudge_type, state, formed_at, last_sample_at, sample_misses, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(nudge_type) DO UPDATE SET
+       state = excluded.state, formed_at = excluded.formed_at,
+       last_sample_at = excluded.last_sample_at, sample_misses = excluded.sample_misses,
+       updated_at = datetime('now')`,
+    [s.nudgeType, s.state, s.formedAt, s.lastSampleAt, s.sampleMisses],
+  );
 }
 
 // --------- Medications / supplements (lembretes do usuário) ---------

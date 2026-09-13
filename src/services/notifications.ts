@@ -34,6 +34,27 @@ const OWL_VIBRATION_PATTERN = [0, 200, 200, 200, 200, 200, 450, 550];
 export const SLEEP_CATEGORY = 'comentor-sleep-actions';
 export const SLEEP_NOW_ACTION = 'sleep-now';
 export const SNOOZE_ACTION = 'snooze-15';
+/**
+ * "O que te segura acordado?" — campo de texto direto na notificação. A
+ * resposta vira contexto do coach (snooze_feedback + histórico do chat) sem a
+ * pessoa precisar abrir o app.
+ */
+export const SLEEP_WHY_ACTION = 'sleep-why';
+
+/**
+ * Check-in da manhã seguinte: como a pessoa acordou depois de ontem. Dois
+ * botões rápidos e um campo de texto. O que ela escrever aqui é o que o coach
+ * cita de volta, entre aspas, nas noites seguintes.
+ */
+export const MORNING_CATEGORY = 'comentor-morning-actions';
+export const MORNING_GOOD_ACTION = 'morning-good';
+export const MORNING_BAD_ACTION = 'morning-bad';
+export const MORNING_TEXT_ACTION = 'morning-text';
+
+/** Amostragem de hábito já formado: "ainda fazendo isso?" Sim / Não. */
+export const SAMPLE_CATEGORY = 'comentor-sample-actions';
+export const SAMPLE_YES_ACTION = 'sample-yes';
+export const SAMPLE_NO_ACTION = 'sample-no';
 
 /**
  * Category that gives "verify" behavior nudges (suplemento, óculos de luz
@@ -111,6 +132,26 @@ export async function ensureNotificationCategories() {
       buttonTitle: 'Adiar 15 min',
       options: { opensAppToForeground: true }, // abre o fluxo de adiar (precisa de UI)
     },
+    {
+      identifier: SLEEP_WHY_ACTION,
+      buttonTitle: 'Responder',
+      textInput: { submitButtonTitle: 'Enviar', placeholder: 'O que te segura acordado?' },
+      options: bg,
+    },
+  ]);
+  await Notifications.setNotificationCategoryAsync(MORNING_CATEGORY, [
+    { identifier: MORNING_GOOD_ACTION, buttonTitle: 'Bem 🙂', options: bg },
+    { identifier: MORNING_BAD_ACTION, buttonTitle: 'Mal 😩', options: bg },
+    {
+      identifier: MORNING_TEXT_ACTION,
+      buttonTitle: 'Contar',
+      textInput: { submitButtonTitle: 'Enviar', placeholder: 'Como você acordou?' },
+      options: bg,
+    },
+  ]);
+  await Notifications.setNotificationCategoryAsync(SAMPLE_CATEGORY, [
+    { identifier: SAMPLE_YES_ACTION, buttonTitle: 'Sim, continuo ✅', options: bg },
+    { identifier: SAMPLE_NO_ACTION, buttonTitle: 'Não…', options: bg },
   ]);
   await Notifications.setNotificationCategoryAsync(NUDGE_CATEGORY, [
     { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },

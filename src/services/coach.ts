@@ -3,7 +3,9 @@ import {
   addChatMessage,
   getActiveHabits,
   getHabitByType,
+  getKV,
   getLatestCompletedInterview,
+  getLogsWithMorningFeedback,
   getOrCreateLog,
   getRecentChat,
   getRecentLogs,
@@ -12,8 +14,11 @@ import {
   getUserConfig,
   incrementReminders,
   markLogCompleted,
+  setKV,
   upsertHabit,
 } from './database';
+import { formatPastSelfQuotes, scheduleMorningCheckin } from './morning';
+import { isSleepHabitFormed, minutesLateOf } from './habitFormation';
 import {
   continueConversation as continueConversationRemote,
   generateCoachMessage as generateCoachMessageRemote,
@@ -39,6 +44,7 @@ import { getIntensityForMinutesLate, INTENSITY_LEVELS } from '../constants/inten
 import { DEFAULT_SYSTEM_PROMPT, fillTemplate } from '../constants/promptTemplate';
 import type {
   ChatMessage,
+  DailyLog,
   IntensityLevel,
   LocalModelId,
   SnoozeFeedback,
@@ -114,6 +120,10 @@ interface CoachingContext {
   recentSnoozeFeedback?: string;
   /** Resumo dos dados de saúde (sono/exercício/passos) do Health Connect. */
   healthContext?: string;
+  /** Falas LITERAIS da própria pessoa em manhãs depois de dormir tarde (datadas). */
+  pastSelfQuotes?: string;
+  /** Nota quando o hábito de dormir no horário já está consolidado. */
+  sleepFormedNote?: string;
 }
 
 /**
@@ -140,14 +150,105 @@ function formatSnoozeFeedback(feedback: SnoozeFeedback[]): string {
   return lines.join('; ');
 }
 
-async function buildPersonalizationContext(
-  habitId: number,
-): Promise<{ interviewContext: string; recentSnoozeFeedback: string }> {
-  const interview = await getLatestCompletedInterview();
-  const feedback = await getRecentSnoozeFeedback(habitId, 3);
+// ————————————— Micro-entrevista + eu-passado —————————————
+
+const MICRO_INTERVIEW_EVERY_DAYS = 14;
+const MICRO_PENDING_KEY = 'micro_interview_pending';
+const MICRO_LAST_KEY = 'micro_interview_last';
+const FOLLOWUPS_KEY = 'interview_followups';
+
+interface InterviewFollowup {
+  date: string;
+  text: string;
+}
+
+async function readInterviewFollowups(): Promise<InterviewFollowup[]> {
+  try {
+    const raw = await getKV(FOLLOWUPS_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(arr) ? (arr as InterviewFollowup[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * MICRO-ENTREVISTA. A entrevista do onboarding era foto: uma vez, e nunca mais.
+ * A cada ~2 semanas, o abridor do chat termina com UMA pergunta de acompanhamento
+ * sobre algo que a pessoa disse ("da última vez você disse que era o celular na
+ * cama — ainda é?"). A resposta é guardada e passa a entrar no contexto.
+ */
+async function microInterviewInstruction(): Promise<string | null> {
+  try {
+    const interview = await getLatestCompletedInterview();
+    if (!interview?.summary) return null;
+    const last = (await getKV(MICRO_LAST_KEY)) ?? interview.completedAt ?? interview.createdAt;
+    const lastMs = new Date(String(last).replace(' ', 'T')).getTime();
+    if (Number.isFinite(lastMs) && Date.now() - lastMs < MICRO_INTERVIEW_EVERY_DAYS * 86_400_000) {
+      return null;
+    }
+    await setKV(MICRO_LAST_KEY, new Date().toISOString());
+    await setKV(MICRO_PENDING_KEY, '1');
+    return (
+      'ACOMPANHAMENTO DA ENTREVISTA: já faz mais de duas semanas desde a última vez que você revisitou as causas. ' +
+      'Em vez da pergunta aberta genérica, TERMINE com UMA pergunta de acompanhamento sobre algo ESPECÍFICO que a pessoa ' +
+      'disse na entrevista (as causas e gatilhos estão em "O QUE VOCÊ JÁ SABE SOBRE A PESSOA"), no formato ' +
+      '"da última vez você disse que X — ainda é assim?".'
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Se o abridor fez a pergunta de acompanhamento, a resposta seguinte da pessoa é guardada. */
+async function captureMicroInterviewAnswer(text: string): Promise<void> {
+  try {
+    if ((await getKV(MICRO_PENDING_KEY)) !== '1') return;
+    await setKV(MICRO_PENDING_KEY, '0');
+    const list = await readInterviewFollowups();
+    list.push({ date: todayISO(), text: text.replace(/\s+/g, ' ').trim().slice(0, 300) });
+    await setKV(FOLLOWUPS_KEY, JSON.stringify(list.slice(-10)));
+  } catch {
+    /* best-effort */
+  }
+}
+
+function formatDateBR(iso: string): string {
+  const [, m, d] = iso.split('-');
+  return d && m ? `${d}/${m}` : iso;
+}
+
+async function buildPersonalizationContext(habitId: number): Promise<{
+  interviewContext: string;
+  recentSnoozeFeedback: string;
+  pastSelfQuotes: string;
+  sleepFormedNote: string;
+}> {
+  const [interview, feedback, morningLogs, followups, sleep] = await Promise.all([
+    getLatestCompletedInterview().catch(() => null),
+    getRecentSnoozeFeedback(habitId, 3).catch(() => [] as SnoozeFeedback[]),
+    getLogsWithMorningFeedback(habitId, 30).catch(() => [] as DailyLog[]),
+    readInterviewFollowups(),
+    isSleepHabitFormed(habitId),
+  ]);
+  let interviewContext = summaryToCoachContext(interview?.summary ?? null);
+  if (followups.length > 0) {
+    const recent = followups
+      .slice(-5)
+      .reverse()
+      .map((f) => `- ${formatDateBR(f.date)}: "${f.text}"`)
+      .join('\n');
+    interviewContext =
+      `${interviewContext}\nAtualizações que a pessoa deu depois, nas conversas (mais recentes primeiro):\n${recent}`.trim();
+  }
   return {
-    interviewContext: summaryToCoachContext(interview?.summary ?? null),
+    interviewContext,
     recentSnoozeFeedback: formatSnoozeFeedback(feedback),
+    pastSelfQuotes: formatPastSelfQuotes(morningLogs),
+    sleepFormedNote: sleep.formed
+      ? `O hábito de deitar no horário está CONSOLIDADO (${sleep.onTime} das últimas ${sleep.total} noites no horário). ` +
+        'Não cobre como se fosse novidade: reconheça o que ela construiu e trate um deslize como exceção, não como padrão.'
+      : '',
   };
 }
 
@@ -181,7 +282,30 @@ function buildSystemPromptText(ctx: CoachingContext): string {
       `\nDADOS DE SAÚDE RECENTES (do Health Connect — use para personalizar, mas não soe robótico citando números crus):\n${ctx.healthContext}`,
     );
   }
+  if (ctx.pastSelfQuotes && ctx.pastSelfQuotes.trim().length > 0) {
+    extras.push(
+      `\nO QUE A PRÓPRIA PESSOA DISSE EM MANHÃS DEPOIS DE DORMIR TARDE:\n${ctx.pastSelfQuotes}\n` +
+        'Você pode citar UMA dessas falas, literalmente e entre aspas, com a data, quando for pertinente ao que está ' +
+        'acontecendo agora. É o argumento mais forte que você tem — é a voz dela mesma. Nunca invente, resuma ou ' +
+        'parafraseie uma citação; se não couber, não cite.',
+    );
+  }
+  if (ctx.sleepFormedNote && ctx.sleepFormedNote.trim().length > 0) {
+    extras.push(`\nESTADO DO HÁBITO:\n${ctx.sleepFormedNote}`);
+  }
   return extras.length ? `${base}\n${extras.join('\n')}` : base;
+}
+
+/**
+ * O caminho REMOTO (gemini.ts) monta o próprio system prompt a partir de
+ * `systemPrompt` + `healthContext` e ignora o resto do contexto. Até aqui, a
+ * entrevista e os motivos de adiamento só chegavam ao modelo LOCAL — no Gemini,
+ * o caminho principal, eram descartados. Este wrapper entrega ao remoto o
+ * prompt já completo, e zera healthContext para ele não anexar a seção de
+ * saúde uma segunda vez.
+ */
+function forRemote(ctx: CoachingContext): CoachingContext {
+  return { ...ctx, systemPrompt: buildSystemPromptText(ctx), healthContext: undefined };
 }
 
 function historyToLocalMessages(history: ChatMessage[]): LocalChatMessage[] {
@@ -235,7 +359,7 @@ async function runCoachGeneration(
       };
     }
   }
-  return generateCoachMessageRemote(context, config.geminiModel, history);
+  return generateCoachMessageRemote(forRemote(context), config.geminiModel, history);
 }
 
 async function runChatGeneration(
@@ -270,7 +394,7 @@ async function runChatGeneration(
       };
     }
   }
-  return continueConversationRemote(context, config.geminiModel, history, userMessage);
+  return continueConversationRemote(forRemote(context), config.geminiModel, history, userMessage);
 }
 
 async function runSnoozeGeneration(
@@ -308,7 +432,7 @@ async function runSnoozeGeneration(
       };
     }
   }
-  return generateSnoozeArgumentRemote(context, config.geminiModel, snoozeMinutes);
+  return generateSnoozeArgumentRemote(forRemote(context), config.geminiModel, snoozeMinutes);
 }
 
 export interface CoachInvocationResult {
@@ -378,6 +502,8 @@ export async function getChatOpenerForNow(): Promise<CoachInvocationResult> {
   const recentLogs = await getRecentLogs(habit.id, 14);
   const history = await getRecentChat(habit.id, 6);
   const healthContext = await getHealthContext();
+  const personalization = await buildPersonalizationContext(habit.id);
+  const micro = await microInterviewInstruction();
 
   const result = await runCoachGeneration(
     config,
@@ -390,7 +516,8 @@ export async function getChatOpenerForNow(): Promise<CoachInvocationResult> {
       streak: streak.currentStreak,
       tone: config.tone,
       recentLogsSummary: summarizeRecentLogs(recentLogs),
-      systemPrompt: CHAT_OPENER_PROMPT,
+      systemPrompt: micro ? `${CHAT_OPENER_PROMPT}\n\n${micro}` : CHAT_OPENER_PROMPT,
+      ...personalization,
       healthContext,
     },
     history,
@@ -527,6 +654,7 @@ export async function sendUserMessage(
 ): Promise<{ message: string; offline: boolean }> {
   const config = await getUserConfig();
   await addChatMessage(habitId, 'user', text);
+  await captureMicroInterviewAnswer(text);
   const history = await getRecentChat(habitId, 10);
   const streak = await getStreak(habitId);
   const recentLogs = await getRecentLogs(habitId, 14);
@@ -591,8 +719,13 @@ export async function markSleepDone(habitId: number) {
   const today = todayISO();
   const config = await getUserConfig();
   const log = await getOrCreateLog(habitId, today, config.bedtime);
-  await markLogCompleted(log.id, nowHHMM());
+  const now = nowHHMM();
+  await markLogCompleted(log.id, now);
   const updated = await recordCompletion(habitId, today);
+  // Manhã seguinte: pergunta como acordou — já sabendo o quanto passou do
+  // horário, então a pergunta sai específica ("deitou 1h40 atrasado…").
+  const late = minutesLateOf(log.targetTime || config.bedtime, now) ?? 0;
+  void scheduleMorningCheckin(habitId, today, late).catch(() => {});
   return updated;
 }
 
@@ -608,10 +741,13 @@ export async function rescheduleAllNotifications(): Promise<void> {
   await ensureNotificationCategories();
   await ensureChannel(config.owlSpecies);
   const habit = await ensureSleepHabit(config.bedtime);
+  const sleepFormed = await isSleepHabitFormed(habit.id);
   await scheduleNightReminders({
     bedtime: config.bedtime,
     intervalMinutes: config.reminderIntervalMinutes,
-    maxReminders: 12,
+    // Sono consolidado (14 das últimas 16 noites no horário): uma cobrança só,
+    // em vez de doze. A coruja que se cala é parte do método.
+    maxReminders: sleepFormed.formed ? 2 : 12,
     habitId: habit.id,
   });
   await scheduleAllNudges();
