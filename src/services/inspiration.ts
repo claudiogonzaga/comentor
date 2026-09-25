@@ -59,10 +59,31 @@ const FALLBACK_MESSAGES: InspirationMessage[] = COMENTORA_MESSAGES.map((m) => ({
   speak: m.body,
 }));
 
-function shuffled<T>(arr: T[]): T[] {
+/**
+ * Embaralhamento ESTÁVEL POR DIA: a mesma semente (a data de hoje) produz a
+ * mesma ordem em todas as chamadas do dia.
+ *
+ * Antes era Math.random(): cada agendamento — e ele roda a cada vez que o app
+ * volta para a frente, às vezes em dobro — escolhia frases NOVAS, e a versão
+ * falada regenerava ~10 áudios na voz do Gemini por abertura (medido no
+ * aparelho em 2026-09-23), gastando a cota de TTS que a leitura também usa e
+ * nunca aproveitando o cache por texto. Agora as frases mudam uma vez por dia
+ * e os áudios são gerados uma vez só.
+ */
+function shuffledForToday<T>(arr: T[]): T[] {
+  const d = new Date();
+  let seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  const rand = () => {
+    // mulberry32 — pequeno, determinístico, suficiente para embaralhar.
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
@@ -115,7 +136,7 @@ export async function scheduleInspirationNotifications(): Promise<void> {
   } catch {
     pool = FALLBACK_MESSAGES;
   }
-  const messages = shuffled(pool);
+  const messages = shuffledForToday(pool);
   // coletados para, ao final, agendar as versões FALADAS (se o recurso estiver on)
   const spokenItems: { text: string; hour: number; minute: number }[] = [];
 

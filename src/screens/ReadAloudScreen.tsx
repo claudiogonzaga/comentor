@@ -19,8 +19,8 @@ import { Button } from '../components/Button';
 import { AudioScrubber } from '../components/AudioScrubber';
 import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
-import { useReadAloud } from '../store/useReadAloud';
-import { prepareReadAloudAudio, isReadAloudCached } from '../services/voice';
+import { isGeneratingSame, keepScreenOnFor, useReadAloud } from '../store/useReadAloud';
+import { prepareReadAloudAudio } from '../services/voice';
 import {
   startReadAloudKeepAlive,
   stopReadAloudKeepAlive,
@@ -76,10 +76,14 @@ function looksBinary(s: string): boolean {
   return bad / Math.max(1, sample.length) > 0.1;
 }
 
+/** Sequência para tags de tela acesa do "Salvar e gerar áudio" (uma por chamada). */
+let saveSeq = 0;
+
 const PREPARING_MSG =
-  'Vou preparar o áudio — pode levar alguns minutos na 1ª vez. Você pode usar o ' +
-  'app normalmente e até sair desta tela; quando ficar pronto, começo a ler em ' +
-  'voz alta (mesmo em outra tela). Depois fica salvo e toca na hora.';
+  'Vou preparar o áudio — pode levar alguns minutos na 1ª vez. A tela fica acesa ' +
+  'até terminar. Pode usar outras telas do app, mas não saia dele nem bloqueie o ' +
+  'celular: fora do app a preparação pausa (e continua de onde parou quando você ' +
+  'voltar). Quando ficar pronto, começo a ler em voz alta. Depois fica salvo e toca na hora.';
 
 /**
  * Barra do player (▶/⏸/⏹ + tempo + barra arrastável). Subcomponente próprio para
@@ -313,7 +317,14 @@ export function ReadAloudScreen() {
     }
 
     setSaveGen({ done: 0, total: 1 });
-    void startReadAloudKeepAlive(); // mantém vivo se o usuário sair do app
+    // Tela acesa enquanto gera: fora do primeiro plano a geração congela (ver
+    // readAloudKeepAlive.ts). O loop silencioso é mantido, mas não segura nada.
+    // Tag ÚNICA por chamada: o expo-keep-awake guarda tags num conjunto sem
+    // contagem, então dois "Salvar" sobrepostos (possível ao sair e voltar da
+    // tela) com a mesma tag fariam o primeiro a terminar apagar a tela do outro.
+    const keepTag = `readaloud-save-${++saveSeq}`;
+    keepScreenOnFor(keepTag, true);
+    void startReadAloudKeepAlive();
     try {
       const uri = await prepareReadAloudAudio(t, {
         geminiVoiceName: voice,
@@ -333,6 +344,7 @@ export function ReadAloudScreen() {
       );
     } finally {
       stopReadAloudKeepAlive();
+      keepScreenOnFor(keepTag, false);
       setSaveGen(null);
       setSavingAudio(false);
     }
@@ -388,10 +400,19 @@ export function ReadAloudScreen() {
     Keyboard.dismiss();
     const ra = useReadAloud.getState();
     if (provider === 'gemini') {
-      if (!isReadAloudCached(t, { geminiVoiceName, paused })) {
-        Alert.alert('Preparando o áudio', PREPARING_MSG, [{ text: 'Ok' }]);
-      }
-      void ra.startGemini(t, title, { provider: 'gemini', geminiVoiceName, paused, rate });
+      const opts = { provider: 'gemini' as const, geminiVoiceName, paused, rate };
+      // Toque repetido no mesmo texto: o store não reinicia — assume a
+      // preparação em andamento e toca quando ficar pronta.
+      void ra.startGemini(t, title, opts);
+      // Avisa só se a PREPARAÇÃO de fato começou. Antes, a decisão vinha de uma
+      // checagem de cache à parte, que às vezes errava: o aviso aparecia e o
+      // áudio, já pronto, tocava na hora.
+      setTimeout(() => {
+        const st = useReadAloud.getState();
+        if (st.status === 'generating' && isGeneratingSame(t, opts)) {
+          Alert.alert('Preparando o áudio', PREPARING_MSG, [{ text: 'Ok' }]);
+        }
+      }, 800);
     } else {
       ra.startSystem(t, title, {
         provider: 'system',
@@ -490,7 +511,8 @@ export function ReadAloudScreen() {
         <Text style={styles.intro}>
           Cole ou importe um texto — visualização, oração, auto-hipnose — e a
           Comentora lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
-          para voltar/avançar, e você pode sair da tela enquanto o áudio é gerado.
+          para voltar/avançar. Enquanto o áudio é preparado, a tela fica acesa —
+          não saia do app até terminar.
         </Text>
 
         <TextInput
@@ -675,7 +697,7 @@ export function ReadAloudScreen() {
           <>
             <Text style={styles.progress}>
               {gen
-                ? `Preparando o áudio… ${gen.done}/${gen.total} · pode sair desta tela; começo a ler quando ficar pronto`
+                ? `Preparando o áudio… ${gen.done}/${gen.total} · mantenha o app aberto; começo a ler quando ficar pronto`
                 : 'Preparando a leitura…'}
             </Text>
             <Button
@@ -686,10 +708,10 @@ export function ReadAloudScreen() {
           </>
         ) : (
           <>
-            {/* Geração continua em 2º plano mesmo tocando outro áudio. */}
+            {/* A preparação continua enquanto outro áudio toca (app aberto). */}
             {gen && (
               <Text style={styles.progress}>
-                Gerando áudio em segundo plano… {gen.done}/{gen.total}
+                Preparando outro áudio… {gen.done}/{gen.total} · mantenha o app aberto
               </Text>
             )}
             {showPlayer ? (

@@ -486,8 +486,12 @@ interface SpeakLongOptions {
  *  nº de REQUISIÇÕES (gargalo real é RPM 10/min e RPD 100/dia no Tier 1 — um
  *  texto de 26k chars cai de ~38 para ~15 requisições), mantém o trecho < 4000
  *  bytes (limite, mesmo com acentos PT-BR), ~2 min de fala (longe do corte de
- *  ~5 min) e ~45s de geração (dentro do timeout de 90s). O ritmo (RPM) é global
- *  no geminiTTS (acquireRpmSlot). */
+ *  ~5 min) e ~45s de geração (medido em junho/2026). Em setembro/2026 a geração
+ *  desses trechos passou a levar minutos; o limite por chamada agora cresce com o
+ *  tamanho do trecho (geminiTTS.timeoutForChunk) em vez de 90 s fixos. Se os logs
+ *  [GeminiTTS] mostrarem chamadas ainda estourando, reduzir este número — mas
+ *  isso muda a chave de cache dos áudios avulsos já gerados. O ritmo (RPM) é
+ *  global no geminiTTS (acquireRpmSlot). */
 const GEMINI_CHUNK_MAX = 2000;
 const SYSTEM_CHUNK_MAX = 3500;
 

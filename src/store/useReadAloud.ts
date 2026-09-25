@@ -3,6 +3,7 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 import { prepareReadAloudAudio, speakLongText, stopSpeaking } from '../services/voice';
 import { startReadAloudKeepAlive, stopReadAloudKeepAlive } from '../services/readAloudKeepAlive';
 import { registerPlayer, claimPlayback } from '../services/playerBus';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 export type ReadAloudStatus = 'idle' | 'generating' | 'playing' | 'paused';
 
@@ -68,6 +69,51 @@ registerPlayer('readaloud', () => {
   useReadAloud.setState({ status: 'idle', currentTime: 0, duration: 0, title: '' });
 });
 
+// Identidade da geração em andamento (texto + voz + pausas). Um segundo toque
+// no MESMO texto não aborta e recomeça — antes, cada toque impaciente jogava
+// fora os trechos já gerados e gastava a cota de novo.
+let genKey: string | null = null;
+// Quem vai OUVIR o resultado da geração em andamento: o token de reprodução e a
+// velocidade do pedido mais recente para este texto. Um novo toque no mesmo
+// texto não reinicia a geração — ele a ASSUME (novo token), para que o áudio
+// toque quando ficar pronto mesmo que outro áudio tenha tocado no meio.
+let genOwner: { token: number; rate: number; title: string } | null = null;
+
+function keyFor(text: string, opts: ReadAloudStartOpts): string {
+  return `${opts.geminiVoiceName ?? ''}|${opts.paused ? 1 : 0}|${text}`;
+}
+
+/** Já existe uma geração em andamento para exatamente este texto/voz/pausas? */
+export function isGeneratingSame(text: string, opts: ReadAloudStartOpts): boolean {
+  return !!genAbort && genKey === keyFor(text.trim(), opts);
+}
+
+// TELA ACESA durante a geração. A geração é JS; no React Native (nova
+// arquitetura) os timers — e com eles a entrega das respostas do fetch — ficam
+// PARADOS enquanto o app está fora do primeiro plano. Se a tela apaga no meio,
+// a geração congela até o app voltar. Manter a tela acesa restaura o "aperta e
+// espera com o app aberto", que funcionava enquanto a geração era rápida.
+const KEEP_AWAKE_TAG = 'readaloud-gen';
+
+/** Tela acesa para outra geração (ex.: "Salvar e gerar áudio"), com tag própria. */
+export function keepScreenOnFor(tag: string, on: boolean): void {
+  if (on) void activateKeepAwakeAsync(tag).catch(() => {});
+  else void deactivateKeepAwake(tag).catch(() => {});
+}
+
+function screenOnWhileGenerating(on: boolean): void {
+  if (on) void activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+  else void deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+}
+
+/** Encerra os recursos da geração — só se nenhuma geração mais nova assumiu. */
+function releaseGenerationResources(): void {
+  if (genAbort) return; // outra geração em andamento: ela é dona dos recursos
+  genKey = null;
+  stopReadAloudKeepAlive();
+  screenOnWhileGenerating(false);
+}
+
 function abortOngoingGeneration(): void {
   try {
     genAbort?.abort();
@@ -75,6 +121,8 @@ function abortOngoingGeneration(): void {
     /* ignore */
   }
   genAbort = null;
+  genKey = null;
+  genOwner = null;
 }
 
 function teardownPlayer() {
@@ -188,15 +236,39 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     finishedTick: 0,
 
     // Voz GEMINI: gera o áudio COMPLETO (pode levar minutos) e toca. Roda em
-    // nível de módulo → o usuário pode sair da tela; a leitura começa quando
-    // ficar pronta, em qualquer tela.
+    // nível de módulo → o usuário pode NAVEGAR para outras telas do app; a
+    // leitura começa quando ficar pronta, em qualquer tela. SAIR do app (ou a
+    // tela apagar) pausa a geração até o app voltar — por isso a tela fica
+    // acesa, e os trechos prontos ficam em disco (retomável).
     startGemini: async (text, title, opts) => {
       const t = text.trim();
       if (!t) return;
+      // Mesmo texto já sendo gerado: NÃO recomeça (jogaria fora os trechos e a
+      // cota). Assume a geração: para o que estiver tocando e passa a ser o dono
+      // do resultado — o áudio toca quando ficar pronto.
+      if (genAbort && genKey === keyFor(t, opts) && genOwner) {
+        const tk = ++token;
+        genOwner.token = tk;
+        genOwner.rate = opts.rate ?? 1;
+        genOwner.title = title;
+        await stopSpeaking();
+        // Revalida depois do await: a geração pode ter TERMINADO (a conclusão
+        // já está tocando o áudio com este token), FALHADO ou sido CANCELADA
+        // nesse meio-tempo. Em qualquer desses casos, não mexe em nada — senão
+        // mataria o áudio recém-iniciado ou prenderia a tela em "gerando".
+        // A tela acesa não é reativada aqui: a geração em andamento já a segura.
+        if (tk !== token || !genAbort || genOwner?.token !== tk) return;
+        teardownPlayer();
+        set({ status: 'generating', isGemini: true, title, currentTime: 0, duration: 0, error: null });
+        return;
+      }
       const mine = ++token;
       abortOngoingGeneration(); // uma geração por vez (a nova substitui a antiga)
       const myAbort = new AbortController();
       genAbort = myAbort;
+      genKey = keyFor(t, opts);
+      const me = { token: mine, rate: opts.rate ?? 1, title };
+      genOwner = me;
       const signal = myAbort.signal;
       await stopSpeaking();
       teardownPlayer();
@@ -209,8 +281,10 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
         duration: 0,
         error: null,
       });
-      // Mantém o app VIVO durante a geração — senão, ao SAIR do app, o Android
-      // congela o JS e a geração para no meio (ex.: travou em 2/13).
+      // Tela acesa enquanto gera (ver screenOnWhileGenerating). O loop
+      // silencioso abaixo é antigo e NÃO segura a geração fora do app: ele não
+      // cria serviço em primeiro plano nem destrava os timers do JS.
+      screenOnWhileGenerating(true);
       void startReadAloudKeepAlive();
       try {
         const uri = await prepareReadAloudAudio(t, {
@@ -224,26 +298,32 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
           },
         });
         if (genAbort === myAbort) genAbort = null;
-        set({ gen: null });
-        stopReadAloudKeepAlive();
+        // Só limpa o progresso/recursos se nenhuma geração mais nova assumiu.
+        if (!genAbort) set({ gen: null });
+        releaseGenerationResources();
+        if (genOwner === me) genOwner = null;
         // Se o usuário tocou OUTRA coisa durante a geração, não rouba o player:
         // o áudio ficou no cache e toca na hora quando ele pedir esse texto.
-        if (mine !== token) return;
-        if (uri) await attachAndPlay(uri, opts.rate ?? 1, mine);
+        // `me.token` (e não o `mine` original): um toque repetido no mesmo
+        // texto assumiu a geração com um token novo.
+        if (me.token !== token) return;
+        if (uri) await attachAndPlay(uri, me.rate, me.token);
         else set({ status: 'idle' });
       } catch (e) {
         if (genAbort === myAbort) genAbort = null;
-        stopReadAloudKeepAlive();
+        if (genOwner === me) genOwner = null;
+        releaseGenerationResources();
         if ((e as { aborted?: boolean })?.aborted) {
-          // cancelamento explícito — não é erro
-          if (mine === token) set({ status: 'idle', gen: null });
-          else set({ gen: null });
+          // cancelamento explícito — não é erro. Uma geração abortada por uma
+          // NOVA não mexe no progresso da nova.
+          if (me.token === token) set({ status: 'idle', gen: null });
+          else if (!genAbort) set({ gen: null });
           return;
         }
         set((s2) => ({
           gen: null,
           // só derruba o status se ainda é a geração ativa (não o player de outro áudio)
-          ...(mine === token ? { status: 'idle' as const, error: formatErr(e) } : {}),
+          ...(me.token === token ? { status: 'idle' as const, error: formatErr(e) } : {}),
           finishedTick: s2.finishedTick,
         }));
       }
@@ -328,8 +408,8 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     stop: () => {
       token++;
       stopSpeaking();
-      // keep-alive fica se ainda há GERAÇÃO em andamento (o stop é do player).
-      if (!genAbort) stopReadAloudKeepAlive();
+      // keep-alive/tela acesa ficam se ainda há GERAÇÃO em andamento (o stop é do player).
+      releaseGenerationResources();
       teardownPlayer();
       // NÃO zera `gen`: a geração em segundo plano segue (só o player para).
       set({ status: 'idle', currentTime: 0, duration: 0, title: '' });
@@ -338,7 +418,7 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
     // Cancela SÓ a geração (botão "Parar geração" do banner). Player intacto.
     cancelGeneration: () => {
       abortOngoingGeneration();
-      stopReadAloudKeepAlive();
+      releaseGenerationResources();
       set((s2) => ({
         gen: null,
         ...(s2.status === 'generating' ? { status: 'idle' as const } : {}),

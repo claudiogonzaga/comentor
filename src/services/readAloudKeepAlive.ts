@@ -5,9 +5,21 @@
 // REPRODUÇÃO sobrevive porque o expo-audio mantém um foreground service de mídia
 // — mas durante a GERAÇÃO não há áudio tocando, então nada segura o processo.
 //
-// Solução: tocar um loop SILENCIOSO (volume 0, sem atrapalhar outras mídias) só
-// durante a geração. Isso liga o MESMO foreground service de mídia (já testado em
-// background), mantendo o processo vivo e o JS rodando até o áudio ficar pronto.
+// Tentativa (v1.52.0): tocar um loop SILENCIOSO (volume 0) só durante a geração,
+// supondo que isso ligasse o foreground service de mídia e mantivesse o JS
+// rodando.
+//
+// NÃO FUNCIONA — verificado no aparelho em 2026-09-25: (1) o expo-audio só cria
+// o serviço em primeiro plano via setActiveForLockScreen, que o app não chama —
+// `dumpsys activity services` não mostra serviço nenhum durante a geração; (2)
+// mesmo com serviço, no React Native (nova arquitetura) os timers ficam parados
+// com a Activity pausada, e o fetch (whatwg-fetch) só entrega a resposta dentro
+// de um setTimeout. Resultado: fora do app, a geração congela.
+//
+// O que segura a geração hoje é a TELA ACESA (expo-keep-awake, em
+// useReadAloud) + trechos persistidos em disco (retomável). Este loop foi
+// mantido por ser inofensivo; gerar de fato com o app fora da tela exigiria uma
+// tarefa Headless JS em serviço de primeiro plano.
 
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { File, Paths } from 'expo-file-system';

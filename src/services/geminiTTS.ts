@@ -215,8 +215,9 @@ function throwIfAborted(signal?: TtsSignal): void {
  */
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Timeout por chamada de TTS. Gerar áudio longo leva tempo — 30s era curto e
- *  abortava ("Gemini TTS: Aborted"). */
+/** Timeout PADRÃO por chamada de TTS (frases curtas). Gerar áudio longo leva
+ *  tempo — 30s era curto e abortava ("Gemini TTS: Aborted"). Os trechos da
+ *  leitura usam um limite proporcional ao tamanho (timeoutForChunk). */
 const TTS_TIMEOUT_MS = 90000;
 /**
  * Re-tentativas para erros TRANSITÓRIOS: 429 (limite), 5xx (ex.: "An internal
@@ -304,6 +305,39 @@ function classify429(body: unknown): { daily: boolean; retryMs: number } {
 }
 
 /**
+ * Uma linha de log por TENTATIVA (logcat → ReactNativeJS, tag [GeminiTTS]):
+ * tamanho do trecho, nº da tentativa, espera na fila de RPM, duração da
+ * chamada, limite usado e resultado. Existe porque o diagnóstico de setembro
+ * dependeu de inferir latência por cronômetro de tela — sem isto, não dá para
+ * saber se as tentativas batem no limite ou se o servidor ficou lento.
+ */
+function logAttempt(
+  text: string,
+  attempt: number,
+  queueMs: number,
+  fetchMs: number,
+  timeoutMs: number,
+  outcome: string,
+): void {
+  console.warn(
+    `[GeminiTTS] chars=${text.length} tentativa=${attempt + 1} fila=${Math.round(queueMs / 1000)}s ` +
+      `chamada=${Math.round(fetchMs / 1000)}s limite=${Math.round(timeoutMs / 1000)}s → ${outcome}`,
+  );
+}
+
+/**
+ * Limite por chamada proporcional ao tamanho do trecho da LEITURA. Os trechos
+ * de 2000 caracteres foram dimensionados em junho para ~45 s de geração; em
+ * setembro de 2026 eles passaram a bater nos 90 s fixos, e cada estouro
+ * DESCARTAVA uma resposta que talvez estivesse quase pronta — e a cobrava da
+ * cota — recomeçando o trecho do zero. 90 ms por caractere ≈ 180 s para 2000.
+ * Frases curtas (nudges, inspirações) seguem com os 90 s.
+ */
+function timeoutForChunk(text: string): number {
+  return Math.max(TTS_TIMEOUT_MS, text.length * 90);
+}
+
+/**
  * Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. Re-tenta
  * (com backoff) em TODOS os erros transitórios — 429 (limite), 5xx (erro
  * interno do servidor), timeout/rede e resposta 200 sem áudio — em vez de
@@ -315,6 +349,8 @@ async function fetchPcm(
   apiKey: string,
   attempt = 0,
   signal?: TtsSignal,
+  /** Limite desta chamada. Trechos longos da leitura precisam de mais que 90 s. */
+  timeoutMs: number = TTS_TIMEOUT_MS,
 ): Promise<Uint8Array> {
   throwIfAborted(signal);
   // Bloqueio diário (RPD) ativo? Nem chama a API — cai direto para o fallback.
@@ -327,7 +363,9 @@ async function fetchPcm(
   }
   // Ritma para não estourar os 10 RPM (gargalo real do TTS). Adquire um slot em
   // TODA requisição — inclusive cada retry, que é uma nova requisição.
+  const tQueue = Date.now();
   await acquireRpmSlot(signal);
+  const queueMs = Date.now() - tQueue;
   const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ parts: [{ text }] }],
@@ -337,7 +375,8 @@ async function fetchPcm(
     },
   };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const tFetch = Date.now();
   let res: Response;
   try {
     res = await fetch(url, {
@@ -348,23 +387,27 @@ async function fetchPcm(
     });
   } catch (err) {
     clearTimeout(timer);
+    logAttempt(text, attempt, queueMs, Date.now() - tFetch, timeoutMs,
+      err instanceof Error ? err.message : 'erro de rede');
     // Timeout (abort) ou rede instável — transiente. Tenta de novo com backoff
     // antes de desistir (em vez de cair na voz do sistema na primeira falha).
     if (attempt < MAX_RETRIES) {
       await sleep(retryDelayMs(attempt));
       throwIfAborted(signal);
-      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
+      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
     }
     const msg = err instanceof Error ? err.message : 'erro de rede';
     throw new GeminiTTSError(`Gemini TTS: ${msg}`);
   }
   clearTimeout(timer);
+  const fetchMs = Date.now() - tFetch;
+  if (!res.ok) logAttempt(text, attempt, queueMs, fetchMs, timeoutMs, `HTTP ${res.status}`);
 
   // 5xx ("An internal error has occurred. Please retry") é transitório → re-tenta.
   if (res.status >= 500 && res.status < 600 && attempt < MAX_RETRIES) {
     await sleep(retryDelayMs(attempt));
     throwIfAborted(signal);
-    return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
+    return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
   }
 
   if (!res.ok) {
@@ -390,7 +433,7 @@ async function fetchPcm(
               : Math.min(60000, 12000 * Math.pow(2, attempt));
         await sleep(delay);
         throwIfAborted(signal);
-        return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
+        return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
       }
     }
     const msg = j.error?.message ?? `HTTP ${res.status}`;
@@ -403,12 +446,14 @@ async function fetchPcm(
     candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
   };
   const audioBase64 = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  logAttempt(text, attempt, queueMs, Date.now() - tFetch, timeoutMs,
+    audioBase64 ? `ok ${Math.round((audioBase64.length * 3) / 4 / 1024)} KiB` : 'ok SEM ÁUDIO');
   if (!audioBase64) {
     // 200 mas sem áudio — também é uma falha transitória; re-tenta antes de desistir.
     if (attempt < MAX_RETRIES) {
       await sleep(retryDelayMs(attempt));
       throwIfAborted(signal);
-      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal);
+      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
     }
     throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
   }
@@ -592,15 +637,68 @@ export async function synthesizeFullSpeechGemini(
 
   // O ritmo (RPM) agora é GLOBAL, dentro de fetchPcm (acquireRpmSlot), e vale
   // para todos os caminhos. Aqui é só gerar em série e concatenar.
+  //
+  // RETOMÁVEL: cada trecho pronto vai para o disco. Se a geração for
+  // interrompida (app fora da tela, processo morto à noite, novo toque), a
+  // próxima tentativa pula o que já existe em vez de recomeçar do trecho 1 —
+  // e de gastar a cota de novo com ele.
   const pcms: Uint8Array[] = [];
+  const chunkFiles: File[] = [];
   let totalLen = 0;
   for (let i = 0; i < clean.length; i++) {
     throwIfAborted(signal);
     onProgress?.(i, clean.length);
-    const pcm = normalizePcm(await fetchPcm(clean[i], voiceName, apiKey, 0, signal));
+    const chunkFile = new File(
+      Paths.cache,
+      `readaloud_chunk_${shortHash(`${voiceName}:chunk:${clean[i]}`)}.pcm`,
+    );
+    chunkFiles.push(chunkFile);
+    let pcm: Uint8Array | null = null;
+    if (chunkFile.exists) {
+      try {
+        const bytes = await chunkFile.bytes();
+        // PCM 16-bit: comprimento ímpar = arquivo truncado (a gravação é
+        // atômica e com tamanho conferido, mas por garantia). Descarta e gera de novo.
+        if (bytes.length > 0 && bytes.length % 2 === 0) pcm = bytes;
+      } catch {
+        pcm = null; // ilegível → gera de novo
+      }
+      if (!pcm) {
+        try {
+          chunkFile.delete();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (!pcm) {
+      pcm = normalizePcm(
+        await fetchPcm(clean[i], voiceName, apiKey, 0, signal, timeoutForChunk(clean[i])),
+      );
+      // Grava num temporário e só então renomeia: um processo morto ou disco
+      // cheio no meio da escrita nunca deixa um trecho truncado com o nome
+      // final — senão ele seria reaproveitado e viraria chiado no áudio salvo.
+      const tmp = new File(Paths.cache, `${chunkFile.name}.tmp`);
+      try {
+        tmp.create({ overwrite: true });
+        tmp.write(pcm);
+        // Com o disco quase cheio o Android pode gravar só PARTE do arquivo sem
+        // lançar erro. Confere o tamanho antes de dar o nome final.
+        if (tmp.size !== pcm.length) throw new Error('gravação curta do trecho');
+        tmp.move(chunkFile);
+      } catch {
+        try {
+          if (tmp.exists) tmp.delete();
+        } catch {
+          /* ignore */
+        }
+        /* sem disco para o trecho: segue só em memória */
+      }
+    }
     pcms.push(pcm);
     totalLen += pcm.length;
   }
+  throwIfAborted(signal);
   onProgress?.(clean.length, clean.length);
 
   const allPcm = new Uint8Array(totalLen);
@@ -613,6 +711,25 @@ export async function synthesizeFullSpeechGemini(
   await cleanupReadAloudCache();
   file.create({ overwrite: true });
   file.write(wav);
+  // Mesma conferência do trecho: um WAV gravado pela metade não pode ficar como
+  // "pronto" (seria reusado para sempre) — e aí os trechos NÃO são apagados,
+  // para a próxima tentativa só remontar o arquivo.
+  if (file.size !== wav.length) {
+    try {
+      file.delete();
+    } catch {
+      /* ignore */
+    }
+    throw new GeminiTTSError('não consegui gravar o áudio completo (espaço em disco?)');
+  }
+  // O WAV completo já tem tudo: os trechos avulsos não servem mais.
+  for (const f of chunkFiles) {
+    try {
+      if (f.exists) f.delete();
+    } catch {
+      /* best-effort */
+    }
+  }
   return { uri: file.uri, cached: false };
 }
 
@@ -668,7 +785,9 @@ export async function synthesizeChunkGemini(
       /* cache ilegível → regenera abaixo */
     }
   }
-  const pcm = normalizePcm(await fetchPcm(trimmed, voiceName, apiKey));
+  const pcm = normalizePcm(
+    await fetchPcm(trimmed, voiceName, apiKey, 0, undefined, timeoutForChunk(trimmed)),
+  );
   const wav = pcmToWav(pcm);
   file.create({ overwrite: true });
   file.write(wav);
