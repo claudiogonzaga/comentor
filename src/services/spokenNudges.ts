@@ -330,7 +330,54 @@ export async function scheduleSpokenTest(
  * Cancela os antigos e re-cria conforme a config. Best-effort: se um trecho
  * falhar (cota/rede), os outros seguem. Chamado por scheduleInspirationNotifications.
  */
-export async function syncSpokenInspirations(
+/**
+ * UMA sincronização por vez, por fonte. No boot, App.tsx e useAppStore.init
+ * agendam as inspirações quase ao mesmo tempo; as duas sincronizações rodavam em
+ * paralelo e, como nenhuma achava no cache o áudio que a outra ainda estava
+ * gerando, cada frase era gerada DUAS vezes na voz do Gemini (visto no logcat
+ * em 2026-09-25: pares idênticos de chamadas). Agora uma chamada que chega com
+ * outra em andamento só guarda a lista mais recente; ao terminar a atual, roda
+ * uma vez com ela — e aí o cache já tem os áudios.
+ */
+function singleFlight<T>(run: (items: T) => Promise<void>): (items: T) => Promise<void> {
+  let running: Promise<void> | null = null;
+  let pending: { items: T } | null = null;
+  const loop = async (first: T): Promise<void> => {
+    let next: T | null = first;
+    while (next !== null) {
+      const cur: T = next;
+      pending = null;
+      try {
+        await run(cur);
+      } catch {
+        /* best-effort, como antes */
+      }
+      next = pending ? (pending as { items: T }).items : null;
+    }
+  };
+  const trigger = (items: T): Promise<void> => {
+    if (running) {
+      pending = { items };
+      return running;
+    }
+    running = loop(items).finally(() => {
+      running = null;
+      // Uma chamada que chegou entre o fim do laço e este finally ficaria
+      // guardada e nunca executada — processa aqui.
+      if (pending) {
+        const late = (pending as { items: T }).items;
+        pending = null;
+        void trigger(late);
+      }
+    });
+    return running;
+  };
+  return trigger;
+}
+
+export const syncSpokenInspirations = singleFlight(syncSpokenInspirationsOnce);
+
+async function syncSpokenInspirationsOnce(
   items: { text: string; hour: number; minute: number }[],
 ): Promise<void> {
   if (!native) return;
@@ -439,7 +486,9 @@ function nextWeeklyEpoch(dow: number, hour: number, minute: number): number {
  *    sem voz — a versão falada é best-effort por cima da notificação nativa.
  * Gate: `spokenNudgesEnabled` (a chave "Falar em voz alta"). Best-effort.
  */
-export async function syncSpokenMedications(
+export const syncSpokenMedications = singleFlight(syncSpokenMedicationsOnce);
+
+async function syncSpokenMedicationsOnce(
   items: { id: number; text: string; hour: number; minute: number; daysOfWeek: number[] }[],
 ): Promise<void> {
   if (!native) return;

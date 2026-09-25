@@ -326,6 +326,36 @@ function logAttempt(
 }
 
 /**
+ * Por que o Gemini respondeu 200 SEM áudio? Em setembro/2026 isso passou a
+ * acontecer em 4 de 5 chamadas da leitura (40–90 s cada), e é o que deixa a
+ * geração lenta. O Gemini informa o motivo em finishReason (ex.: OTHER,
+ * MAX_TOKENS, SAFETY), às vezes em promptFeedback.blockReason, e às vezes manda
+ * TEXTO no lugar do áudio. Registrar isso decide o próximo passo (trechos
+ * menores, outro modelo, desistir antes) com dados em vez de palpite.
+ */
+function describeEmpty(json: {
+  candidates?: {
+    content?: { parts?: { text?: string }[] };
+    finishReason?: string;
+    finishMessage?: string;
+  }[];
+  promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+}): string {
+  const c = json.candidates?.[0];
+  const bits: string[] = [];
+  bits.push(`candidatos=${json.candidates?.length ?? 0}`);
+  if (c?.finishReason) bits.push(`finishReason=${c.finishReason}`);
+  if (c?.finishMessage) bits.push(`finishMessage="${c.finishMessage.slice(0, 120)}"`);
+  if (json.promptFeedback?.blockReason) bits.push(`blockReason=${json.promptFeedback.blockReason}`);
+  const txt = c?.content?.parts?.find((p) => p.text)?.text;
+  if (txt) bits.push(`texto="${txt.replace(/\s+/g, ' ').slice(0, 80)}"`);
+  const u = json.usageMetadata;
+  if (u) bits.push(`tokens=${u.promptTokenCount ?? '?'}/${u.candidatesTokenCount ?? '?'}`);
+  return bits.join(' ');
+}
+
+/**
  * Limite por chamada proporcional ao tamanho do trecho da LEITURA. Os trechos
  * de 2000 caracteres foram dimensionados em junho para ~45 s de geração; em
  * setembro de 2026 eles passaram a bater nos 90 s fixos, e cada estouro
@@ -443,11 +473,19 @@ async function fetchPcm(
     });
   }
   const json = (await res.json()) as {
-    candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
+    candidates?: {
+      content?: { parts?: { inlineData?: { data?: string }; text?: string }[] };
+      finishReason?: string;
+      finishMessage?: string;
+    }[];
+    promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
   };
   const audioBase64 = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   logAttempt(text, attempt, queueMs, Date.now() - tFetch, timeoutMs,
-    audioBase64 ? `ok ${Math.round((audioBase64.length * 3) / 4 / 1024)} KiB` : 'ok SEM ÁUDIO');
+    audioBase64
+      ? `ok ${Math.round((audioBase64.length * 3) / 4 / 1024)} KiB`
+      : `ok SEM ÁUDIO — ${describeEmpty(json)}`);
   if (!audioBase64) {
     // 200 mas sem áudio — também é uma falha transitória; re-tenta antes de desistir.
     if (attempt < MAX_RETRIES) {
