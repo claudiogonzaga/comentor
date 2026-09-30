@@ -12,7 +12,13 @@
 import { format } from 'date-fns';
 import { addHabitEvent, type HabitEventStatus } from './database';
 
-export type ConfirmVia = 'notification' | 'home' | 'voice' | 'review' | 'auto';
+/**
+ * Por onde veio a resposta. 'auto' = a corrente venceu sem resposta (registrado
+ * pela própria coruja); 'sensor' = confirmação AUTOMÁTICA por evidência (treino
+ * gravado no relógio, respiração/Ioga Nidra feita no app). São coisas opostas e
+ * a exportação as separa.
+ */
+export type ConfirmVia = 'notification' | 'home' | 'voice' | 'review' | 'auto' | 'sensor';
 
 export interface ConfirmMeta {
   via?: ConfirmVia;
@@ -20,16 +26,30 @@ export interface ConfirmMeta {
   k?: number;
   technique?: string;
   reason?: string | null;
+  /** Confirmação automática: a evidência ("relógio · Health Sync · 42 min"). */
+  evidence?: string | null;
+  /**
+   * Quando o comportamento ACONTECEU (epoch ms), se for diferente de agora —
+   * ex.: o fim do treino gravado no relógio, lido horas depois. A latência é
+   * calculada a partir daqui, não do momento em que o app percebeu.
+   */
+  occurredAt?: number;
 }
 
-function minutesSince(hhmm: string): number | null {
+function minutesSince(hhmm: string, occurredAt: number, via: ConfirmVia | undefined): number | null {
   const [h, m] = hhmm.split(':').map((s) => parseInt(s, 10));
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
-  const at = new Date();
+  const at = new Date(occurredAt);
   at.setHours(h, m, 0, 0);
-  const diff = Math.round((Date.now() - at.getTime()) / 60_000);
-  // Respondeu antes do horário (ex.: pela Home de manhã): atraso zero.
-  return diff < 0 ? 0 : diff;
+  // NEGATIVO = fez ANTES do horário programado (ex.: marcou pela Home de manhã
+  // um hábito das 18h). Antes isso era zerado — e era justamente o sinal mais
+  // útil de automaticidade: o hábito acontecendo sem a coruja precisar chamar.
+  let diff = Math.round((occurredAt - at.getTime()) / 60_000);
+  // Resposta a uma notificação da corrente de ONTEM depois da meia-noite (ex.:
+  // hábito das 22h respondido à 00:30): o horário de referência é o de ontem.
+  // Pela notificação, nunca se responde antes de ela tocar.
+  if ((via === 'notification' || via === 'voice') && diff < -12 * 60) diff += 24 * 60;
+  return diff;
 }
 
 /**
@@ -50,8 +70,9 @@ export async function recordHabitEvent(
       via: meta.via ?? null,
       k: meta.k ?? null,
       technique: meta.technique ?? null,
-      latencyMin: scheduledHHMM ? minutesSince(scheduledHHMM) : null,
+      latencyMin: scheduledHHMM ? minutesSince(scheduledHHMM, meta.occurredAt ?? Date.now(), meta.via) : null,
       reason: meta.reason?.trim() || null,
+      evidence: meta.evidence?.trim() || null,
     });
   } catch (err) {
     console.warn('[habitEvents] falhou:', err);

@@ -16,13 +16,60 @@ import { format } from 'date-fns';
 import {
   getAllHabitStates,
   getDoneNudgeTypes,
+  getKV,
+  getLastAutomaticityDates,
   getUserConfig,
   listMedications,
   listNudges,
+  recordAutomaticity,
+  setKV,
 } from './database';
 import { ensureChannel } from './notifications';
 
 export const REVIEW_TYPE = 'review';
+
+// ——— AUTOMATICIDADE (v1.106) ———
+// Uma pergunta por dia, no máximo, e cada hábito no máximo uma vez por semana:
+// "faço sem pensar" (1–7), o item central do SRBAI (Gardner et al., 2012). É a
+// medida direta de hábito formado — o que a contagem de "feitos" só adivinha.
+
+const AUTOMATICITY_EVERY_DAYS = 7;
+
+export interface AutomaticityQuestion {
+  key: string;
+  title: string;
+}
+
+/** O hábito a perguntar hoje (o de avaliação mais antiga), ou null. */
+export async function getAutomaticityQuestion(): Promise<AutomaticityQuestion | null> {
+  try {
+    const today = isoOf(new Date());
+    if ((await getKV('automaticity_asked')) === today) return null; // já perguntou hoje
+    const last = await getLastAutomaticityDates();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - AUTOMATICITY_EVERY_DAYS);
+    const cutoffISO = isoOf(cutoff);
+    const candidates = (await listNudges())
+      .filter((n) => n.enabled)
+      .filter((n) => !last[n.type] || last[n.type] <= cutoffISO)
+      .sort((a, b) => (last[a.type] ?? '').localeCompare(last[b.type] ?? ''));
+    const n = candidates[0];
+    return n ? { key: n.type, title: n.title } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Grava a resposta (1–7) ou o "agora não" (score null): não pergunta de novo hoje. */
+export async function answerAutomaticity(key: string, score: number | null): Promise<void> {
+  const today = isoOf(new Date());
+  try {
+    if (score != null) await recordAutomaticity(key, today, score);
+    await setKV('automaticity_asked', today);
+  } catch (err) {
+    console.warn('[review] automaticidade falhou:', err);
+  }
+}
 
 export interface PendingItem {
   key: string;

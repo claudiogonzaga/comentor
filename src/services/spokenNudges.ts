@@ -36,6 +36,11 @@ interface SpokenNudgesNative {
   rearmAll(): Promise<void>;
   setHeadphonesOnly(enabled: boolean): void;
   setNudgeVolume(volume: number): void;
+  setOwlPauseSeconds(seconds: number): void;
+  getSilencedAt?(): number;
+  hasUsageAccess(): boolean;
+  openUsageAccessSettings(): void;
+  openAppDetails(): void;
   isHeadphonesConnected(): boolean;
   setQuietHours(enabled: boolean, startMin: number, endMin: number, daysMask: number): void;
 }
@@ -111,6 +116,54 @@ export function setSpokenHeadphonesOnly(enabled: boolean): void {
 export function setSpokenVolume(volume: number): void {
   try {
     native?.setNudgeVolume(Math.max(0, Math.min(1, volume)));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Pausa (s) entre o canto da coruja e a fala, espelhada no nativo (o serviço lê
+ * no disparo, com o app fechado). O caminho de primeiro plano lê da config.
+ */
+export function setSpokenOwlPause(seconds: number): void {
+  try {
+    native?.setOwlPauseSeconds(Math.max(0, Math.min(120, Math.round(seconds))));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Último "Calar agora" tocado na notificação da fala (epoch ms; 0 = nunca). */
+export function getSpokenSilencedAt(): number {
+  try {
+    return Number(native?.getSilencedAt?.() ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** O usuário concedeu "Acesso ao uso" (base da coleta de uso do celular)? */
+export function hasUsageAccess(): boolean {
+  try {
+    return !!native?.hasUsageAccess();
+  } catch {
+    return false;
+  }
+}
+
+/** Abre Configurações > Acesso ao uso (direto no app, quando o sistema aceita). */
+export function openUsageAccessSettings(): void {
+  try {
+    native?.openUsageAccessSettings();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Abre "Informações do app" (menu ⋮ > Permitir configurações restritas). */
+export function openAppDetails(): void {
+  try {
+    native?.openAppDetails();
   } catch {
     /* ignore */
   }

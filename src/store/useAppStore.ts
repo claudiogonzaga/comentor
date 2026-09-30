@@ -8,10 +8,12 @@ import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
+import { backfillHealthDailyOnce } from '../services/health';
 import {
   setSpokenHeadphonesOnly,
   setSpokenQuietHours,
   setSpokenVolume,
+  setSpokenOwlPause,
 } from '../services/spokenNudges';
 
 interface AppState {
@@ -29,6 +31,17 @@ function syncVoiceFromConfig(config: UserConfig) {
   setActiveVoiceProvider(config.voiceProvider, config.geminiVoiceName);
 }
 
+/**
+ * Espelha no nativo o que o serviço de fala lê no disparo, com o app fechado:
+ * "só com fone", horário silencioso, volume e a pausa depois do canto.
+ */
+function mirrorSpokenConfig(config: UserConfig): void {
+  setSpokenHeadphonesOnly(config.spokenHeadphonesOnly);
+  setSpokenQuietHours(config);
+  setSpokenVolume(config.nudgeVolume ?? 1);
+  setSpokenOwlPause(config.owlPauseSeconds ?? 15);
+}
+
 export const useAppStore = create<AppState>((set) => ({
   ready: false,
   config: null,
@@ -38,10 +51,7 @@ export const useAppStore = create<AppState>((set) => ({
     const apiKey = await getApiKey();
     const hasApiKey = !!apiKey;
     syncVoiceFromConfig(config);
-    // Espelha "só falar com fone" + horário silencioso pro nativo (lidos no disparo).
-    setSpokenHeadphonesOnly(config.spokenHeadphonesOnly);
-    setSpokenQuietHours(config);
-    setSpokenVolume(config.nudgeVolume ?? 1);
+    mirrorSpokenConfig(config);
     set({ config: { ...config, hasApiKey }, hasApiKey, ready: true });
     // Ensure daily nudges (bluelight, breathing) are scheduled
     // — seeded on first run, re-scheduled on every cold start so the
@@ -65,12 +75,16 @@ export const useAppStore = create<AppState>((set) => ({
     scheduleInspirationNotifications().catch((err) =>
       console.warn('scheduleInspirationNotifications on init failed:', err),
     );
+    // Uma vez: corrige a série de saúde gravada com passos em dobro (até v1.105).
+    void backfillHealthDailyOnce();
   },
   refreshConfig: async () => {
     const config = await getUserConfig();
     const apiKey = await getApiKey();
     const hasApiKey = !!apiKey;
     syncVoiceFromConfig(config);
+    // Depois de restaurar backup / apagar dados, o nativo precisa ver os valores novos.
+    mirrorSpokenConfig(config);
     set({ config: { ...config, hasApiKey }, hasApiKey });
   },
   setConfig: async (patch) => {

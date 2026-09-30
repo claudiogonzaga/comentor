@@ -28,6 +28,8 @@ object SpokenStore {
   private const val KEY_QUIET_END = "quiet_end" // minutos do dia
   private const val KEY_QUIET_DAYS = "quiet_days" // bitmask (bit d = dia d, 0=dom)
   private const val KEY_NUDGE_VOLUME = "nudge_volume" // 0–1
+  private const val KEY_OWL_PAUSE_SEC = "owl_pause_sec" // segundos entre o canto e a fala
+  private const val KEY_SILENCED_AT = "silenced_at" // epoch ms do último "Calar agora"
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -60,6 +62,22 @@ object SpokenStore {
   fun getQuietDays(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_DAYS, 127)
 
   /** Volume da voz dos nudges (0–1), barra da Home. Lido no disparo do WAV. */
+  /**
+   * Pausa entre o CANTO da coruja e a FALA, em ms. É o tempo para a pessoa baixar
+   * o volume ou tocar "Calar agora" se o ambiente não permitir. Padrão 15 s.
+   */
+  fun getOwlPauseMs(ctx: Context): Long =
+    prefs(ctx).getInt(KEY_OWL_PAUSE_SEC, 15).coerceIn(0, 120) * 1000L
+  fun setOwlPauseSeconds(ctx: Context, seconds: Int) {
+    prefs(ctx).edit().putInt(KEY_OWL_PAUSE_SEC, seconds.coerceIn(0, 120)).apply()
+  }
+
+  /** Último "Calar agora" (epoch ms): o caminho JS de primeiro plano também respeita. */
+  fun getSilencedAt(ctx: Context): Long = prefs(ctx).getLong(KEY_SILENCED_AT, 0L)
+  fun setSilencedAt(ctx: Context, at: Long) {
+    prefs(ctx).edit().putLong(KEY_SILENCED_AT, at).apply()
+  }
+
   fun getNudgeVolume(ctx: Context): Float = prefs(ctx).getFloat(KEY_NUDGE_VOLUME, 1f)
   fun setNudgeVolume(ctx: Context, value: Float) {
     prefs(ctx).edit().putFloat(KEY_NUDGE_VOLUME, value.coerceIn(0f, 1f)).apply()

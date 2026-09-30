@@ -3,6 +3,7 @@ import {
   listMedications,
   listNudges,
   getAllHabitStates,
+  getSensorEvidenceForDate,
 } from './database';
 import { confirmNudge, unconfirmNudge } from './nudges';
 import { confirmMedication, unconfirmMedication } from './medications';
@@ -37,6 +38,11 @@ export interface TodoItem {
    * `skipped`: ali foi decisão sua, aqui foi desistência dela.
    */
   missed?: boolean;
+  /**
+   * Confirmado AUTOMATICAMENTE por evidência (treino no relógio, prática no
+   * app): o texto da evidência. A Home mostra "✓ Relógio"/"✓ App".
+   */
+  evidence?: string;
 }
 
 function todayISO(): string {
@@ -124,6 +130,13 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
   }
   const done = new Set(doneKeys);
 
+  let evidence: Record<string, string> = {};
+  try {
+    evidence = await getSensorEvidenceForDate(today);
+  } catch {
+    /* sem evidências */
+  }
+
   const items: TodoItem[] = [];
 
   // Hábitos já FORMADOS saem da lista do dia: a coruja parou de cobrar e só
@@ -157,6 +170,7 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
           done.has(`${n.type}:missed`) &&
           !done.has(n.type) &&
           !done.has(`${n.type}:skip`),
+        evidence: done.has(n.type) ? evidence[n.type] : undefined,
       });
     }
   } catch {

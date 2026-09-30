@@ -9,6 +9,11 @@ import {
   markNudgeDone,
   markNudgeUndone,
   updateNudge,
+  upsertDecisionPoint,
+  cancelFutureDecisionPoints,
+  resetFutureDecisionPoints,
+  getKV,
+  setKV,
 } from './database';
 import {
   NUDGE_CATEGORY,
@@ -119,6 +124,38 @@ function rescheduleSoon(): void {
     rescheduleTimer = null;
     void scheduleAllNudges().catch(() => {});
   }, 2000);
+}
+
+// PONTOS DE DECISÃO (v1.106): cada vez que a coruja decide mandar (ou não)
+// uma âncora, uma cobrança ou uma amostra, isso fica registrado — com a
+// probabilidade da escolha. É o que permite, depois, estimar o efeito de cada
+// cobrança sem confundir "a coruja insistiu" com "a pessoa já ia fazer".
+function stratumOf(d: Date): string {
+  const h = d.getHours();
+  return h < 12 ? 'manha' : h < 18 ? 'tarde' : 'noite';
+}
+
+function logDecision(p: {
+  date: string;
+  key: string;
+  kind: string;
+  k: number;
+  action: string;
+  technique?: string | null;
+  at?: Date | null;
+  pAction?: number | null;
+}): void {
+  void upsertDecisionPoint({
+    date: p.date,
+    key: p.key,
+    kind: p.kind,
+    k: p.k,
+    action: p.action,
+    technique: p.technique ?? null,
+    scheduledAt: p.at ? p.at.toISOString() : null,
+    pAction: p.pAction ?? 1,
+    stratum: p.at ? stratumOf(p.at) : null,
+  }).catch(() => {});
 }
 
 /** Instrução do botão, anexada às cobranças que ainda não a trazem. */
@@ -284,6 +321,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
 
   const nudges = await listNudges();
   const ids: string[] = [];
+  await resetFutureDecisionPoints(today, new Date().toISOString()).catch(() => {});
 
   // Memória compartilhada com o coach: o que a pessoa escreveu em manhãs ruins.
   // Entra no gerador de cobranças (técnica "eu-passado").
@@ -323,7 +361,11 @@ export async function scheduleAllNudges(): Promise<string[]> {
   }
 
   for (const n of nudges) {
-    if (!n.enabled) continue;
+    if (!n.enabled) {
+      // Desligado: o gatilho diário deixa de existir — ao religar, conta de novo.
+      void setKV(`anchor_armed:${n.type}`, '').catch(() => {});
+      continue;
+    }
     const parts = n.scheduleTime.split(':').map((s) => parseInt(s, 10));
     const h = parts[0];
     const m = parts[1] ?? 0;
@@ -365,7 +407,13 @@ export async function scheduleAllNudges(): Promise<string[]> {
         console.warn(`failed to schedule formed announcement ${n.type}:`, err);
       }
     }
-    if (decision?.schedule === 'none') continue; // formado: sem âncora, sem corrente
+    if (decision?.schedule === 'none') {
+      // formado: sem âncora, sem corrente — e isso também é uma decisão.
+      if (isVerify) {
+        logDecision({ date: today, key: n.type, kind: 'anchor', k: 0, action: 'skip', technique: 'formado', at: buildTodayAt(safeHour, safeMinute) });
+      }
+      continue;
+    }
     if (decision?.schedule === 'sample') {
       // Amostra: uma pergunta de um toque, no horário do hábito (ou já, se passou).
       const at = buildTodayAt(safeHour, safeMinute);
@@ -382,6 +430,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt, channelId },
         });
         if (id) ids.push(id);
+        logDecision({ date: today, key: n.type, kind: 'sample', k: 0, action: id ? 'send' : 'blocked', at: fireAt });
       } catch (err) {
         console.warn(`failed to schedule sample ${n.type}:`, err);
       }
@@ -412,6 +461,22 @@ export async function scheduleAllNudges(): Promise<string[]> {
         },
       });
       if (id) ids.push(id);
+      // A âncora é DIÁRIA: toca todo dia no horário, feito ou não. Registra a de
+      // hoje se ela ainda vai tocar, ou se já tocou — o que só é certo quando
+      // o gatilho, com este horário, já estava armado antes de hoje (hábito
+      // criado ou com horário mudado depois do horário só toca amanhã).
+      if (isVerify) {
+        const anchorAt = buildTodayAt(safeHour, safeMinute);
+        const armedKey = `anchor_armed:${n.type}`;
+        const [armedHHMM, armedDate] = ((await getKV(armedKey).catch(() => null)) ?? '').split('|');
+        const armedBefore = armedHHMM === n.scheduleTime && !!armedDate && armedDate < today;
+        if (anchorAt.getTime() > Date.now() || armedBefore) {
+          logDecision({ date: today, key: n.type, kind: 'anchor', k: 0, action: id ? 'send' : 'blocked', at: anchorAt });
+        }
+        if (id && armedHHMM !== n.scheduleTime) {
+          void setKV(armedKey, `${n.scheduleTime}|${today}`).catch(() => {});
+        }
+      }
     } catch (err) {
       console.warn(`failed to schedule nudge anchor ${n.type}:`, err);
     }
@@ -440,9 +505,17 @@ export async function scheduleAllNudges(): Promise<string[]> {
             onGenerated: rescheduleSoon,
           })
         ).lines;
+      // Probabilidade de uma batida do meio ser pulada (ver jitteredOffsetsMin):
+      // 1/8 por dia, sorteada entre as batidas do meio.
+      const pSkip = offsets.length >= 4 ? 1 / 8 / (offsets.length - 2) : 0;
       for (let k = 1; k <= offsets.length; k++) {
         const off = offsets[k - 1];
-        if (off === null) continue; // batida pulada de propósito
+        const isMiddle = k > 1 && k < offsets.length;
+        if (off === null) {
+          // batida pulada de propósito — registrada como decisão
+          logDecision({ date: today, key: n.type, kind: 'insistence', k, action: 'skip', technique: 'pulada', pAction: pSkip });
+          continue;
+        }
         const fireAt = new Date(base.getTime() + off * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
         const line = lines[k - 1] ?? lines[lines.length - 1];
@@ -468,6 +541,16 @@ export async function scheduleAllNudges(): Promise<string[]> {
             },
           });
           if (id) ids.push(id);
+          logDecision({
+            date: today,
+            key: n.type,
+            kind: 'insistence',
+            k,
+            action: id ? 'send' : 'blocked',
+            technique,
+            at: fireAt,
+            pAction: isMiddle ? 1 - pSkip : 1,
+          });
         } catch (err) {
           console.warn(`failed to schedule nudge follow-up ${n.type}:`, err);
         }
@@ -494,6 +577,7 @@ export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): P
     console.warn(`failed to mark nudge done ${nudgeType}:`, err);
   }
   void recordHabitEvent(nudgeType, 'done', meta, await scheduleTimeOf(nudgeType));
+  void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
   void refreshReviewNotification();
 
   // Cancela as insistências futuras (follow-ups) deste nudge.
@@ -531,6 +615,7 @@ export async function skipNudgeToday(nudgeType: string, meta: ConfirmMeta = {}):
     console.warn(`failed to mark nudge skipped ${nudgeType}:`, err);
   }
   void recordHabitEvent(nudgeType, 'not_done', meta, await scheduleTimeOf(nudgeType));
+  void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
   void refreshReviewNotification();
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
@@ -565,6 +650,7 @@ export async function unconfirmNudge(nudgeType: string): Promise<void> {
   } catch (err) {
     console.warn(`failed to mark nudge undone ${nudgeType}:`, err);
   }
+  void recordHabitEvent(nudgeType, 'undone', { via: 'home' });
   await scheduleAllNudges();
 }
 
@@ -580,6 +666,9 @@ export async function resetNudgeToday(nudgeType: string): Promise<void> {
   } catch (err) {
     console.warn(`failed to reset nudge ${nudgeType}:`, err);
   }
+  // Registra o "desfazer": se a marcação desfeita era automática (relógio,
+  // prática no app), isto é um FALSO POSITIVO do sensor — dado precioso.
+  void recordHabitEvent(nudgeType, 'undone', { via: 'home' });
   await scheduleAllNudges();
 }
 

@@ -8,6 +8,7 @@ import { speak, stopSpeaking } from '../services/voice';
 import { playBreathingSound, stopBreathingSound } from '../services/breathingSound';
 import { listBreathingCustomSounds } from '../services/database';
 import { useAppStore } from '../store/useAppStore';
+import { recordMindfulSession } from '../services/mindfulness';
 import type { BreathingCustomSound } from '../types';
 
 const DEFAULT_BREATHING_MINUTES = 16;
@@ -40,6 +41,22 @@ export function BreathingScreen() {
   const durationMin = config?.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES;
   const [remainingMs, setRemainingMs] = useState(durationMin * 60000);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Sessão em curso (para registrar a prática ao terminar ou parar).
+  const sessionRef = useRef<{ startedAt: number; plannedMin: number } | null>(null);
+
+  /** Registra a sessão uma vez só (fim natural, Pausar, Voltar ou saída da tela). */
+  const logSession = (completed: boolean) => {
+    const sess = sessionRef.current;
+    if (!sess) return;
+    sessionRef.current = null;
+    void recordMindfulSession({
+      kind: 'breathing',
+      startedAt: sess.startedAt,
+      endedAt: Date.now(),
+      plannedMinutes: sess.plannedMin,
+      completed,
+    });
+  };
   // Sons próprios — para resolver o file:// quando o selecionado é 'custom:<id>'.
   const customSoundsRef = useRef<BreathingCustomSound[]>([]);
   const [soundsReady, setSoundsReady] = useState(false);
@@ -73,6 +90,7 @@ export function BreathingScreen() {
     clearTick();
     setRemainingMs(0);
     stopBreathingSound();
+    logSession(true);
     if (thenReadRef.current) {
       // Encadeamento: ao terminar a respiração, abre a leitura e já toca.
       // SEM setTimeout: com a tela apagada o Android congela os timers JS — a
@@ -89,6 +107,8 @@ export function BreathingScreen() {
     const minutes = config?.breathingDurationMinutes ?? DEFAULT_BREATHING_MINUTES;
     const totalMs = Math.max(1, minutes) * 60000;
     const startedAt = Date.now();
+    logSession(false); // recomeço: a sessão anterior (se houver) terminou aqui
+    sessionRef.current = { startedAt, plannedMin: Math.max(1, minutes) };
     setRemainingMs(totalMs);
     clearTick();
     // O intervalo abaixo é SÓ o cronômetro visual (congela com a tela apagada
@@ -108,10 +128,19 @@ export function BreathingScreen() {
       customUri: resolveCustomUri(),
       stopAfterMs: totalMs,
       onAutoStop: () => void finish(),
+      // Outra tela de respiração (ou uma prévia) assumiu a trilha: esta sessão
+      // acabou aqui — registra e para o cronômetro.
+      onReplaced: () => {
+        logSession(false);
+        stoppedRef.current = true;
+        setRunning(false);
+        clearTick();
+      },
     });
   };
 
   const stop = () => {
+    logSession(false);
     stoppedRef.current = true;
     setRunning(false);
     stopSpeaking();
@@ -133,6 +162,7 @@ export function BreathingScreen() {
 
   useEffect(() => {
     return () => {
+      logSession(false);
       stoppedRef.current = true;
       stopSpeaking();
       stopBreathingSound();

@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Pressable,
   StyleSheet,
   Text,
@@ -18,13 +19,16 @@ import {
   formatSleepDuration,
   getHealthDiagnostics,
   getHealthSnapshot,
+  getSourceChecklist,
   hasExtraHealthPermissions,
   hasHealthPermissions,
   isHealthConnectAvailable,
   openHealthSettings,
   requestHealthPermissions,
   type HealthSnapshot,
+  type SourceCheck,
 } from '../services/health';
+import { hasUsageAccess } from '../services/spokenNudges';
 
 type Status = 'loading' | 'unavailable' | 'denied' | 'granted';
 
@@ -61,6 +65,28 @@ export function HealthCard() {
   const [connecting, setConnecting] = useState(false);
   const [hasExtras, setHasExtras] = useState(true);
   const [yearDraft, setYearDraft] = useState('');
+  const [sources, setSources] = useState<SourceCheck[] | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+
+  // Checklist de fontes: lido só quando aberto (várias leituras do Health Connect).
+  const loadSources = useCallback(async () => {
+    setSourcesLoading(true);
+    try {
+      const list = await getSourceChecklist();
+      const usage = hasUsageAccess();
+      list.push({
+        label: 'Acesso ao uso do celular',
+        ok: usage,
+        detail: usage ? 'concedido' : 'não concedido — veja Configurações',
+      });
+      setSources(list);
+    } catch {
+      setSources([]);
+    } finally {
+      setSourcesLoading(false);
+    }
+  }, []);
 
   const birthYear = config?.birthYear ?? null;
 
@@ -79,11 +105,24 @@ export function HealthCard() {
     setStatus('granted');
   }, []);
 
+  // Checklist aberto: relê ao voltar à tela ou ao app (a pessoa pode ter ido
+  // conceder uma permissão justamente por causa dele).
+  const sourcesOpenRef = useRef(false);
+  sourcesOpenRef.current = sourcesOpen;
+
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      if (sourcesOpenRef.current) void loadSources();
+    }, [load, loadSources]),
   );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active' && sourcesOpenRef.current) void loadSources();
+    });
+    return () => sub.remove();
+  }, [loadSources]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -256,6 +295,41 @@ export function HealthCard() {
             </Pressable>
           )}
 
+          <Pressable
+            onPress={() => {
+              const next = !sourcesOpen;
+              setSourcesOpen(next);
+              if (next) void loadSources();
+            }}
+            hitSlop={6}
+            style={styles.manageBtn}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: sourcesOpen }}
+          >
+            <Text style={styles.manageText}>
+              {sourcesOpen ? 'Fontes de dados ▾' : 'Fontes de dados ▸'}
+            </Text>
+          </Pressable>
+          {sourcesOpen && (
+            <View style={styles.sources}>
+              {sourcesLoading ? (
+                <ActivityIndicator size="small" color={colors.accent.gold} />
+              ) : (
+                (sources ?? []).map((c) => (
+                  <View key={c.label} style={styles.sourceRow}>
+                    <Text style={[styles.sourceMark, { color: c.ok ? colors.accent.gold : colors.text.tertiary }]}>
+                      {c.ok ? '✓' : '!'}
+                    </Text>
+                    <Text style={styles.sourceText}>
+                      <Text style={styles.sourceLabel}>{c.label}: </Text>
+                      {c.detail}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+
           <Pressable onPress={openHealthSettings} hitSlop={6} style={styles.manageBtn}>
             <Text style={styles.manageText}>Gerenciar no Health Connect →</Text>
           </Pressable>
@@ -335,5 +409,27 @@ const styles = StyleSheet.create({
   manageText: {
     ...typography.small,
     color: colors.accent.gold,
+  },
+  sources: {
+    marginTop: spacing.xs,
+    gap: 4,
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+  },
+  sourceMark: {
+    ...typography.bodyMedium,
+    width: 16,
+    textAlign: 'center',
+  },
+  sourceText: {
+    ...typography.small,
+    color: colors.text.secondary,
+    flex: 1,
+  },
+  sourceLabel: {
+    color: colors.text.primary,
   },
 });

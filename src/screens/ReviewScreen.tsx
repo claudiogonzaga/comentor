@@ -4,7 +4,14 @@ import { useNavigation } from '@react-navigation/native';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
-import { getCompleteDaysStreak, getPendingItemsToday, type PendingItem } from '../services/review';
+import {
+  answerAutomaticity,
+  getAutomaticityQuestion,
+  getCompleteDaysStreak,
+  getPendingItemsToday,
+  type AutomaticityQuestion,
+  type PendingItem,
+} from '../services/review';
 import { confirmNudge, skipNudgeToday } from '../services/nudges';
 import { confirmMedication, skipMedicationToday } from '../services/medications';
 
@@ -20,11 +27,24 @@ export function ReviewScreen() {
   const [streak, setStreak] = useState(0);
   const [askingReason, setAskingReason] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [autoQ, setAutoQ] = useState<AutomaticityQuestion | null>(null);
+  const [autoThanks, setAutoThanks] = useState(false);
 
   const reload = useCallback(async () => {
     setItems(await getPendingItemsToday());
     setStreak(await getCompleteDaysStreak());
   }, []);
+
+  useEffect(() => {
+    void getAutomaticityQuestion().then(setAutoQ);
+  }, []);
+
+  const answerAuto = async (score: number | null) => {
+    if (!autoQ) return;
+    await answerAutomaticity(autoQ.key, score);
+    setAutoQ(null);
+    if (score != null) setAutoThanks(true);
+  };
 
   useEffect(() => {
     void reload();
@@ -120,6 +140,35 @@ export function ReviewScreen() {
           ))
         )}
 
+        {autoQ && (
+          <Card style={styles.card}>
+            <Text style={styles.reasonLabel}>Pergunta da semana</Text>
+            <Text style={styles.title}>
+              “{autoQ.title}” é algo que eu faço sem precisar pensar.
+            </Text>
+            <Text style={styles.meta}>1 = discordo totalmente · 7 = concordo totalmente</Text>
+            <View style={styles.scaleRow}>
+              {[1, 2, 3, 4, 5, 6, 7].map((v) => (
+                <Pressable
+                  key={v}
+                  style={styles.scaleBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${v} de 7`}
+                  onPress={() => void answerAuto(v)}
+                >
+                  <Text style={styles.chipText}>{v}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable onPress={() => void answerAuto(null)} hitSlop={6}>
+              <Text style={styles.skipAuto}>agora não</Text>
+            </Pressable>
+          </Card>
+        )}
+        {autoThanks && !autoQ && (
+          <Text style={styles.streak}>Anotado. Daqui a uma semana eu pergunto de novo.</Text>
+        )}
+
         {items.length > 0 && streak > 0 && (
           <Text style={styles.streak}>
             {streak} dia{streak > 1 ? 's' : ''} seguido{streak > 1 ? 's' : ''} com o registro completo — não deixe hoje quebrar.
@@ -161,6 +210,16 @@ const styles = StyleSheet.create({
     borderColor: colors.accent.gold,
   },
   chipMuted: { borderColor: colors.bg.surfaceStrong },
+  scaleRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 4, marginBottom: spacing.xs },
+  scaleBtn: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+    alignItems: 'center',
+  },
+  skipAuto: { ...typography.small, color: colors.text.tertiary, textAlign: 'right', marginTop: spacing.xs },
   chipText: { ...typography.small, color: colors.text.primary },
   allDone: { ...typography.subtitle, color: colors.text.primary, textAlign: 'center' },
   streak: { ...typography.small, color: colors.text.secondary, textAlign: 'center', marginTop: spacing.sm },

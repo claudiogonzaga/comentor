@@ -12,6 +12,9 @@ import { getBreathingSound, type BreathingSoundId } from '../constants/breathing
 let active: AudioPlayer | null = null;
 let activeStatusSub: { remove: () => void } | null = null;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
+// Aviso ao DONO da trilha ativa de que ela foi substituída por outra (outra
+// tela de respiração, prévia): a sessão dele terminou ali.
+let activeOnReplaced: (() => void) | null = null;
 
 /**
  * Entra no modo de áudio do exercício de respiração.
@@ -76,6 +79,7 @@ function release(player: AudioPlayer): void {
  * poderia aterrissar depois e desfazê-lo).
  */
 function stopActiveSound(restoreMode: boolean): void {
+  activeOnReplaced = null;
   if (previewTimer) {
     clearTimeout(previewTimer);
     previewTimer = null;
@@ -136,11 +140,20 @@ export async function playBreathingSound(opts: {
    */
   stopAfterMs?: number | null;
   onAutoStop?: () => void;
+  /** Chamado se OUTRA trilha substituir esta antes do fim (não em stopBreathingSound). */
+  onReplaced?: () => void;
 }): Promise<boolean> {
   const source = resolveSource(opts.id, opts.customUri ?? null);
   if (source == null) return false;
   try {
+    const replaced = activeOnReplaced;
     stopActiveSound(false); // troca de trilha: para sem devolver o modo de áudio
+    try {
+      replaced?.();
+    } catch {
+      /* callback do dono anterior não derruba a troca */
+    }
+    activeOnReplaced = opts.onReplaced ?? null;
     // Depois do stop, para o restore não correr por cima: trilha por cima do
     // que o usuário já estiver ouvindo, e seguindo com a tela apagada.
     await enterMixingAudioMode();

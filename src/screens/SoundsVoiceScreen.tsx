@@ -37,6 +37,7 @@ import {
   getVoiceDiagnostics,
   cancelAllSpoken,
   setSpokenHeadphonesOnly,
+  setSpokenOwlPause,
   isHeadphonesConnected,
 } from '../services/spokenNudges';
 import {
@@ -54,6 +55,9 @@ import type { BreathingCustomSound, OwlSpeciesId } from '../types';
  * lembretes do dia, modo inspiração, avisos falados (fone/horário silencioso),
  * teste, Não Perturbe e volume. Tudo salva automaticamente.
  */
+/** Opções da pausa entre o canto da coruja e a fala (segundos). */
+const OWL_PAUSE_OPTIONS = [0, 5, 10, 15, 20, 30, 45, 60];
+
 export function SoundsVoiceScreen() {
   const navigation = useNavigation<any>();
   const { config, setConfig } = useAppStore();
@@ -178,6 +182,46 @@ export function SoundsVoiceScreen() {
             await rescheduleAllNotifications();
           }}
         />
+
+        {/* Pausa entre o canto e a fala: tempo de baixar o volume (ou tocar em
+            "Calar agora" na notificação) se o lugar não permitir a fala. */}
+        <Card style={styles.card}>
+          <Text style={styles.section}>Pausa depois do canto</Text>
+          <Text style={[typography.small, { color: colors.text.secondary }]}>
+            Antes de falar um lembrete, uma cobrança ou uma inspiração, a coruja
+            canta e espera este tempo. Se não for um bom momento: com a tela
+            apagada, toque em &quot;Calar agora&quot; na notificação da fala; com o
+            app aberto, arraste o volume da Comentora para zero na tela inicial.
+            (As teclas de volume do celular nem sempre alcançam a voz no
+            alto-falante — ela usa o volume de alarme.)
+          </Text>
+          <View style={[styles.quietDaysRow, { marginTop: spacing.sm }]}>
+            {OWL_PAUSE_OPTIONS.map((sec) => {
+              const on = (config?.owlPauseSeconds ?? 15) === sec;
+              return (
+                <Pressable
+                  key={sec}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={sec === 0 ? 'Sem pausa' : `${sec} segundos`}
+                  style={[styles.quietDayChip, on && styles.quietDayChipOn]}
+                  onPress={async () => {
+                    try {
+                      await setConfig({ owlPauseSeconds: sec });
+                      setSpokenOwlPause(sec); // espelha pro nativo (lê no disparo)
+                    } catch (err) {
+                      console.warn('set owl pause failed:', err);
+                    }
+                  }}
+                >
+                  <Text style={[styles.quietDayText, on && styles.quietDayTextOn]}>
+                    {sec === 0 ? 'Sem pausa' : `${sec} s`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
 
         <BreathingSoundPicker
           value={config?.breathingSoundId ?? 'cello'}

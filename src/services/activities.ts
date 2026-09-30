@@ -10,6 +10,7 @@ import {
   type BreathingSoundId,
 } from '../constants/breathingSounds';
 import type { QueueItem } from '../store/useMediaQueue';
+import { recordMindfulSession } from './mindfulness';
 
 // Resolve as ATIVIDADES da sequência (respiração, ioga nidra, leia para mim) em
 // fontes de áudio prontas para a fila (useMediaQueue). Cada passo aponta para
@@ -60,6 +61,23 @@ export async function listActivityOptions(kind: ActivityKind): Promise<ActivityO
   return texts.filter((t) => t.audioUri).map((t) => ({ ref: t.id, label: t.title }));
 }
 
+/** Item de Ioga Nidra para a fila, já registrando a prática ao terminar. */
+export function nidraQueueItem(label: string, uri: string): QueueItem {
+  return {
+    label,
+    source: { uri },
+    onEnd: ({ completed, playedMs, startedAt, durationMs }) =>
+      void recordMindfulSession({
+        kind: 'nidra',
+        startedAt,
+        endedAt: Date.now(),
+        playedMinutes: playedMs / 60_000,
+        plannedMinutes: durationMs ? durationMs / 60_000 : null,
+        completed,
+      }),
+  };
+}
+
 async function resolveStep(step: SeqStep): Promise<{ item?: QueueItem; warning?: string }> {
   if (step.kind === 'breathing') {
     const config = await getUserConfig();
@@ -83,6 +101,15 @@ async function resolveStep(step: SeqStep): Promise<{ item?: QueueItem; warning?:
         source,
         loop: true,
         stopAfterMs: minutes * 60000,
+        onEnd: ({ completed, playedMs, startedAt }) =>
+          void recordMindfulSession({
+            kind: 'breathing',
+            startedAt,
+            endedAt: Date.now(),
+            playedMinutes: playedMs / 60_000,
+            plannedMinutes: minutes,
+            completed,
+          }),
       },
     };
   }
@@ -90,7 +117,7 @@ async function resolveStep(step: SeqStep): Promise<{ item?: QueueItem; warning?:
     const list = await listYogaNidraSounds();
     const s = list.find((x) => x.id === step.ref);
     if (!s) return { warning: `Ioga Nidra: "${step.label}" não encontrado.` };
-    return { item: { label: `${ACTIVITY_LABEL.yoganidra}: ${s.name}`, source: { uri: s.uri } } };
+    return { item: nidraQueueItem(`${ACTIVITY_LABEL.yoganidra}: ${s.name}`, s.uri) };
   }
   // readaloud
   const texts = await listReadAloudTexts();

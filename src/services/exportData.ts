@@ -29,7 +29,12 @@ import {
   listMedications,
   listNudges,
   getAllHabitStates,
+  getMindfulSessionsBetween,
+  getDecisionPointsBetween,
+  getAutomaticityBetween,
   type CompletionRow,
+  type DecisionPoint,
+  type MindfulSession,
   type Experiment,
   type HabitEvent,
   type HealthDaily,
@@ -56,6 +61,10 @@ interface DayHabit {
   latencyMin: number | null;
   technique: string | null;
   reason: string | null;
+  /** Confirmação automática: a evidência (relógio, prática no app). */
+  evidence: string | null;
+  /** Houve uma confirmação automática DESFEITA pela pessoa neste dia (falso positivo). */
+  autoUndone: boolean;
 }
 
 interface DayRecord {
@@ -72,6 +81,8 @@ interface DayRecord {
   } | null;
   health: HealthDaily | null;
   habits: DayHabit[];
+  /** Práticas feitas no app (respiração, Ioga Nidra). */
+  practices: { kind: string; minutes: number; completed: boolean; at: string }[];
   feedback: string[];
 }
 
@@ -142,6 +153,11 @@ async function collect(opts: ExportOptions) {
     getTechniqueStats().catch(() => []),
     getAllHabitStates().catch(() => []),
   ]);
+  const [mindful, decisionsAll, automaticity] = await Promise.all([
+    getMindfulSessionsBetween(fromISO, toISO).catch(() => [] as MindfulSession[]),
+    getDecisionPointsBetween(fromISO, toISO).catch(() => [] as DecisionPoint[]),
+    getAutomaticityBetween(fromISO, toISO).catch(() => [] as { key: string; date: string; score: number }[]),
+  ]);
   const feedback = sleepHabit ? await getSnoozeFeedbackSince(sleepHabit.id, fromISO).catch(() => []) : [];
   const chat = opts.includeChat && sleepHabit ? await getChatSince(sleepHabit.id, fromISO).catch(() => []) : [];
   const interview = opts.includeInterview ? await getLatestCompletedInterview().catch(() => null) : null;
@@ -170,8 +186,31 @@ async function collect(opts: ExportOptions) {
     if (!compByDate.has(c.date)) compByDate.set(c.date, new Set());
     compByDate.get(c.date)!.add(c.nudgeType);
   }
+  // O último evento de RESPOSTA vence; um "desfazer" logo depois de uma
+  // confirmação automática marca falso positivo do sensor.
   const eventByDateKey = new Map<string, HabitEvent>();
-  for (const e of events) eventByDateKey.set(`${e.date}|${e.key}`, e); // o último vence
+  const autoUndone = new Set<string>();
+  for (const e of events) {
+    const dk = `${e.date}|${e.key}`;
+    if (e.status === 'undone') {
+      if (eventByDateKey.get(dk)?.via === 'sensor') autoUndone.add(dk);
+      eventByDateKey.delete(dk);
+      continue;
+    }
+    eventByDateKey.set(dk, e);
+  }
+  // Hoje ainda está em curso: as cobranças das próximas horas não "foram enviadas".
+  const decisions = decisionsAll.filter((d) => d.date < toISO);
+  const practicesByDate = new Map<string, DayRecord['practices']>();
+  for (const s of mindful) {
+    if (!practicesByDate.has(s.date)) practicesByDate.set(s.date, []);
+    practicesByDate.get(s.date)!.push({
+      kind: s.kind === 'breathing' ? 'respiração' : 'Ioga Nidra',
+      minutes: Math.round(s.minutes),
+      completed: s.completed,
+      at: hhmmOf(s.startedAt) ?? '',
+    });
+  }
   const feedbackByDate = new Map<string, string[]>();
   for (const f of feedback) {
     const d = f.createdAt.slice(0, 10);
@@ -203,6 +242,8 @@ async function collect(opts: ExportOptions) {
         latencyMin: ev?.latencyMin ?? null,
         technique: ev?.technique ?? null,
         reason: ev?.reason ?? null,
+        evidence: ev?.via === 'sensor' ? ev?.evidence ?? null : null,
+        autoUndone: autoUndone.has(`${date}|${key}`),
       };
     });
     days.push({
@@ -221,6 +262,7 @@ async function collect(opts: ExportOptions) {
         : null,
       health: healthByDate.get(date) ?? null,
       habits,
+      practices: practicesByDate.get(date) ?? [],
       feedback: feedbackByDate.get(date) ?? [],
     });
   }
@@ -254,7 +296,10 @@ async function collect(opts: ExportOptions) {
     habitRates,
   };
 
-  return { fromISO, toISO, config, days, summary, experiments, techniques, states, chat, interview, followups, titles };
+  return {
+    fromISO, toISO, config, days, summary, experiments, techniques, states, chat, interview, followups, titles,
+    decisions, automaticity,
+  };
 }
 
 type Collected = Awaited<ReturnType<typeof collect>>;
@@ -300,7 +345,7 @@ Faça, nesta ordem:
 Use as falas dela quando forem relevantes, citando literalmente. Não moralize. Termine perguntando o que ela topa testar.`;
 
 function md(c: Collected): string {
-  const { fromISO, toISO, config, days, summary: s, experiments, techniques, states, chat, interview, followups } = c;
+  const { fromISO, toISO, config, days, summary: s, experiments, techniques, states, chat, interview, followups, decisions, automaticity } = c;
   const out: string[] = [];
   out.push(`# CoMentor — exportação de sinais (${days.length} dias: ${fromISO} → ${toISO})`);
   out.push('');
@@ -350,6 +395,39 @@ function md(c: Collected): string {
     }
     out.push('');
   }
+  if (automaticity.length) {
+    out.push('## Automaticidade ("faço sem pensar", 1–7, autoavaliação semanal)');
+    out.push('');
+    const byKey = new Map<string, { date: string; score: number }[]>();
+    for (const a of automaticity) {
+      if (!byKey.has(a.key)) byKey.set(a.key, []);
+      byKey.get(a.key)!.push({ date: a.date, score: a.score });
+    }
+    for (const [key, list] of byKey) {
+      out.push(`- ${c.titles.get(key) ?? key}: ${list.map((x) => `${x.score} (${x.date.slice(5)})`).join(' → ')}`);
+    }
+    out.push('');
+  }
+  if (decisions.length) {
+    out.push('## Decisões da coruja (o que ela mandou, pulou ou cancelou)');
+    out.push('');
+    const agg = new Map<string, Record<string, number>>();
+    for (const d of decisions) {
+      const k = d.kind === 'insistence' ? `cobrança ${d.k}` : d.kind === 'anchor' ? 'âncora' : d.kind;
+      const row = agg.get(k) ?? {};
+      row[d.action] = (row[d.action] ?? 0) + 1;
+      agg.set(k, row);
+    }
+    out.push('| tipo | enviada | pulada | cancelada (já respondido) | bloqueada |');
+    out.push('|---|---:|---:|---:|---:|');
+    const order = (x: string) => (x === 'âncora' ? 0 : x.startsWith('cobrança') ? parseInt(x.split(' ')[1], 10) : 99);
+    for (const [k, r] of [...agg.entries()].sort((a, b) => order(a[0]) - order(b[0]))) {
+      out.push(`| ${k} | ${r.send ?? 0} | ${r.skip ?? 0} | ${r.cancelled ?? 0} | ${r.blocked ?? 0} |`);
+    }
+    out.push('');
+    out.push('("pulada" inclui batidas sorteadas para NÃO tocar — comparar os dias com e sem ela estima o efeito da cobrança.)');
+    out.push('');
+  }
   const formed = states.filter((st) => st.state !== 'forming');
   if (formed.length) {
     out.push('## Hábitos já consolidados (a coruja parou de cobrar)');
@@ -360,7 +438,7 @@ function md(c: Collected): string {
   out.push('## Dia a dia');
   out.push('');
   for (const d of days) {
-    const hasAnything = d.sleep || d.health || d.habits.some((h) => h.status !== '—') || d.feedback.length;
+    const hasAnything = d.sleep || d.health || d.habits.some((h) => h.status !== '—') || d.feedback.length || d.practices.length;
     if (!hasAnything) continue;
     out.push(`### ${d.date} (${d.weekday})${d.experiments.length ? ` · experimento: ${d.experiments.join(', ')}` : ''}`);
     if (d.sleep) {
@@ -393,12 +471,23 @@ function md(c: Collected): string {
           .map((h) => {
             const mark = h.status === 'feito' ? '✅' : h.status === 'não fez' ? '❌' : '❔';
             const meta: string[] = [];
-            if (h.k) meta.push(`${h.k}ª cobrança`);
+            if (h.evidence) meta.push(`automático: ${h.evidence}`);
+            else if (h.k) meta.push(`${h.k}ª cobrança`);
             else if (h.via && h.via !== 'auto') meta.push(h.via === 'home' ? 'pela Home' : h.via);
             if (h.latencyMin !== null && h.latencyMin > 0) meta.push(`+${h.latencyMin} min`);
+            else if (h.latencyMin !== null && h.latencyMin < 0 && h.status === 'feito') meta.push(`${-h.latencyMin} min ANTES do horário`);
+            else if (h.latencyMin !== null && h.latencyMin < 0) meta.push(`avisou ${-h.latencyMin} min antes do horário`);
+            if (h.autoUndone) meta.push('confirmação automática desfeita pela pessoa');
             if (h.reason) meta.push(`"${h.reason}"`);
             return `${h.title} ${mark}${meta.length ? ` (${meta.join(', ')})` : ''}`;
           })
+          .join(' · ')}`,
+      );
+    }
+    if (d.practices.length) {
+      out.push(
+        `- práticas no app: ${d.practices
+          .map((p) => `${p.kind} ${p.minutes} min às ${p.at}${p.completed ? ' (completa)' : ' (interrompida)'}`)
           .join(' · ')}`,
       );
     }
@@ -429,7 +518,8 @@ function md(c: Collected): string {
   out.push('## Legenda');
   out.push('');
   out.push('- ✅ feito · ❌ não fez (a pessoa disse) · ❔ sem resposta (ninguém respondeu; NÃO é "não fez")');
-  out.push('- "Nª cobrança": em qual insistência a resposta veio; "+X min": atraso em relação ao horário programado');
+  out.push('- "Nª cobrança": em qual insistência a resposta veio; "+X min": atraso em relação ao horário programado; "X min ANTES do horário": feito antes de a coruja chamar (sinal de hábito automático)');
+  out.push('- "automático: …": o app confirmou sozinho por evidência (treino gravado no relógio, prática feita no app) — a pessoa não precisou responder');
   out.push('- "como acordou": nota 0–10 dada na manhã seguinte; texto entre aspas é literal da pessoa');
   out.push('');
   return out.join('\n');
@@ -437,7 +527,7 @@ function md(c: Collected): string {
 
 function csv(c: Collected): string {
   const keys = c.days[0]?.habits.map((h) => h.key) ?? [];
-  const head = ['data', 'dia', 'alvo', 'deitou', 'atraso_min', 'acordou_0_10', 'nota_manha', 'relogio_sono_min', 'passos', 'exercicio_min', 'fc_repouso', 'peso_kg', 'experimentos', ...keys.map((k) => c.titles.get(k) ?? k)];
+  const head = ['data', 'dia', 'alvo', 'deitou', 'atraso_min', 'acordou_0_10', 'nota_manha', 'relogio_sono_min', 'passos', 'exercicio_min', 'fc_repouso', 'peso_kg', 'praticas_min', 'experimentos', ...keys.map((k) => c.titles.get(k) ?? k)];
   const esc = (v: unknown) => {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -458,6 +548,7 @@ function csv(c: Collected): string {
         d.health?.exerciseMinutes ?? '',
         d.health?.restingHr ?? '',
         d.health?.weightKg ?? '',
+        d.practices.length ? d.practices.reduce((a, p) => a + p.minutes, 0) : '',
         d.experiments.join('; '),
         ...d.habits.map((h) => (h.status === '—' ? '' : h.status)),
       ]
@@ -479,6 +570,8 @@ export async function buildExport(opts: ExportOptions): Promise<{ markdown: stri
       techniques: c.techniques,
       habitStates: c.states,
       days: c.days,
+      automaticity: c.automaticity,
+      decisionPoints: c.decisions,
       interview: c.interview?.summary ?? null,
       interviewFollowups: c.followups,
       chat: c.chat,

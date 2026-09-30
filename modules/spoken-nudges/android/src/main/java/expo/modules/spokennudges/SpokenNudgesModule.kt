@@ -1,6 +1,7 @@
 package expo.modules.spokennudges
 
 import android.app.AlarmManager
+import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -95,6 +96,77 @@ class SpokenNudgesModule : Module() {
     // Volume da voz dos nudges (0–1), barra da Home. O serviço aplica no WAV.
     Function("setNudgeVolume") { volume: Double ->
       SpokenStore.setNudgeVolume(context, volume.toFloat())
+    }
+
+    // Pausa (s) entre o canto da coruja e a fala. O serviço lê no disparo.
+    Function("setOwlPauseSeconds") { seconds: Int ->
+      SpokenStore.setOwlPauseSeconds(context, seconds)
+    }
+
+    // Último "Calar agora" (epoch ms) — a fala de primeiro plano confere depois da pausa.
+    Function("getSilencedAt") {
+      SpokenStore.getSilencedAt(context).toDouble()
+    }
+
+    // Acesso ao uso (PACKAGE_USAGE_STATS): concedido pelo usuário em
+    // Configurações > Acesso ao uso. Base da fase 2 (coleta de uso do celular).
+    Function("hasUsageAccess") {
+      try {
+        val aom = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          aom.unsafeCheckOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName,
+          )
+        } else {
+          @Suppress("DEPRECATION")
+          aom.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName,
+          )
+        }
+        if (mode == AppOpsManager.MODE_DEFAULT) {
+          context.checkCallingOrSelfPermission(android.Manifest.permission.PACKAGE_USAGE_STATS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+          mode == AppOpsManager.MODE_ALLOWED
+        }
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    // Abre a tela "Acesso ao uso" já no app, quando o sistema aceita; senão a lista.
+    Function("openUsageAccessSettings") {
+      val direct = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+        data = Uri.fromParts("package", context.packageName, null)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      try {
+        context.startActivity(direct)
+      } catch (_: Exception) {
+        try {
+          context.startActivity(
+            Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+          )
+        } catch (_: Exception) {}
+      }
+    }
+
+    // "Informações do app" — onde fica o menu ⋮ > "Permitir configurações
+    // restritas", exigido quando o APK foi instalado por um gerenciador de
+    // arquivos (Android 13+).
+    Function("openAppDetails") {
+      try {
+        context.startActivity(
+          Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          },
+        )
+      } catch (_: Exception) {}
     }
   }
 }

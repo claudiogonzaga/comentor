@@ -28,6 +28,7 @@ import { VerticalVolume } from '../components/VerticalVolume';
 import { SequenceCard } from '../components/SequenceCard';
 import { InspirationHomeCard } from '../components/InspirationHomeCard';
 import { getTodayTodos, type TodoItem } from '../services/todos';
+import { checkExerciseEvidence } from '../services/exerciseDetection';
 import {
   confirmMedication,
   skipMedicationToday,
@@ -43,7 +44,7 @@ import {
 import type { OwlMood } from '../types';
 import { cancelSleepEscalationReminders } from '../services/notifications';
 import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
-import { getCompleteDaysStreak } from '../services/review';
+import { getAutomaticityQuestion, getCompleteDaysStreak } from '../services/review';
 
 interface Dashboard {
   config: { bedtime: string; name: string | null };
@@ -186,6 +187,8 @@ export function HomeScreen() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   // Completude da coleta: dias seguidos em que todo item teve resposta.
   const [completeStreak, setCompleteStreak] = useState(0);
+  // Pergunta semanal de automaticidade pendente (aparece à noite, leva ao Fechar o dia).
+  const [hasAutoQ, setHasAutoQ] = useState(false);
 
   useEffect(() => {
     // Throttled background check (only fires if 6h+ since last check).
@@ -203,6 +206,12 @@ export function HomeScreen() {
       sleepHabit: d.sleepHabit ? { id: d.sleepHabit.id } : null,
     });
     getCompleteDaysStreak().then(setCompleteStreak).catch(() => {});
+    getAutomaticityQuestion()
+      .then((q) => setHasAutoQ(!!q))
+      .catch(() => {});
+    // Treino gravado no relógio confirma o hábito de exercício (no máx. uma
+    // leitura a cada 10 min; a lista abaixo já sai atualizada).
+    await checkExerciseEvidence().catch(() => []);
     try {
       setTodos(await getTodayTodos());
     } catch {
@@ -250,13 +259,13 @@ export function HomeScreen() {
   ) => {
     try {
       if (item.kind === 'med' && item.medId != null) {
-        if (action === 'done') await confirmMedication(item.medId);
-        else if (action === 'skip') await skipMedicationToday(item.medId);
+        if (action === 'done') await confirmMedication(item.medId, { via: 'home' });
+        else if (action === 'skip') await skipMedicationToday(item.medId, { via: 'home' });
         else if (action === 'undo') await resetMedicationToday(item.medId);
         else await snoozeMedication(item.medId, storeConfig?.snoozeMinutes ?? 20);
       } else if (item.kind === 'nudge' && item.nudgeType) {
-        if (action === 'done') await confirmNudge(item.nudgeType);
-        else if (action === 'skip') await skipNudgeToday(item.nudgeType);
+        if (action === 'done') await confirmNudge(item.nudgeType, { via: 'home' });
+        else if (action === 'skip') await skipNudgeToday(item.nudgeType, { via: 'home' });
         else if (action === 'undo') await resetNudgeToday(item.nudgeType);
         else await snoozeNudge(item.nudgeType, storeConfig?.snoozeMinutes ?? 20);
       }
@@ -436,6 +445,11 @@ export function HomeScreen() {
               </Text>
             </Pressable>
           )}
+          {hasAutoQ && !todos.some((t) => !t.done) && new Date().getHours() >= 18 && (
+            <Pressable style={styles.closeDayBtn} onPress={() => navigation.navigate('Review')}>
+              <Text style={styles.closeDayText}>Pergunta da semana · 1 toque</Text>
+            </Pressable>
+          )}
           {completeStreak > 0 && (
             <Text style={styles.streakLine}>
               Registro completo: {completeStreak} dia{completeStreak > 1 ? 's' : ''} seguido
@@ -477,7 +491,16 @@ export function HomeScreen() {
                         (item.skipped || item.missed) && styles.todoStatusSkip,
                       ]}
                     >
-                      {item.missed ? 'Não feito' : item.skipped ? 'Não hoje' : '✓ Feito'} ✕
+                      {item.missed
+                        ? 'Não feito'
+                        : item.skipped
+                          ? 'Não hoje'
+                          : item.evidence
+                            ? /no app/.test(item.evidence)
+                              ? '✓ App'
+                              : '✓ Relógio'
+                            : '✓ Feito'}{' '}
+                      ✕
                     </Text>
                   </Pressable>
                 )}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Linking,
   Pressable,
   ScrollView,
@@ -22,6 +23,7 @@ import { releaseModel } from '../services/localModel';
 import { resetAllUserData } from '../services/database';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
 import { confirmAndRestoreBackup, exportBackup } from '../services/backup';
+import { hasUsageAccess, openAppDetails, openUsageAccessSettings } from '../services/spokenNudges';
 import type { Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
@@ -38,6 +40,29 @@ export function SettingsScreen() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [exportingBackup, setExportingBackup] = useState(false);
+  const [usageAccess, setUsageAccess] = useState(() => hasUsageAccess());
+
+  // Reconfere ao voltar das Configurações do Android (a pessoa pode ter concedido lá).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') setUsageAccess(hasUsageAccess());
+    });
+    return () => sub.remove();
+  }, []);
+
+  const showRestrictedHelp = () => {
+    Alert.alert(
+      'O Android não deixa ligar?',
+      'Apps instalados fora da Play Store às vezes aparecem com o botão bloqueado ("configuração restrita"). Para liberar:\n\n' +
+        '1. Toque em "Abrir informações do app".\n' +
+        '2. No menu ⋮ (canto de cima), escolha "Permitir configurações restritas" e confirme.\n' +
+        '3. Volte aqui e toque em "Conceder acesso" de novo.',
+      [
+        { text: 'Fechar', style: 'cancel' },
+        { text: 'Abrir informações do app', onPress: () => openAppDetails() },
+      ],
+    );
+  };
 
   const handleExportBackup = async () => {
     setExportingBackup(true);
@@ -214,6 +239,33 @@ export function SettingsScreen() {
         
 
         
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Uso do celular</Text>
+          <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
+            Com o &quot;Acesso ao uso&quot;, a Comentora poderá perceber sozinha coisas
+            como tela acesa depois da hora de dormir, redes sociais na cama ou uma
+            meditação feita em outro app — sem você precisar contar. Os dados ficam
+            só no aparelho. Nesta versão, só a permissão; a leitura vem na próxima.
+          </Text>
+          <View style={styles.versionRow}>
+            <Text style={[typography.body, { color: colors.text.primary }]}>Acesso ao uso</Text>
+            <Text style={[typography.bodyMedium, { color: usageAccess ? colors.accent.gold : colors.text.tertiary }]}>
+              {usageAccess ? 'concedido ✓' : 'não concedido'}
+            </Text>
+          </View>
+          {!usageAccess && (
+            <>
+              <View style={{ height: spacing.sm }} />
+              <Button label="Conceder acesso" variant="secondary" onPress={() => openUsageAccessSettings()} />
+              <Pressable onPress={showRestrictedHelp} hitSlop={6} style={{ marginTop: spacing.sm }}>
+                <Text style={[typography.small, { color: colors.accent.gold }]}>
+                  O botão está bloqueado no Android? →
+                </Text>
+              </Pressable>
+            </>
+          )}
+        </Card>
 
         <Card style={styles.card}>
           <Text style={styles.section}>Atualizações</Text>

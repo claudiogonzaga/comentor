@@ -196,6 +196,12 @@ export interface UserConfig {
   /** Horário (HH:MM) da notificação "fechar o dia" — pede resposta aos itens sem registro. */
   reviewTime: string;
   reviewEnabled: boolean;
+  /**
+   * Segundos de silêncio entre o CANTO da coruja e a FALA (nudges, lembretes,
+   * inspirações). Tempo para a pessoa baixar o volume ou tocar "Calar agora"
+   * se o ambiente não permitir. Padrão 15.
+   */
+  owlPauseSeconds: number;
   /** Áudio de Ioga Nidra selecionado (id em yoga_nidra_sounds), ou null. */
   yogaNidraSoundId: number | null;
 }

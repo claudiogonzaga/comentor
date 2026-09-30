@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import type { Permission } from 'react-native-health-connect';
-import { getUserConfig } from './database';
+import { getKV, getUserConfig, setKV } from './database';
 
 /**
  * Acesso aos dados de saúde do Android via Health Connect (substituto oficial
@@ -152,7 +152,7 @@ export interface HealthSnapshot {
   exerciseMinutesWeek: number;
   /**
    * Minutos NESTA SEMANA com FC acima de 80% da FC máxima estimada
-   * (220 − idade). null = sem ano de nascimento, sem permissão ou sem dados.
+   * (Tanaka: 208 − 0,7 × idade). null = sem ano de nascimento, sem permissão ou sem dados.
    */
   hrHighMinutesWeek: number | null;
   /**
@@ -234,6 +234,217 @@ async function readAllRecords(
   return out;
 }
 
+// ————————————— Fontes, deduplicação e FC (v1.106) —————————————
+
+type RecordMeta = {
+  dataOrigin?: string;
+  lastModifiedTime?: string;
+  recordingMethod?: number;
+  device?: { type?: number; manufacturer?: string; model?: string };
+};
+
+/** Apps que trazem o RELÓGIO Huawei para o Health Connect. */
+export const WATCH_ORIGINS = ['nl.appyhapps.healthsync', 'com.huawei.health'];
+
+const ORIGIN_LABEL: Record<string, string> = {
+  'nl.appyhapps.healthsync': 'Health Sync',
+  'com.huawei.health': 'Huawei Health',
+  'com.google.android.apps.fitness': 'Google Fit',
+  'com.google.android.apps.healthdata': 'Health Connect',
+  'com.samsung.android.app.health': 'Samsung Health',
+};
+
+export function originLabel(pkg: string | undefined | null): string {
+  if (!pkg) return 'origem desconhecida';
+  return ORIGIN_LABEL[pkg] ?? pkg;
+}
+
+/** Health Connect: DEVICE_TYPE_WATCH=1 (a lib omite do enum), BAND=6, RING=4, PHONE=2. */
+function deviceLabel(type: number | undefined): string | null {
+  switch (type) {
+    case 1:
+      return 'relógio';
+    case 6:
+      return 'pulseira';
+    case 4:
+      return 'anel';
+    case 7:
+      return 'cinta';
+    case 2:
+      return 'celular';
+    case 3:
+      return 'balança';
+    default:
+      return null;
+  }
+}
+
+function methodLabel(method: number | undefined): string | null {
+  switch (method) {
+    case 1:
+      return 'gravado ativamente';
+    case 2:
+      return 'automático';
+    case 3:
+      return 'digitado à mão';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Soma de passos na janela SEM contagem dupla. Health Sync (relógio) e Google
+ * Fit (celular) escrevem os MESMOS passos; somar `readRecords` dobrava o
+ * número. O `aggregate` do Health Connect deduplica pela prioridade de fontes
+ * que o próprio usuário define no Health Connect. Se falhar (versão antiga),
+ * cai na soma crua — e `deduped=false` diz isso a quem exibe.
+ */
+async function sumSteps(
+  m: HealthConnectModule,
+  startTime: string,
+  endTime: string,
+): Promise<{ total: number; raw: number | null; deduped: boolean }> {
+  try {
+    const agg = await m.aggregateRecord({
+      recordType: 'Steps',
+      timeRangeFilter: { operator: 'between', startTime, endTime },
+    });
+    const total = Math.round(Number(agg?.COUNT_TOTAL ?? 0));
+    if (Number.isFinite(total)) return { total, raw: null, deduped: true };
+  } catch {
+    /* cai para a soma crua */
+  }
+  const recs = (await readAllRecords(m, 'Steps' as never, startTime, endTime)) as { count?: number }[];
+  const raw = recs.reduce((a, r) => a + (r.count ?? 0), 0);
+  return { total: raw, raw, deduped: false };
+}
+
+export interface ExerciseSessionInfo {
+  start: string;
+  end: string;
+  minutes: number;
+  exerciseType: number;
+  title: string | null;
+  origin: string | null;
+  device: string | null;
+  /** Gravado ativamente (o usuário iniciou o treino no relógio/app). */
+  active: boolean;
+}
+
+/**
+ * Sessões de exercício DEDUPLICADAS: o mesmo treino chega por Huawei Health e
+ * por Health Sync (ou é reenviado). Duas sessões que se sobrepõem em mais da
+ * metade da menor contam como UMA. Fica a de MAIOR PRIORIDADE — relógio antes
+ * de celular, gravada ativamente antes de automática — e, empatando, a mais longa.
+ */
+function dedupeSessions(recs: unknown[]): ExerciseSessionInfo[] {
+  const all: ExerciseSessionInfo[] = [];
+  for (const raw of recs) {
+    const r = raw as {
+      startTime: string;
+      endTime: string;
+      exerciseType?: number;
+      title?: string;
+      metadata?: RecordMeta;
+    };
+    const minutes = durationMinutes(r.startTime, r.endTime);
+    if (minutes <= 0) continue;
+    all.push({
+      start: r.startTime,
+      end: r.endTime,
+      minutes,
+      exerciseType: r.exerciseType ?? 0,
+      title: r.title?.trim() || null,
+      origin: r.metadata?.dataOrigin ?? null,
+      device: deviceLabel(r.metadata?.device?.type),
+      active: r.metadata?.recordingMethod === 1,
+    });
+  }
+  const prio = (x: ExerciseSessionInfo) =>
+    (x.origin && WATCH_ORIGINS.includes(x.origin) ? 2 : 0) + (x.active ? 1 : 0);
+  all.sort((a, b) => prio(b) - prio(a) || b.minutes - a.minutes); // quem vence vem primeiro
+  const kept: ExerciseSessionInfo[] = [];
+  for (const s of all) {
+    const s0 = new Date(s.start).getTime();
+    const s1 = new Date(s.end).getTime();
+    const dup = kept.some((k) => {
+      const k0 = new Date(k.start).getTime();
+      const k1 = new Date(k.end).getTime();
+      const overlap = Math.min(s1, k1) - Math.max(s0, k0);
+      return overlap > 0.5 * Math.min(s1 - s0, k1 - k0);
+    });
+    if (!dup) kept.push(s);
+  }
+  return kept.sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/**
+ * Sessões de exercício (deduplicadas) na janela. `origins` filtra as origens
+ * ANTES de deduplicar (senão uma cópia mais longa de outra origem "engoliria" a
+ * do relógio). [] sem permissão/dados.
+ */
+export async function getExerciseSessions(
+  startISO: string,
+  endISO: string,
+  origins?: string[],
+): Promise<ExerciseSessionInfo[]> {
+  const m = getModule();
+  if (!m || !(await ensureInit(m))) return [];
+  try {
+    let recs = await readAllRecords(m, 'ExerciseSession' as never, startISO, endISO);
+    if (origins) {
+      recs = recs.filter((r) => {
+        const o = (r as { metadata?: RecordMeta }).metadata?.dataOrigin;
+        return !!o && origins.includes(o);
+      });
+    }
+    return dedupeSessions(recs);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * FC máxima estimada — Tanaka (2001): 208 − 0,7 × idade. A fórmula 220 − idade
+ * subestima a FC máxima de quem tem mais de ~40 anos e inflava os minutos de
+ * "FC alta".
+ */
+export function estimateMaxHr(age: number): number {
+  return Math.round(208 - 0.7 * age);
+}
+
+/**
+ * Minutos em cada zona, PONDERADOS PELO TEMPO: cada amostra vale o intervalo
+ * até a próxima, com teto de 60 s (amostra isolada não vira um minuto inteiro
+ * de esforço, nem um buraco de 10 min herda a última FC). Amostras repetidas
+ * (mesmo instante, fontes diferentes) contam uma vez.
+ */
+function hrZoneMinutes(
+  records: { samples?: { time: string; beatsPerMinute: number }[] }[],
+  maxHr: number,
+): { zone2: number; high: number } {
+  const byTime = new Map<number, number>();
+  for (const rec of records) {
+    for (const smp of rec.samples ?? []) {
+      const t = new Date(smp.time).getTime();
+      const bpm = smp.beatsPerMinute;
+      if (!Number.isFinite(t) || !(bpm > 25 && bpm < 230)) continue;
+      byTime.set(t, bpm);
+    }
+  }
+  const times = [...byTime.keys()].sort((a, b) => a - b);
+  let zone2Ms = 0;
+  let highMs = 0;
+  for (let i = 0; i < times.length; i++) {
+    const next = times[i + 1];
+    const dt = next == null ? 5_000 : Math.min(60_000, next - times[i]);
+    const bpm = byTime.get(times[i])!;
+    if (bpm > 0.8 * maxHr) highMs += dt;
+    else if (bpm >= 0.6 * maxHr && bpm <= 0.7 * maxHr) zone2Ms += dt;
+  }
+  return { zone2: Math.round(zone2Ms / 60_000), high: Math.round(highMs / 60_000) };
+}
+
 /**
  * Lê um retrato dos dados de saúde. Retorna null se Health Connect não estiver
  * disponível ou sem permissão — nunca lança. Campos extras (FC/composição)
@@ -286,57 +497,41 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
       endTime: nowISO,
     };
 
-    const exercise = await m.readRecords('ExerciseSession', { timeRangeFilter: weekFilter });
+    // Sessões deduplicadas (o mesmo treino chega por Huawei Health e Health Sync).
+    const exercise = dedupeSessions(
+      await readAllRecords(m, 'ExerciseSession' as never, weekFilter.startTime, weekFilter.endTime),
+    );
     let exMin = 0;
-    for (const r of exercise.records) exMin += durationMinutes(r.startTime, r.endTime);
+    for (const r of exercise) exMin += r.minutes;
 
-    const steps = await m.readRecords('Steps', { timeRangeFilter: weekFilter });
-    let stepsTotal = 0;
-    for (const r of steps.records) stepsTotal += r.count ?? 0;
+    // Passos via AGGREGATE (deduplicado): relógio + celular não somam em dobro.
+    const stepsTotal = (await sumSteps(m, weekStartISO, nowISO)).total;
 
     // Passos de hoje: da meia-noite local até agora.
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
-    const stepsTodayRec = await m.readRecords('Steps', {
-      timeRangeFilter: {
-        operator: 'between',
-        startTime: todayStart.toISOString(),
-        endTime: nowISO,
-      },
-    });
-    let stepsToday = 0;
-    for (const r of stepsTodayRec.records) stepsToday += r.count ?? 0;
+    const stepsToday = (await sumSteps(m, todayStart.toISOString(), nowISO)).total;
 
     // FC (semana): das MESMAS amostras saem DUAS métricas — minutos em ZONA 2
     // (~60–70% da FC máxima; base aeróbica) e minutos de ALTA intensidade
-    // (>80%). Conta MINUTOS DISTINTOS com amostra na faixa — robusto a
-    // amostragem irregular de relógio/pulseira. Precisa do ano de nascimento
-    // para estimar a FC máxima (220 − idade).
+    // (>80%), ponderados pelo tempo (ver hrZoneMinutes). Precisa do ano de
+    // nascimento para estimar a FC máxima (Tanaka: 208 − 0,7 × idade).
     let hrHighMinutesWeek: number | null = null;
     let zone2MinutesWeek: number | null = null;
     try {
       const birthYear = (await getUserConfig()).birthYear;
       if (birthYear != null) {
         const age = Math.max(10, Math.min(110, now.getFullYear() - birthYear));
-        const maxHr = 220 - age;
+        const maxHr = estimateMaxHr(age);
         const hrRecords = (await readAllRecords(
           m,
           'HeartRate' as never,
           weekStartISO,
           nowISO,
         )) as { samples?: { time: string; beatsPerMinute: number }[] }[];
-        const highMinutes = new Set<number>();
-        const zone2Minutes = new Set<number>();
-        for (const rec of hrRecords) {
-          for (const s of rec.samples ?? []) {
-            const bpm = s.beatsPerMinute;
-            const minute = Math.floor(new Date(s.time).getTime() / 60000);
-            if (bpm > 0.8 * maxHr) highMinutes.add(minute);
-            else if (bpm >= 0.6 * maxHr && bpm <= 0.7 * maxHr) zone2Minutes.add(minute);
-          }
-        }
-        hrHighMinutesWeek = highMinutes.size;
-        zone2MinutesWeek = zone2Minutes.size;
+        const zones = hrZoneMinutes(hrRecords, maxHr);
+        hrHighMinutesWeek = zones.high;
+        zone2MinutesWeek = zones.zone2;
       }
     } catch {
       hrHighMinutesWeek = null; // sem permissão de FC — campos ficam ocultos
@@ -359,7 +554,7 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
 
     return {
       sleepMinutesLastNight,
-      exerciseSessionsWeek: exercise.records.length,
+      exerciseSessionsWeek: exercise.length,
       exerciseMinutesWeek: Math.round(exMin),
       hrHighMinutesWeek,
       zone2MinutesWeek,
@@ -401,29 +596,28 @@ export async function captureHealthDaily(daysBack = 3): Promise<void> {
     const startISO = start.toISOString();
     const nowISO = now.toISOString();
 
+    // Passos: um AGGREGATE por dia local (deduplicado entre relógio e celular).
     const steps = new Map<string, number>();
-    try {
-      const recs = (await readAllRecords(m, 'Steps' as never, startISO, nowISO)) as {
-        startTime: string;
-        count?: number;
-      }[];
-      for (const r of recs) {
-        const k = localDayKey(new Date(r.startTime));
-        steps.set(k, (steps.get(k) ?? 0) + (r.count ?? 0));
+    for (let i = 0; i <= daysBack; i++) {
+      const d0 = new Date(start);
+      d0.setDate(start.getDate() + i);
+      const d1 = new Date(d0);
+      d1.setDate(d0.getDate() + 1);
+      const end = d1.getTime() > now.getTime() ? nowISO : d1.toISOString();
+      try {
+        const r = await sumSteps(m, d0.toISOString(), end);
+        if (r.total > 0) steps.set(localDayKey(d0), r.total);
+      } catch {
+        /* sem passos */
       }
-    } catch {
-      /* sem passos */
     }
 
     const exercise = new Map<string, number>();
     try {
-      const recs = (await readAllRecords(m, 'ExerciseSession' as never, startISO, nowISO)) as {
-        startTime: string;
-        endTime: string;
-      }[];
+      const recs = dedupeSessions(await readAllRecords(m, 'ExerciseSession' as never, startISO, nowISO));
       for (const r of recs) {
-        const k = localDayKey(new Date(r.startTime));
-        exercise.set(k, (exercise.get(k) ?? 0) + durationMinutes(r.startTime, r.endTime));
+        const k = localDayKey(new Date(r.start));
+        exercise.set(k, (exercise.get(k) ?? 0) + r.minutes);
       }
     } catch {
       /* sem exercício */
@@ -533,14 +727,61 @@ export async function getHealthDiagnostics(): Promise<string> {
   }
   const has = (rt: string) => granted.some((g) => g.recordType === rt);
 
+  // Para cada tipo: quantos registros, DE ONDE vieram (app, aparelho, modo de
+  // gravação) e com quanto ATRASO chegaram (lastModifiedTime − fim do
+  // registro): é isso que diz se o relógio está sincronizando e se dá para
+  // reagir "agora" ou só no dia seguinte.
   const probe = async (rt: string, since: string): Promise<string> => {
     try {
-      const res = (await m.readRecords(rt as never, {
-        timeRangeFilter: { operator: 'between', startTime: since, endTime: nowISO },
-      })) as { records: unknown[] };
-      return `${rt}: perm=${has(rt) ? 'sim' : 'NÃO'} · ${res.records.length} registro(s)`;
+      const recs = (await readAllRecords(m, rt as never, since, nowISO)) as {
+        time?: string;
+        endTime?: string;
+        metadata?: RecordMeta;
+      }[];
+      const head = `${rt}: perm=${has(rt) ? 'sim' : 'NÃO'} · ${recs.length} registro(s)`;
+      if (!recs.length) return head;
+      const byOrigin = new Map<string, { n: number; lags: number[]; tags: Set<string>; last: number }>();
+      for (const r of recs) {
+        const key = originLabel(r.metadata?.dataOrigin);
+        const g = byOrigin.get(key) ?? { n: 0, lags: [], tags: new Set<string>(), last: 0 };
+        g.n++;
+        const endMs = new Date(r.endTime ?? r.time ?? 0).getTime();
+        const modMs = new Date(r.metadata?.lastModifiedTime ?? 0).getTime();
+        if (endMs > 0 && modMs >= endMs) g.lags.push((modMs - endMs) / 60_000);
+        if (endMs > g.last) g.last = endMs;
+        const dev = deviceLabel(r.metadata?.device?.type);
+        const met = methodLabel(r.metadata?.recordingMethod);
+        if (dev) g.tags.add(dev);
+        if (met) g.tags.add(met);
+        byOrigin.set(key, g);
+      }
+      const parts = [...byOrigin.entries()].map(([origin, g]) => {
+        g.lags.sort((a, b) => a - b);
+        const lag = g.lags.length ? g.lags[Math.floor(g.lags.length / 2)] : null;
+        const lagTxt = lag == null ? '' : ` · atraso ~${lag < 90 ? `${Math.round(lag)} min` : `${(lag / 60).toFixed(1)} h`}`;
+        const agoH = g.last ? (now.getTime() - g.last) / 3600_000 : null;
+        const lastTxt = agoH == null ? '' : ` · último há ${agoH < 1 ? `${Math.round(agoH * 60)} min` : `${agoH.toFixed(1)} h`}`;
+        const tags = g.tags.size ? ` (${[...g.tags].join(', ')})` : '';
+        return `  – ${origin}${tags}: ${g.n}${lagTxt}${lastTxt}`;
+      });
+      return [head, ...parts].join('\n');
     } catch (e) {
       return `${rt}: perm=${has(rt) ? 'sim' : 'NÃO'} · ERRO ${e instanceof Error ? e.message : e}`;
+    }
+  };
+
+  // Passos de hoje: soma crua × deduplicada. Se a crua for bem maior, há duas
+  // fontes contando os mesmos passos (e a Comentora usa a deduplicada).
+  const stepsLine = async (): Promise<string> => {
+    const t0 = new Date(now);
+    t0.setHours(0, 0, 0, 0);
+    try {
+      const recs = (await readAllRecords(m, 'Steps' as never, t0.toISOString(), nowISO)) as { count?: number }[];
+      const raw = recs.reduce((a, r) => a + (r.count ?? 0), 0);
+      const agg = await sumSteps(m, t0.toISOString(), nowISO);
+      return `Passos hoje: ${agg.total} ${agg.deduped ? 'deduplicados' : '(sem deduplicação)'} · soma crua ${raw}${raw > agg.total * 1.2 && agg.deduped ? ' — há fontes duplicadas' : ''}`;
+    } catch (e) {
+      return `Passos hoje: ERRO ${e instanceof Error ? e.message : e}`;
     }
   };
 
@@ -548,11 +789,153 @@ export async function getHealthDiagnostics(): Promise<string> {
     probe('SleepSession', d2),
     probe('Weight', yearStart),
     probe('BodyFat', yearStart),
-    probe('Steps', yearStart),
+    probe('Steps', d2),
     probe('HeartRate', d2),
     probe('ExerciseSession', d2),
+    stepsLine(),
   ]);
   return lines.join('\n');
+}
+
+// ————————————— Checklist de fontes (v1.106) —————————————
+
+export interface SourceCheck {
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Checklist legível das fontes de dados (card Saúde): o que está chegando, de
+ * onde e há quanto tempo. Substitui o "sem registro" genérico por um motivo.
+ */
+export async function getSourceChecklist(): Promise<SourceCheck[]> {
+  const out: SourceCheck[] = [];
+  const m = getModule();
+  const available = await isHealthConnectAvailable();
+  out.push({
+    label: 'Health Connect',
+    ok: available,
+    detail: available ? 'instalado e disponível' : 'indisponível neste aparelho',
+  });
+  if (!m || !available || !(await ensureInit(m))) return out;
+
+  const granted = await getGranted(m);
+  const core = hasAll(granted, CORE_PERMISSIONS);
+  const NAMES: Record<string, string> = {
+    SleepSession: 'sono',
+    ExerciseSession: 'treino',
+    Steps: 'passos',
+    HeartRate: 'FC',
+    Weight: 'peso',
+    BodyFat: 'gordura',
+  };
+  const missing = (list: Permission[]) =>
+    list.filter((p) => !hasAll(granted, [p])).map((p) => NAMES[p.recordType] ?? p.recordType);
+  const missingCore = missing(CORE_PERMISSIONS);
+  const missingExtra = missing(EXTRA_PERMISSIONS);
+  const hr = hasAll(granted, [{ accessType: 'read', recordType: 'HeartRate' }]);
+  out.push({
+    label: 'Permissões',
+    ok: core,
+    detail: !core
+      ? `faltam ${missingCore.join(', ')}`
+      : missingExtra.length
+        ? `faltam ${missingExtra.join(', ')} (opcionais)`
+        : 'sono, treino, passos, FC, peso e gordura',
+  });
+  if (!core) return out;
+
+  const now = Date.now();
+  const nowISO = new Date(now).toISOString();
+  const since = new Date(now - 72 * 3600_000).toISOString();
+
+  // Relógio: qualquer registro recente vindo das origens do relógio (ou marcado
+  // como aparelho de pulso). É o teste de "a sincronização está viva?".
+  let watchLast = 0;
+  let watchVia = '';
+  for (const rt of ['HeartRate', 'Steps', 'SleepSession', 'ExerciseSession']) {
+    if (!granted.some((g) => g.recordType === rt)) continue;
+    try {
+      const recs = (await readAllRecords(m, rt as never, since, nowISO)) as {
+        time?: string;
+        endTime?: string;
+        metadata?: RecordMeta;
+      }[];
+      for (const r of recs) {
+        const origin = r.metadata?.dataOrigin ?? '';
+        const wrist = [1, 4, 6].includes(r.metadata?.device?.type ?? 0);
+        if (!WATCH_ORIGINS.includes(origin) && !wrist) continue;
+        const t = new Date(r.endTime ?? r.time ?? 0).getTime();
+        if (t > watchLast) {
+          watchLast = t;
+          watchVia = originLabel(origin);
+        }
+      }
+    } catch {
+      /* tipo sem permissão */
+    }
+  }
+  const agoH = watchLast ? (now - watchLast) / 3600_000 : null;
+  out.push({
+    label: 'Relógio',
+    ok: agoH != null && agoH < 12,
+    detail:
+      agoH == null
+        ? 'nada do relógio nos últimos 3 dias — confira o Health Sync'
+        : `último dado há ${agoH < 1 ? `${Math.round(agoH * 60)} min` : `${agoH.toFixed(1)} h`} (${watchVia})`,
+  });
+
+  // Sono da última noite.
+  try {
+    const res = await m.readRecords('SleepSession', {
+      timeRangeFilter: { operator: 'between', startTime: new Date(now - 36 * 3600_000).toISOString(), endTime: nowISO },
+    });
+    const n = res.records.length;
+    out.push({ label: 'Sono', ok: n > 0, detail: n > 0 ? 'última noite registrada' : 'nenhuma noite nas últimas 36 h' });
+  } catch {
+    out.push({ label: 'Sono', ok: false, detail: 'não foi possível ler' });
+  }
+
+  // Passos: deduplicação funcionando?
+  try {
+    const t0 = new Date(now);
+    t0.setHours(0, 0, 0, 0);
+    const agg = await sumSteps(m, t0.toISOString(), nowISO);
+    out.push({
+      label: 'Passos',
+      ok: agg.deduped,
+      detail: agg.deduped
+        ? `${agg.total.toLocaleString('pt-BR')} hoje, sem contagem dupla`
+        : `${agg.total.toLocaleString('pt-BR')} hoje (soma crua — pode estar em dobro)`,
+    });
+  } catch {
+    out.push({ label: 'Passos', ok: false, detail: 'não foi possível ler' });
+  }
+
+  out.push({
+    label: 'Frequência cardíaca',
+    ok: hr,
+    detail: hr ? 'liberada' : 'não liberada — zonas de FC ficam ocultas',
+  });
+  return out;
+}
+
+/**
+ * Uma vez só (v1.106): regrava os últimos 30 dias de health_daily com passos e
+ * treinos DEDUPLICADOS. Até a v1.105 a série somava relógio + celular e dobrava
+ * os passos; sem isto a exportação misturaria dias inflados com dias corretos.
+ */
+export async function backfillHealthDailyOnce(): Promise<void> {
+  const FLAG = 'health_daily_dedup_v106';
+  try {
+    if (await getKV(FLAG)) return;
+    if (!(await hasHealthPermissions())) return; // tenta de novo quando houver
+    await captureHealthDaily(30);
+    await setKV(FLAG, new Date().toISOString());
+  } catch (err) {
+    console.warn('[health] backfill falhou:', err);
+  }
 }
 
 /** Formata "6h30" a partir de minutos. */

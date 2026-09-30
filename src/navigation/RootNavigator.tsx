@@ -47,7 +47,9 @@ import { addChatMessage, addSnoozeFeedback, bumpTechnique } from '../services/da
 import { confirmMedication, snoozeMedication, skipMedicationToday } from '../services/medications';
 import { askAndHandleVoiceAnswer } from '../services/reminderVoiceAnswer';
 import { saveLastNotification } from '../services/lastNotification';
-import { isHeadphonesConnected } from '../services/spokenNudges';
+import { getSpokenSilencedAt, isHeadphonesConnected } from '../services/spokenNudges';
+import { getDoneNudgeTypes } from '../services/database';
+import { format } from 'date-fns';
 import { isQuietNow } from '../services/quietHours';
 import { markSleepDone } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
@@ -327,16 +329,60 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           .replace(/\s+/g, ' ')
           .trim();
         if (!text) return;
-        // Toca o PIADO DA CORUJA ~1,5s ANTES da fala — chama a atenção antes de
-        // a Comentora começar a falar o aviso (não no modo silencioso).
-        // Som composto: piado da coruja (~3s) + 1,5s de pausa + a voz.
+        // PIADO DA CORUJA antes da fala, depois a PAUSA configurada (padrão
+        // 15 s): tempo para a pessoa baixar o volume se o ambiente não permitir
+        // a fala. Som composto: piado (~3 s) + pausa + a voz.
+        let volume = cfg?.nudgeVolume ?? 1;
+        let snoozeMinutes = cfg?.snoozeMinutes ?? 20;
         if (!cfg?.silentMode) {
           playOwlCall(cfg?.owlSpecies);
-          await new Promise((r) => setTimeout(r, 3000 + 1500));
+          const pauseMs = Math.max(0, Math.min(120, cfg?.owlPauseSeconds ?? 15)) * 1000;
+          const startedAt = Date.now();
+          const due = startedAt + 3000 + pauseMs;
+          await new Promise((r) => setTimeout(r, due - Date.now()));
+          // Saiu do app ou apagou a tela durante a pausa: os timers do JS
+          // CONGELAM em segundo plano e este só dispara na volta, atrasado — aí
+          // a Comentora falaria um aviso velho, na hora errada. Atraso > 2 s =
+          // ficou fora; esta fala morre. (Uma ida e volta rápida, como tocar na
+          // própria notificação, não atrasa o timer e não conta.)
+          if (Date.now() - due > 2000) return;
+          // Durante a pausa a pessoa pode ter tocado "Calar agora", silenciado o
+          // app, desligado a voz, ligado o "só com fone", entrado no horário
+          // silencioso ou já respondido o lembrete: reconfere antes de falar.
+          if (getSpokenSilencedAt() >= startedAt) return;
+          const now = useAppStore.getState().config;
+          if (AppState.currentState !== 'active' || !now?.voiceNudgesEnabled) return;
+          if (now?.silentMode || (now?.nudgeVolume ?? 1) <= 0) return;
+          if (now?.spokenHeadphonesOnly && !isHeadphonesConnected()) return;
+          if ((await isQuietNow()) && !isHeadphonesConnected()) return;
+          if (isSpeaking()) return;
+          // Lembrete que pede resposta e JÁ foi respondido durante a pausa (pelos
+          // botões da notificação): não fala. Só vale para os que pedem ação —
+          // o anúncio de hábito formado e os avisos do jejum falam sempre.
+          const dp = (notification.request.content.data ?? {}) as {
+            nudgeType?: string;
+            medId?: number;
+            verify?: boolean;
+          };
+          const actionable =
+            (dp.verify === true && !!dp.nudgeType) ||
+            (typeof dp.medId === 'number' && !!notification.request.content.categoryIdentifier);
+          const answeredKey = !actionable
+            ? null
+            : typeof dp.medId === 'number'
+              ? `med:${dp.medId}`
+              : dp.nudgeType;
+          if (answeredKey) {
+            const today = format(new Date(), 'yyyy-MM-dd');
+            const done = await getDoneNudgeTypes(today).catch(() => [] as string[]);
+            if (done.includes(answeredKey) || done.includes(`${answeredKey}:skip`)) return;
+          }
+          volume = now?.nudgeVolume ?? volume;
+          snoozeMinutes = now?.snoozeMinutes ?? snoozeMinutes;
         }
         // Espera a fala TERMINAR (speak resolve antes do fim; onDone marca o fim).
         await new Promise<void>((resolve) => {
-          void speak(text, { volume: cfg?.nudgeVolume ?? 1, onDone: resolve, onError: () => resolve() });
+          void speak(text, { volume, onDone: resolve, onError: () => resolve() });
         });
         // RESPOSTA POR VOZ: para lembretes acionáveis (hábito/remédio), a
         // Comentora lista as opções (a/b/c) e abre o MICROFONE. A resposta
@@ -353,10 +399,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
               ? ({ kind: 'nudge', nudgeType: dd.nudgeType } as const)
               : null;
         if (ref) {
-          await askAndHandleVoiceAnswer(ref, {
-            snoozeMinutes: cfg?.snoozeMinutes ?? 20,
-            volume: cfg?.nudgeVolume ?? 1,
-          });
+          await askAndHandleVoiceAnswer(ref, { snoozeMinutes, volume });
         }
       } catch {
         /* speaking is best-effort */

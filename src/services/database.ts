@@ -578,6 +578,59 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN review_enabled INTEGER NOT NULL DEFAULT 1`,
     );
   }
+  // v1.106: pausa (segundos) entre o canto da coruja e a fala — tempo para a
+  // pessoa baixar o volume ou calar a fala se o ambiente não permitir.
+  if (!colNames.includes('owl_pause_seconds')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN owl_pause_seconds INTEGER NOT NULL DEFAULT 15`,
+    );
+  }
+  // v1.106 (fase 1 dos sensores):
+  // - habit_events.evidence: de onde veio uma confirmação automática
+  //   ("relógio · Health Sync · 42 min", "respiração no app · 5 min").
+  // - mindful_sessions: sessões de respiração/Ioga Nidra feitas NO APP.
+  // - decision_points: cada decisão da coruja (âncora/insistência enviada ou
+  //   pulada) — base para qualquer análise causal ou algoritmo adaptativo.
+  // - automaticity: autoavaliação semanal "faço isso automaticamente" (1–7).
+  const evCols = await database.getAllAsync<{ name: string }>("PRAGMA table_info('habit_events')");
+  if (!evCols.some((c) => c.name === 'evidence')) {
+    await database.execAsync(`ALTER TABLE habit_events ADD COLUMN evidence TEXT`);
+  }
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS mindful_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      date TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT NOT NULL,
+      minutes REAL NOT NULL,
+      planned_minutes REAL,
+      completed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mindful_date ON mindful_sessions(date);
+    CREATE TABLE IF NOT EXISTS decision_points (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      k INTEGER NOT NULL DEFAULT 0,
+      action TEXT NOT NULL,
+      technique TEXT,
+      scheduled_at TEXT,
+      p_action REAL,
+      stratum TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(date, key, kind, k)
+    );
+    CREATE TABLE IF NOT EXISTS automaticity (
+      key TEXT NOT NULL,
+      date TEXT NOT NULL,
+      score INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(key, date)
+    );
+  `);
   // v1.66: Ioga Nidra — tabela de áudios próprios + áudio selecionado na config.
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS yoga_nidra_sounds (
@@ -846,6 +899,7 @@ interface UserConfigRow {
   nudge_max_insistences: number | null;
   review_time: string | null;
   review_enabled: number | null;
+  owl_pause_seconds: number | null;
   yoga_nidra_sound_id: number | null;
 }
 
@@ -907,6 +961,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   nudgeMaxInsistences: r.nudge_max_insistences ?? 5,
   reviewTime: r.review_time ?? '21:30',
   reviewEnabled: (r.review_enabled ?? 1) === 1,
+  owlPauseSeconds: r.owl_pause_seconds ?? 15,
   yogaNidraSoundId: r.yoga_nidra_sound_id ?? null,
 });
 
@@ -980,6 +1035,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     nudgeMaxInsistences: 'nudge_max_insistences',
     reviewTime: 'review_time',
     reviewEnabled: 'review_enabled',
+    owlPauseSeconds: 'owl_pause_seconds',
     yogaNidraSoundId: 'yoga_nidra_sound_id',
   };
 
@@ -1665,7 +1721,8 @@ export async function setHabitState(s: HabitState): Promise<void> {
 
 // --------- Coletora de sinais (v1.103): eventos, saúde diária, experimentos ---------
 
-export type HabitEventStatus = 'done' | 'not_done' | 'no_answer';
+/** 'undone' = a pessoa DESFEZ uma marcação (ex.: confirmação automática errada). */
+export type HabitEventStatus = 'done' | 'not_done' | 'no_answer' | 'undone';
 
 export interface HabitEvent {
   id: number;
@@ -1681,6 +1738,8 @@ export interface HabitEvent {
   /** Minutos entre o horário programado e a resposta. */
   latencyMin: number | null;
   reason: string | null;
+  /** Confirmação automática: de onde veio a evidência (relógio, app…). */
+  evidence: string | null;
   createdAt: string;
 }
 
@@ -1694,6 +1753,7 @@ interface HabitEventRow {
   technique: string | null;
   latency_min: number | null;
   reason: string | null;
+  evidence: string | null;
   created_at: string;
 }
 
@@ -1707,15 +1767,16 @@ const rowToHabitEvent = (r: HabitEventRow): HabitEvent => ({
   technique: r.technique,
   latencyMin: r.latency_min,
   reason: r.reason,
+  evidence: r.evidence ?? null,
   createdAt: r.created_at,
 });
 
 export async function addHabitEvent(e: Omit<HabitEvent, 'id' | 'createdAt'>): Promise<void> {
   const d = await getDb();
   await d.runAsync(
-    `INSERT INTO habit_events (key, date, status, via, k, technique, latency_min, reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [e.key, e.date, e.status, e.via, e.k, e.technique, e.latencyMin, e.reason],
+    `INSERT INTO habit_events (key, date, status, via, k, technique, latency_min, reason, evidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [e.key, e.date, e.status, e.via, e.k, e.technique, e.latencyMin, e.reason, e.evidence],
   );
 }
 
@@ -1892,6 +1953,168 @@ export async function getSnoozeFeedbackSince(habitId: number, fromISO: string): 
     customText: r.custom_text,
     createdAt: r.created_at,
   }));
+}
+
+// --------- Fase 1 dos sensores (v1.106) ---------
+
+/**
+ * Hábitos cuja confirmação MAIS RECENTE de hoje foi automática (via 'sensor'),
+ * com a evidência. Se a pessoa desfez e marcou à mão depois, não entra.
+ */
+export async function getSensorEvidenceForDate(date: string): Promise<Record<string, string>> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ key: string; via: string | null; evidence: string | null }>(
+    `SELECT key, via, evidence FROM habit_events
+       WHERE date = ? AND status = 'done' ORDER BY id`,
+    [date],
+  );
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    if (r.via === 'sensor') out[r.key] = r.evidence ?? 'automático';
+    else delete out[r.key];
+  }
+  return out;
+}
+
+export interface MindfulSession {
+  id: number;
+  kind: 'breathing' | 'nidra';
+  date: string;
+  startedAt: string;
+  endedAt: string;
+  minutes: number;
+  plannedMinutes: number | null;
+  completed: boolean;
+}
+
+export async function addMindfulSession(s: Omit<MindfulSession, 'id'>): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO mindful_sessions (kind, date, started_at, ended_at, minutes, planned_minutes, completed)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [s.kind, s.date, s.startedAt, s.endedAt, s.minutes, s.plannedMinutes, s.completed ? 1 : 0],
+  );
+}
+
+export async function getMindfulSessionsBetween(fromISO: string, toISO: string): Promise<MindfulSession[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{
+    id: number; kind: string; date: string; started_at: string; ended_at: string;
+    minutes: number; planned_minutes: number | null; completed: number;
+  }>('SELECT * FROM mindful_sessions WHERE date >= ? AND date <= ? ORDER BY started_at', [fromISO, toISO]);
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind as MindfulSession['kind'],
+    date: r.date,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    minutes: r.minutes,
+    plannedMinutes: r.planned_minutes,
+    completed: r.completed === 1,
+  }));
+}
+
+export interface DecisionPoint {
+  date: string;
+  key: string;
+  /** anchor | insistence | sample | formed-announcement */
+  kind: string;
+  /** k-ésima cobrança (0 = âncora). */
+  k: number;
+  /** send | skip */
+  action: string;
+  technique: string | null;
+  scheduledAt: string | null;
+  /** Probabilidade com que a ação foi escolhida (1 = regra determinística). */
+  pAction: number | null;
+  /** Estrato de contexto (manhã/tarde/noite). */
+  stratum: string | null;
+}
+
+/** Registra (ou atualiza, se reagendado no mesmo dia) um ponto de decisão. */
+export async function upsertDecisionPoint(p: DecisionPoint): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO decision_points (date, key, kind, k, action, technique, scheduled_at, p_action, stratum)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(date, key, kind, k) DO UPDATE SET
+       action = excluded.action, technique = excluded.technique,
+       scheduled_at = excluded.scheduled_at, p_action = excluded.p_action, stratum = excluded.stratum`,
+    [p.date, p.key, p.kind, p.k, p.action, p.technique, p.scheduledAt, p.pAction, p.stratum],
+  );
+}
+
+/**
+ * A pessoa respondeu: as cobranças de hoje que ainda iam tocar foram
+ * canceladas. Marca-as como tal (sem isso, pareceriam "enviadas").
+ */
+export async function cancelFutureDecisionPoints(date: string, key: string, nowISO: string): Promise<void> {
+  const d = await getDb();
+  // Só as COBRANÇAS são canceladas ao responder; a âncora diária e a amostra
+  // continuam agendadas e tocam no horário.
+  await d.runAsync(
+    `UPDATE decision_points SET action = 'cancelled'
+       WHERE date = ? AND key = ? AND kind = 'insistence' AND action = 'send' AND scheduled_at > ?`,
+    [date, key, nowISO],
+  );
+}
+
+/**
+ * Antes de reagendar tudo: o que estava para tocar hoje vira 'cancelled'; o
+ * reagendamento devolve 'send' a quem continuar agendado. Sem isto, um hábito
+ * desligado ou com horário mudado deixaria linhas 'send' que nunca tocaram.
+ */
+export async function resetFutureDecisionPoints(date: string, nowISO: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `UPDATE decision_points SET action = 'cancelled'
+       WHERE date = ? AND action = 'send' AND scheduled_at > ?`,
+    [date, nowISO],
+  );
+}
+
+export async function getDecisionPointsBetween(fromISO: string, toISO: string): Promise<DecisionPoint[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{
+    date: string; key: string; kind: string; k: number; action: string; technique: string | null;
+    scheduled_at: string | null; p_action: number | null; stratum: string | null;
+  }>('SELECT * FROM decision_points WHERE date >= ? AND date <= ? ORDER BY date, key, k', [fromISO, toISO]);
+  return rows.map((r) => ({
+    date: r.date, key: r.key, kind: r.kind, k: r.k, action: r.action, technique: r.technique,
+    scheduledAt: r.scheduled_at, pAction: r.p_action, stratum: r.stratum,
+  }));
+}
+
+export async function recordAutomaticity(key: string, date: string, score: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO automaticity (key, date, score) VALUES (?, ?, ?)
+     ON CONFLICT(key, date) DO UPDATE SET score = excluded.score`,
+    [key, date, Math.max(1, Math.min(7, Math.round(score)))],
+  );
+}
+
+/** Autoavaliações de automaticidade no período (mais recentes por último). */
+export async function getAutomaticityBetween(
+  fromISO: string,
+  toISO: string,
+): Promise<{ key: string; date: string; score: number }[]> {
+  const d = await getDb();
+  return d.getAllAsync<{ key: string; date: string; score: number }>(
+    'SELECT key, date, score FROM automaticity WHERE date >= ? AND date <= ? ORDER BY date',
+    [fromISO, toISO],
+  );
+}
+
+/** Data (ISO) da última autoavaliação de cada hábito. */
+export async function getLastAutomaticityDates(): Promise<Record<string, string>> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ key: string; last: string }>(
+    'SELECT key, MAX(date) AS last FROM automaticity GROUP BY key',
+  );
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.key] = r.last;
+  return out;
 }
 
 // --------- Medications / supplements (lembretes do usuário) ---------
@@ -2483,6 +2706,15 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM inspiration_packs;
     DELETE FROM app_kv;
     DELETE FROM habits;
+    DELETE FROM habit_events;
+    DELETE FROM health_daily;
+    DELETE FROM experiments;
+    DELETE FROM nudge_lines;
+    DELETE FROM technique_stats;
+    DELETE FROM habit_state;
+    DELETE FROM mindful_sessions;
+    DELETE FROM decision_points;
+    DELETE FROM automaticity;
     DELETE FROM user_config WHERE id = 1;
   `);
   await d.runAsync(

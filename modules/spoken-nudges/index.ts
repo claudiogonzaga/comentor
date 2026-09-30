@@ -27,6 +27,14 @@ export interface SpokenNudgesNativeModule {
   scheduledIds(): string[];
   /** Re-arma todos os alarmes persistidos (chamar no launch do app). */
   rearmAll(): Promise<void>;
+  /** Pausa (s) entre o canto da coruja e a fala. */
+  setOwlPauseSeconds(seconds: number): void;
+  /** Último "Calar agora" (epoch ms; 0 = nunca). */
+  getSilencedAt(): number;
+  /** O usuário concedeu "Acesso ao uso"? */
+  hasUsageAccess(): boolean;
+  openUsageAccessSettings(): void;
+  openAppDetails(): void;
 }
 
 // Lança se o módulo nativo não estiver presente (ex.: Expo Go, web). Quem

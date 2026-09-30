@@ -14,6 +14,7 @@ import {
   deleteYogaNidraSound,
   listYogaNidraSounds,
 } from '../services/database';
+import { nidraQueueItem } from '../services/activities';
 import type { YogaNidraSound } from '../types';
 
 /**
@@ -108,7 +109,7 @@ export function YogaNidraScreen() {
     await setConfig({ yogaNidraSoundId: id });
     const s = sounds.find((x) => x.id === id);
     if (!s) return;
-    await start([{ label: `Ioga Nidra: ${s.name}`, source: { uri: s.uri } }]);
+    await start([nidraQueueItem(`Ioga Nidra: ${s.name}`, s.uri)]);
   };
 
   const handleDelete = (s: YogaNidraSound) => {
