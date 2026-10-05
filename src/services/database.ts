@@ -759,6 +759,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       title TEXT NOT NULL,
       text TEXT,
       author TEXT,
+      reference TEXT,
       duration_ms INTEGER,
       rating INTEGER NOT NULL DEFAULT 0,
       likes INTEGER NOT NULL DEFAULT 0,
@@ -769,6 +770,11 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_audio_clips_deck ON audio_clips(deck_id, ord);
   `);
+  // v1.112: referência de cada trecho na obra (página/capítulo) — baralho de audiolivro.
+  const clipCols = await database.getAllAsync<{ name: string }>("PRAGMA table_info('audio_clips')");
+  if (!clipCols.some((c) => c.name === 'reference')) {
+    await database.execAsync(`ALTER TABLE audio_clips ADD COLUMN reference TEXT`);
+  }
   await seedInspirationBuiltins(database);
   await seedSleepSciencePack(database);
   // v1.107: o app passou a se chamar Askeo — renomeia o baralho embutido que já existia.
@@ -2672,6 +2678,7 @@ interface AudioClipRow {
   title: string;
   text: string | null;
   author: string | null;
+  reference: string | null;
   duration_ms: number | null;
   rating: number;
   likes: number;
@@ -2688,6 +2695,7 @@ const rowToClip = (r: AudioClipRow): AudioClip => ({
   title: r.title,
   text: r.text,
   author: r.author,
+  reference: r.reference,
   durationMs: r.duration_ms,
   rating: r.rating > 0 ? 1 : r.rating < 0 ? -1 : 0,
   likes: r.likes,
@@ -2716,6 +2724,8 @@ export async function listAudioDecks(): Promise<AudioDeck[]> {
     name: r.name,
     playMode: r.play_mode === 'sequence' ? 'sequence' : 'random',
     enabled: r.enabled === 1,
+    nextPosition:
+      r.play_mode === 'sequence' && r.clip_count > 0 ? Math.min(r.seq_end_ord + 2, r.clip_count) : null,
     clipCount: r.clip_count,
     activeCount: r.active_count,
     likes: r.likes,
@@ -2757,6 +2767,7 @@ export interface NewAudioClip {
   title: string;
   text: string | null;
   author: string | null;
+  reference?: string | null;
   durationMs: number | null;
   /** Estatísticas de um backup restaurado. */
   rating?: -1 | 0 | 1;
@@ -2772,10 +2783,10 @@ export async function addAudioClips(deckId: number, clips: NewAudioClip[]): Prom
     for (const c of clips) {
       await d.runAsync(
         `INSERT INTO audio_clips
-           (deck_id, ord, file_name, title, text, author, duration_ms, rating, likes, dislikes, plays, last_played_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (deck_id, ord, file_name, title, text, author, reference, duration_ms, rating, likes, dislikes, plays, last_played_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          deckId, c.ord, c.fileName, c.title, c.text, c.author, c.durationMs,
+          deckId, c.ord, c.fileName, c.title, c.text, c.author, c.reference ?? null, c.durationMs,
           c.rating ?? 0, c.likes ?? 0, c.dislikes ?? 0, c.plays ?? 0, c.lastPlayedAt ?? null,
         ],
       );
@@ -2826,7 +2837,7 @@ export async function setAudioClipDuration(id: number, ms: number): Promise<void
 
 /** Baralhos LIGADOS com seus trechos que valem nos alertas (sem 👎, dentro da duração). */
 export async function listEnabledAudioDecksWithClips(): Promise<
-  { id: number; name: string; playMode: 'random' | 'sequence'; seqDate: string | null; seqStartOrd: number; seqEndOrd: number; clips: AudioClip[] }[]
+  { id: number; name: string; playMode: 'random' | 'sequence'; seqDate: string | null; seqStartOrd: number; seqEndOrd: number; totalCount: number; clips: AudioClip[] }[]
 > {
   const d = await getDb();
   const decks = await d.getAllAsync<AudioDeckRow>('SELECT * FROM audio_decks WHERE enabled = 1 ORDER BY id ASC');
@@ -2845,6 +2856,8 @@ export async function listEnabledAudioDecksWithClips(): Promise<
       seqDate: k.seq_date,
       seqStartOrd: k.seq_start_ord,
       seqEndOrd: k.seq_end_ord,
+      totalCount:
+        (await d.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM audio_clips WHERE deck_id = ?', [k.id]))?.n ?? rows.length,
       clips: rows.map(rowToClip),
     });
   }
@@ -2855,6 +2868,17 @@ export async function listEnabledAudioDecksWithClips(): Promise<
 export async function setAudioDeckSeqStart(id: number, date: string, startOrd: number): Promise<void> {
   const d = await getDb();
   await d.runAsync('UPDATE audio_decks SET seq_date = ?, seq_start_ord = ? WHERE id = ?', [date, startOrd, id]);
+}
+
+/**
+ * Põe a SEQUÊNCIA no trecho `ord` (0-based): ele é o próximo a tocar — hoje, ao
+ * reagendar, e nos dias seguintes. Usado em "Começar daqui" e "Recomeçar".
+ */
+export async function setAudioDeckSequencePosition(id: number, ord: number, date: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_decks SET seq_date = ?, seq_start_ord = ?, seq_end_ord = ? WHERE id = ?', [
+    date, ord, ord - 1, id,
+  ]);
 }
 
 /** Último trecho que de fato TOCOU: o dia seguinte continua depois dele. */

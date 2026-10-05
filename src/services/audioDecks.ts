@@ -133,6 +133,12 @@ interface ManifestRow {
   title?: string;
   text?: string;
   author?: string;
+  /** Ordem de leitura (número): manda na ordem dos trechos, acima do nome do arquivo. */
+  order?: number;
+  /** Onde o trecho está na obra, já montado ("Cap. 2 · p. 14"). */
+  reference?: string;
+  page?: string;
+  chapter?: string;
   rating?: -1 | 0 | 1;
   likes?: number;
   dislikes?: number;
@@ -150,6 +156,10 @@ function normKey(s: string): string {
 
 const COLS: Record<string, keyof ManifestRow | 'file'> = {
   arquivo: 'file', file: 'file', filename: 'file',
+  ordem: 'order', order: 'order', posicao: 'order', sequencia: 'order', ordemdeleitura: 'order',
+  referencia: 'reference', ref: 'reference', localizacao: 'reference',
+  pagina: 'page', paginas: 'page', pag: 'page', page: 'page',
+  capitulo: 'chapter', cap: 'chapter', chapter: 'chapter', parte: 'chapter',
   titulo: 'title', title: 'title',
   texto: 'text', text: 'text', transcricao: 'text',
   autor: 'author', author: 'author', fonte: 'author',
@@ -202,8 +212,18 @@ function parseManifest(csv: string): Map<string, ManifestRow> {
       } else if (c === 'likes' || c === 'dislikes' || c === 'plays') {
         const n = parseInt(v, 10);
         if (Number.isFinite(n) && n >= 0) row[c] = n;
+      } else if (c === 'order') {
+        const n = parseFloat(v.replace(',', '.'));
+        if (Number.isFinite(n)) row.order = n;
       } else (row as Record<string, unknown>)[c] = v;
     });
+    // Referência = o que vier escrito + capítulo + página ("Cap. 2 · p. 14").
+    const refParts = [
+      row.reference,
+      row.chapter ? (/^\d+$/.test(row.chapter) ? `Cap. ${row.chapter}` : row.chapter) : undefined,
+      row.page ? (/^[\d\s\-–,]+$/.test(row.page) ? `p. ${row.page}` : row.page) : undefined,
+    ].filter(Boolean);
+    row.reference = refParts.length ? refParts.join(' · ') : undefined;
     if (file) out.set(file, row);
   }
   return out;
@@ -396,9 +416,17 @@ export async function importAudioDeckFromZip(
   }
 
   try {
-    // Ordem: pelo caminho, em ordem natural (001, 002 … 010).
-    saved.sort((a, b) => naturalCompare(a.path, b.path));
+    // Ordem: a coluna "Ordem" do deck.csv manda (é a ordem de leitura da obra); sem
+    // ela, o nome do arquivo em ordem natural (001, 002 … 010).
     const manifest = manifestCsv ? parseManifest(manifestCsv) : new Map<string, ManifestRow>();
+    saved.sort((a, b) => {
+      const oa = manifest.get(fileKey(a.path))?.order;
+      const ob = manifest.get(fileKey(b.path))?.order;
+      if (oa != null && ob != null && oa !== ob) return oa - ob;
+      if (oa != null && ob == null) return -1;
+      if (oa == null && ob != null) return 1;
+      return naturalCompare(a.path, b.path);
+    });
     let restoredStats = false;
     const clips: NewAudioClip[] = saved.map((s, i) => {
       const m = manifest.get(fileKey(s.path));
@@ -409,6 +437,7 @@ export async function importAudioDeckFromZip(
         title: m?.title || titleFromFile(baseName(s.path)),
         text: m?.text ?? null,
         author: m?.author ?? null,
+        reference: m?.reference ?? null,
         durationMs: null,
         rating: m?.rating,
         likes: m?.likes,
@@ -505,13 +534,15 @@ export async function exportAudioDeck(deckId: number): Promise<{ ok: boolean; er
       };
 
       const names: string[] = [];
-      const lines = ['Arquivo,Título,Texto,Autor,Nota,Curtidas,Descurtidas,Execuções,Última execução'];
+      const lines = ['Ordem,Arquivo,Título,Texto,Autor,Referência,Nota,Curtidas,Descurtidas,Execuções,Última execução'];
       for (const c of clips) {
         const ext = extOf(c.fileName) || 'mp3';
         const name = `${String(c.ord + 1).padStart(3, '0')}-${safeName(c.title)}.${ext}`;
         names.push(name);
         lines.push(
-          [name, c.title, c.text, c.author, c.rating, c.likes, c.dislikes, c.plays, c.lastPlayedAt].map(csvField).join(','),
+          [c.ord + 1, name, c.title, c.text, c.author, c.reference, c.rating, c.likes, c.dislikes, c.plays, c.lastPlayedAt]
+            .map(csvField)
+            .join(','),
         );
       }
       add('deck.csv', strToU8('﻿' + lines.join('\r\n')));

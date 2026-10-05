@@ -31,6 +31,7 @@ export function InspirationHomeCard() {
   // Trecho de ÁUDIO do último alerta (baralho de áudio) e o nome do baralho.
   const [clip, setClip] = useState<AudioClip | null>(null);
   const [deckName, setDeckName] = useState('');
+  const [deckTotal, setDeckTotal] = useState(0);
   const [playingId, setPlayingId] = useState<number | null>(null);
   // true = veio de um alerta disparado; false = frase do dia (modo desligado)
   const [fromAlert, setFromAlert] = useState(false);
@@ -44,6 +45,7 @@ export function InspirationHomeCard() {
       if (current?.kind === 'clip') {
         setClip(current.clip);
         setDeckName(current.deckName);
+        setDeckTotal(current.total);
         setCard(null);
         setFromAlert(true);
         return;
@@ -145,7 +147,10 @@ export function InspirationHomeCard() {
           </View>
         ) : (
           <>
-            <Text style={styles.author}>{deckName}</Text>
+            <Text style={styles.author}>
+              {deckName} · trecho {clip.ord + 1} de {deckTotal}
+              {clip.reference ? ` · ${clip.reference}` : ''}
+            </Text>
             <Text style={styles.text}>{clip.text?.trim() || clip.title}</Text>
             {clip.author ? <Text style={styles.author}>— {clip.author}</Text> : null}
             <View style={styles.rateRow}>

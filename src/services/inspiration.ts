@@ -80,15 +80,15 @@ function cardToMessage(c: InspirationCard): InspirationMessage {
 }
 
 /** Trecho de áudio → mensagem. A voz é o próprio arquivo: nada de síntese. */
-function clipToMessage(c: AudioClip, deckName: string): InspirationMessage {
+function clipToMessage(c: AudioClip, deckName: string, total: number): InspirationMessage {
   const text = (c.text ?? '').trim();
-  const body = text
-    ? c.author && !text.toLowerCase().includes(c.author.toLowerCase())
-      ? `${text}\n— ${c.author}`
-      : text
-    : `${c.title}${c.author ? `\n— ${c.author}` : ''}`;
+  // "— Autor · Cap. 2 · p. 14": quem e onde na obra
+  const who = [c.author && !text.toLowerCase().includes(c.author.toLowerCase()) ? c.author : null, c.reference]
+    .filter(Boolean)
+    .join(' · ');
+  const body = `${text || c.title}${who ? `\n— ${who}` : ''}`;
   return {
-    title: `🎧 ${deckName}`,
+    title: `🎧 ${deckName} · ${c.ord + 1}/${total}`,
     body,
     speak: text,
     cardId: null,
@@ -328,7 +328,7 @@ async function recordFired(now: Date): Promise<void> {
 /** O que a Home mostra: um card de texto ou um trecho de áudio. */
 export type CurrentInspiration =
   | { kind: 'card'; card: InspirationCard }
-  | { kind: 'clip'; clip: AudioClip; deckName: string };
+  | { kind: 'clip'; clip: AudioClip; deckName: string; total: number };
 
 /**
  * O ÚLTIMO alerta de inspiração disparado (falado ou só notificação), ou null se o
@@ -369,7 +369,7 @@ export async function getCurrentInspiration(now = new Date()): Promise<CurrentIn
     const clip = await getAudioClip(-ref);
     if (!clip) return null;
     const deck = (await listEnabledAudioDecksWithClips()).find((d) => d.id === clip.deckId);
-    return { kind: 'clip', clip, deckName: deck?.name ?? 'Baralho de áudio' };
+    return { kind: 'clip', clip, deckName: deck?.name ?? 'Baralho de áudio', total: deck?.totalCount ?? clip.ord + 1 };
   }
   const card = await getInspirationCardById(ref);
   return card ? { kind: 'card', card } : null;
@@ -512,14 +512,14 @@ async function scheduleInspirationNotificationsOnce(): Promise<void> {
       if (i0 < 0) i0 = 0;
       const list: InspirationMessage[] = [];
       for (let j = 0; j < count; j++) {
-        list.push(clipToMessage(d.clips[(i0 + j) % d.clips.length], d.name));
+        list.push(clipToMessage(d.clips[(i0 + j) % d.clips.length], d.name, d.totalCount));
       }
       // Só o ponto de partida do dia; o "último que tocou" é registrado quando o
       // alerta dispara (countClipPlays).
       await setAudioDeckSeqStart(d.id, today, d.clips[i0].ord).catch(() => {});
       perSource.push(list);
     } else {
-      perSource.push(weightedOrderForToday(d.clips.map((c) => clipToMessage(c, d.name))));
+      perSource.push(weightedOrderForToday(d.clips.map((c) => clipToMessage(c, d.name, d.totalCount))));
     }
   }
   if (textPool) {

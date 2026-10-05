@@ -22,6 +22,7 @@ import {
   listAudioDecks,
   setAudioDeckEnabled,
   setAudioDeckMode,
+  setAudioDeckSequencePosition,
   setKV,
 } from '../services/database';
 import {
@@ -172,6 +173,19 @@ export function AudioDecksScreen() {
     );
   };
 
+  /** Põe a sequência num trecho (0-based): ele é o próximo a tocar, hoje e nos dias seguintes. */
+  const startFrom = async (deck: AudioDeck, ord: number) => {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    await setAudioDeckSequencePosition(deck.id, ord, today);
+    reschedule();
+    await reload();
+    Alert.alert(
+      'Sequência ajustada',
+      `O próximo trecho a tocar é o ${ord + 1} de ${deck.clipCount}. Os alertas já foram reagendados.`,
+    );
+  };
+
   const toggleMix = async (v: boolean) => {
     setMixText(v);
     await setKV(MIX_KEY, v ? '1' : '0');
@@ -249,11 +263,22 @@ export function AudioDecksScreen() {
                         {item.text}
                       </Text>
                     ) : null}
+                    <Text style={styles.clipPos}>
+                      Trecho {item.ord + 1} de {open.clipCount}
+                      {item.reference ? ` · ${item.reference}` : ''}
+                    </Text>
                     <Text style={styles.clipMeta}>
                       {fmtDur(item.durationMs)}
                       {item.author ? ` · ${item.author}` : ''}
                       {' · '}👍 {item.likes} · 👎 {item.dislikes} · ▶ {item.plays}
                     </Text>
+                    {open.playMode === 'sequence' ? (
+                      <Pressable onPress={() => void startFrom(open, item.ord)} hitSlop={6} style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+                        <Text style={styles.link}>
+                          {open.nextPosition === item.ord + 1 ? 'É o próximo da sequência' : 'Começar a sequência daqui'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                     {tooLong ? (
                       <Text style={styles.warnText}>Mais de {AUDIO_DECK_SPEC.maxClipSeconds} s — não toca nos alertas.</Text>
                     ) : null}
@@ -363,12 +388,17 @@ export function AudioDecksScreen() {
             <Text style={styles.deckHint}>
               {d.playMode === 'random'
                 ? 'Sorteia os trechos: 👍 pesa 4× mais, 👎 elimina, sem nota é a probabilidade normal.'
-                : 'Toca na ordem dos arquivos e continua de onde parou no dia seguinte. 👎 pula o trecho; 👍 só conta nas estatísticas.'}
+                : `Toca na ordem de leitura e continua de onde parou no dia seguinte. 👎 pula o trecho; 👍 só conta nas estatísticas. Próximo: trecho ${d.nextPosition ?? 1} de ${d.clipCount}.`}
             </Text>
             <View style={styles.deckActions}>
               <Pressable onPress={() => void openDeck(d)} hitSlop={6}>
                 <Text style={styles.link}>Ver trechos</Text>
               </Pressable>
+              {d.playMode === 'sequence' ? (
+                <Pressable onPress={() => void startFrom(d, 0)} hitSlop={6}>
+                  <Text style={styles.link}>Recomeçar do início</Text>
+                </Pressable>
+              ) : null}
               <Pressable onPress={() => void handleExport(d)} hitSlop={6}>
                 <Text style={styles.link}>Exportar (backup)</Text>
               </Pressable>
@@ -416,8 +446,9 @@ export function AudioDecksScreen() {
           </Text>
           <Text style={styles.importLine}>
             • Opcional: um deck.csv (Arquivo, Título, Texto, Autor) para mostrar o texto do trecho no card e na
-            notificação. Um zip exportado pelo app traz também Nota, Curtidas, Descurtidas, Execuções e Última
-            execução — e importar de volta restaura tudo.
+            notificação. Para AUDIOLIVRO, acrescente Ordem (número da ordem de leitura; manda na ordem dos
+            trechos) e Página e/ou Capítulo (aparecem como &quot;Cap. 2 · p. 14&quot;). Um zip exportado pelo app traz
+            também Nota, Curtidas, Descurtidas, Execuções e Última execução — e importar de volta restaura tudo.
           </Text>
           <View style={{ height: spacing.sm }} />
           <Button label="Escolher arquivo .zip" variant="secondary" onPress={handleImport} loading={!!busy} />
@@ -481,7 +512,8 @@ const styles = StyleSheet.create({
   playGlyph: { color: colors.accent.gold, fontSize: 16 },
   clipTitle: { ...typography.bodyMedium, color: colors.text.primary },
   clipText: { ...typography.small, color: colors.text.secondary, marginTop: 2, lineHeight: 17 },
-  clipMeta: { ...typography.small, color: colors.text.tertiary, marginTop: 4 },
+  clipPos: { ...typography.small, color: colors.accent.gold, marginTop: 4 },
+  clipMeta: { ...typography.small, color: colors.text.tertiary, marginTop: 2 },
   rateCol: { gap: spacing.xs },
   rateBtn: {
     paddingVertical: 4,

@@ -253,6 +253,8 @@ export interface AudioDeck {
   likes: number;
   dislikes: number;
   plays: number;
+  /** Na sequência: posição (1…N) do PRÓXIMO trecho a tocar. null no modo aleatório. */
+  nextPosition: number | null;
 }
 
 export interface AudioClip {
@@ -263,6 +265,8 @@ export interface AudioClip {
   title: string;
   text: string | null;
   author: string | null;
+  /** Onde o trecho está na obra (página, capítulo, parte): "Cap. 2 · p. 14". */
+  reference: string | null;
   durationMs: number | null;
   /** Opinião atual: 1 gostei, -1 eliminado, 0 sem nota. */
   rating: -1 | 0 | 1;
