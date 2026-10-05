@@ -35,6 +35,7 @@ import {
   updateReadAloudTextAudio,
 } from '../services/database';
 import type { ReadAloudText } from '../types';
+import { voiceLabel } from '../services/geminiVoices';
 
 const RATE_OPTIONS = [0.75, 0.9, 1.0, 1.15, 1.3];
 
@@ -628,7 +629,7 @@ export function ReadAloudScreen() {
             <Text style={styles.voiceShortcutLabel}>VOZ DA LEITURA</Text>
             <Text style={styles.voiceShortcutValue}>
               {provider === 'gemini'
-                ? `Gemini · ${geminiVoiceName}`
+                ? `Gemini · ${voiceLabel(geminiVoiceName)}`
                 : 'Voz do sistema (Android)'}
             </Text>
             <Text style={styles.voiceShortcutHint}>

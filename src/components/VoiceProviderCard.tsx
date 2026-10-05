@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from './Card';
 import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
-import { GEMINI_VOICES, TTS_MODELS } from '../services/geminiTTS';
-import { previewGeminiVoice, stopSpeaking } from '../services/voice';
+import { TTS_MODELS } from '../services/geminiTTS';
+import { voiceLabel } from '../services/geminiVoices';
+import { GeminiVoicePicker } from './GeminiVoicePicker';
 import type { VoiceProvider } from '../types';
 
 interface Props {
@@ -26,29 +26,6 @@ export function VoiceProviderCard({
   onGeminiVoiceChange,
   onGeminiModelChange,
 }: Props) {
-  const [previewing, setPreviewing] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  const handlePreview = async (voiceName: string) => {
-    setPreviewError(null);
-    if (previewing === voiceName) {
-      await stopSpeaking();
-      setPreviewing(null);
-      return;
-    }
-    setPreviewing(voiceName);
-    try {
-      await previewGeminiVoice(voiceName);
-    } catch (err) {
-      setPreviewError(err instanceof Error ? err.message : 'falhou ao gerar áudio');
-    } finally {
-      // O onDone do speak limparia automaticamente, mas como o preview pode
-      // demorar e o usuário pode trocar de voz, deixamos o estado por uns
-      // segundos para feedback visual e zeramos depois.
-      setTimeout(() => setPreviewing((c) => (c === voiceName ? null : c)), 8000);
-    }
-  };
-
   return (
     <Card style={styles.card}>
       <View style={styles.sectionRow}>
@@ -119,65 +96,15 @@ export function VoiceProviderCard({
               </Pressable>
             );
           })}
-          <Text style={[styles.label, { marginTop: spacing.md }]}>Escolha a voz (30 vozes)</Text>
-          {GEMINI_VOICES.map((v) => {
-            const selected = v.name === geminiVoiceName;
-            return (
-              <View
-                key={v.name}
-                style={[styles.row, selected && styles.rowSelected]}
-              >
-                <Pressable
-                  style={styles.rowMain}
-                  onPress={() => onGeminiVoiceChange(v.name)}
-                >
-                  <Text style={styles.rowTitle}>
-                    {v.label}{' '}
-                    <Text style={styles.rowGender}>
-                      ({v.gender === 'female' ? 'feminina' : 'masculina'})
-                    </Text>
-                  </Text>
-                  <Text style={styles.rowSub}>{v.description}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => handlePreview(v.name)}
-                  style={[
-                    styles.playBtn,
-                    previewing === v.name && styles.playBtnActive,
-                  ]}
-                  hitSlop={6}
-                  disabled={!hasApiKey}
-                >
-                  {previewing === v.name ? (
-                    <ActivityIndicator color={colors.accent.gold} size="small" />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.playText,
-                        !hasApiKey && { opacity: 0.4 },
-                      ]}
-                    >
-                      ouvir
-                    </Text>
-                  )}
-                </Pressable>
-                <Pressable
-                  onPress={() => onGeminiVoiceChange(v.name)}
-                  hitSlop={6}
-                >
-                  <View style={[styles.radio, selected && styles.radioActive]} />
-                </Pressable>
-              </View>
-            );
-          })}
-          {previewError ? (
-            <Text style={styles.err}>{previewError}</Text>
-          ) : null}
-          <Text style={styles.hint}>
-            Cada preview e cada fala do Askeo no chat fazem uma chamada à
-            API. No plano grátis do AI Studio, é gerenciável; se você usar
-            muito, considere o sistema.
-          </Text>
+          <View style={{ marginTop: spacing.md }}>
+            <GeminiVoicePicker
+              value={geminiVoiceName}
+              valueLabel={voiceLabel(geminiVoiceName)}
+              libraryAvailable={geminiTtsModel.startsWith('gemini-3.8')}
+              hasApiKey={hasApiKey}
+              onChange={(v) => onGeminiVoiceChange(v.id)}
+            />
+          </View>
         </View>
       ) : null}
     </Card>

@@ -4,6 +4,7 @@ import { getUserConfig, updateUserConfig } from '../services/database';
 import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice, setActiveVoiceProvider } from '../services/voice';
 import { setActiveTtsModel } from '../services/geminiTTS';
+import { loadVoiceMeta } from '../services/geminiVoices';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
@@ -54,6 +55,7 @@ export const useAppStore = create<AppState>((set) => ({
     const hasApiKey = !!apiKey;
     syncVoiceFromConfig(config);
     mirrorSpokenConfig(config);
+    await loadVoiceMeta();
     set({ config: { ...config, hasApiKey }, hasApiKey, ready: true });
     // Ensure daily nudges (bluelight, breathing) are scheduled
     // — seeded on first run, re-scheduled on every cold start so the

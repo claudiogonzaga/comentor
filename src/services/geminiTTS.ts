@@ -518,6 +518,11 @@ async function fetchPcm(
   const queueMs = Date.now() - tQueue;
   const model = effectiveModel();
   const interactions = usesInteractions(model);
+  // Voz da biblioteca estendida só existe nos 3.8: no 2.5 de reserva, usa a padrão.
+  const voice =
+    model === LEGACY_TTS_MODEL && !GEMINI_VOICES.some((v) => v.name === voiceName)
+      ? DEFAULT_GEMINI_VOICE
+      : voiceName;
   const url = interactions
     ? `${API_BASE}/interactions`
     : `${API_BASE}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -526,13 +531,13 @@ async function fetchPcm(
         model,
         input: [{ type: 'user_input', content: [{ type: 'text', text }] }],
         response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: SAMPLE_RATE },
-        generation_config: { speech_config: [{ voice: voiceName }] },
+        generation_config: { speech_config: [{ voice }] },
       }
     : {
         contents: [{ parts: [{ text }] }],
         generationConfig: {
           responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
         },
       };
   const controller = new AbortController();
