@@ -13,6 +13,8 @@ import type {
   LocalModelId,
   BreathingCustomSound,
   YogaNidraSound,
+  AudioClip,
+  AudioDeck,
   InspirationPack,
   InspirationCard,
   Medication,
@@ -735,6 +737,38 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     await database.execAsync(`ALTER TABLE inspiration_cards ADD COLUMN rating INTEGER NOT NULL DEFAULT 0`);
     await database.execAsync(`ALTER TABLE inspiration_cards ADD COLUMN rated_at TEXT`);
   }
+  // v1.110: baralhos de ÁUDIO (trechos importados em zip, tocados sem gastar a API).
+  // Cada trecho guarda a opinião atual (rating) e CONTADORES de eventos — quantas
+  // vezes recebeu 👍/👎 e quantas vezes tocou —, que entram no backup do baralho.
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS audio_decks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      play_mode TEXT NOT NULL DEFAULT 'random',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      seq_date TEXT,
+      seq_start_ord INTEGER NOT NULL DEFAULT 0,
+      seq_end_ord INTEGER NOT NULL DEFAULT -1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS audio_clips (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      deck_id INTEGER NOT NULL,
+      ord INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      text TEXT,
+      author TEXT,
+      duration_ms INTEGER,
+      rating INTEGER NOT NULL DEFAULT 0,
+      likes INTEGER NOT NULL DEFAULT 0,
+      dislikes INTEGER NOT NULL DEFAULT 0,
+      plays INTEGER NOT NULL DEFAULT 0,
+      last_played_at TEXT,
+      rated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_audio_clips_deck ON audio_clips(deck_id, ord);
+  `);
   await seedInspirationBuiltins(database);
   await seedSleepSciencePack(database);
   // v1.107: o app passou a se chamar Askeo — renomeia o baralho embutido que já existia.
@@ -2615,6 +2649,220 @@ async function seedSleepSciencePack(database: SQLite.SQLiteDatabase): Promise<vo
   });
 }
 
+// --------- Baralhos de ÁUDIO (v1.110) ---------
+
+/** Duração máxima (ms) de um trecho para valer nos alertas. */
+export const AUDIO_CLIP_MAX_MS = 90_000;
+
+interface AudioDeckRow {
+  id: number;
+  name: string;
+  play_mode: string;
+  enabled: number;
+  seq_date: string | null;
+  seq_start_ord: number;
+  seq_end_ord: number;
+}
+
+interface AudioClipRow {
+  id: number;
+  deck_id: number;
+  ord: number;
+  file_name: string;
+  title: string;
+  text: string | null;
+  author: string | null;
+  duration_ms: number | null;
+  rating: number;
+  likes: number;
+  dislikes: number;
+  plays: number;
+  last_played_at: string | null;
+}
+
+const rowToClip = (r: AudioClipRow): AudioClip => ({
+  id: r.id,
+  deckId: r.deck_id,
+  ord: r.ord,
+  fileName: r.file_name,
+  title: r.title,
+  text: r.text,
+  author: r.author,
+  durationMs: r.duration_ms,
+  rating: r.rating > 0 ? 1 : r.rating < 0 ? -1 : 0,
+  likes: r.likes,
+  dislikes: r.dislikes,
+  plays: r.plays,
+  lastPlayedAt: r.last_played_at,
+});
+
+export async function listAudioDecks(): Promise<AudioDeck[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<
+    AudioDeckRow & { clip_count: number; active_count: number; likes: number; dislikes: number; plays: number }
+  >(
+    `SELECT k.*,
+       (SELECT COUNT(*) FROM audio_clips c WHERE c.deck_id = k.id) AS clip_count,
+       (SELECT COUNT(*) FROM audio_clips c WHERE c.deck_id = k.id AND c.rating >= 0
+          AND (c.duration_ms IS NULL OR c.duration_ms <= ?)) AS active_count,
+       (SELECT COALESCE(SUM(likes), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS likes,
+       (SELECT COALESCE(SUM(dislikes), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS dislikes,
+       (SELECT COALESCE(SUM(plays), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS plays
+     FROM audio_decks k ORDER BY k.id ASC`,
+    [AUDIO_CLIP_MAX_MS],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    playMode: r.play_mode === 'sequence' ? 'sequence' : 'random',
+    enabled: r.enabled === 1,
+    clipCount: r.clip_count,
+    activeCount: r.active_count,
+    likes: r.likes,
+    dislikes: r.dislikes,
+    plays: r.plays,
+  }));
+}
+
+export async function createAudioDeck(name: string, playMode: 'random' | 'sequence' = 'random'): Promise<number> {
+  const d = await getDb();
+  const r = await d.runAsync('INSERT INTO audio_decks (name, play_mode, enabled) VALUES (?, ?, 1)', [name, playMode]);
+  return r.lastInsertRowId as number;
+}
+
+export async function setAudioDeckEnabled(id: number, enabled: boolean): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_decks SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id]);
+}
+
+export async function setAudioDeckMode(id: number, mode: 'random' | 'sequence'): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_decks SET play_mode = ? WHERE id = ?', [mode, id]);
+}
+
+export async function renameAudioDeck(id: number, name: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_decks SET name = ? WHERE id = ?', [name, id]);
+}
+
+export async function deleteAudioDeckRows(id: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('DELETE FROM audio_clips WHERE deck_id = ?', [id]);
+  await d.runAsync('DELETE FROM audio_decks WHERE id = ?', [id]);
+}
+
+export interface NewAudioClip {
+  ord: number;
+  fileName: string;
+  title: string;
+  text: string | null;
+  author: string | null;
+  durationMs: number | null;
+  /** Estatísticas de um backup restaurado. */
+  rating?: -1 | 0 | 1;
+  likes?: number;
+  dislikes?: number;
+  plays?: number;
+  lastPlayedAt?: string | null;
+}
+
+export async function addAudioClips(deckId: number, clips: NewAudioClip[]): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    for (const c of clips) {
+      await d.runAsync(
+        `INSERT INTO audio_clips
+           (deck_id, ord, file_name, title, text, author, duration_ms, rating, likes, dislikes, plays, last_played_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          deckId, c.ord, c.fileName, c.title, c.text, c.author, c.durationMs,
+          c.rating ?? 0, c.likes ?? 0, c.dislikes ?? 0, c.plays ?? 0, c.lastPlayedAt ?? null,
+        ],
+      );
+    }
+  });
+}
+
+export async function listAudioClips(deckId: number): Promise<AudioClip[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<AudioClipRow>('SELECT * FROM audio_clips WHERE deck_id = ? ORDER BY ord ASC', [deckId]);
+  return rows.map(rowToClip);
+}
+
+export async function getAudioClip(id: number): Promise<AudioClip | null> {
+  const d = await getDb();
+  const r = await d.getFirstAsync<AudioClipRow>('SELECT * FROM audio_clips WHERE id = ?', [id]);
+  return r ? rowToClip(r) : null;
+}
+
+/**
+ * Nota do trecho: 1 gostei, -1 eliminar, 0 limpar. Cada toque em 👍/👎 também
+ * incrementa o contador de eventos do trecho (likes/dislikes), que o backup guarda.
+ */
+export async function setAudioClipRating(id: number, rating: -1 | 0 | 1): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `UPDATE audio_clips SET rating = ?, rated_at = ?,
+       likes = likes + ?, dislikes = dislikes + ? WHERE id = ?`,
+    [rating, rating === 0 ? null : new Date().toISOString(), rating > 0 ? 1 : 0, rating < 0 ? 1 : 0, id],
+  );
+}
+
+/** Registra execuções do trecho (no app ou por alerta). */
+export async function addAudioClipPlays(id: number, count = 1, at: Date = new Date()): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `UPDATE audio_clips SET plays = plays + ?,
+       last_played_at = CASE WHEN last_played_at IS NULL OR last_played_at < ? THEN ? ELSE last_played_at END
+     WHERE id = ?`,
+    [count, at.toISOString(), at.toISOString(), id],
+  );
+}
+
+export async function setAudioClipDuration(id: number, ms: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_clips SET duration_ms = ? WHERE id = ?', [Math.round(ms), id]);
+}
+
+/** Baralhos LIGADOS com seus trechos que valem nos alertas (sem 👎, dentro da duração). */
+export async function listEnabledAudioDecksWithClips(): Promise<
+  { id: number; name: string; playMode: 'random' | 'sequence'; seqDate: string | null; seqStartOrd: number; seqEndOrd: number; clips: AudioClip[] }[]
+> {
+  const d = await getDb();
+  const decks = await d.getAllAsync<AudioDeckRow>('SELECT * FROM audio_decks WHERE enabled = 1 ORDER BY id ASC');
+  const out = [];
+  for (const k of decks) {
+    const rows = await d.getAllAsync<AudioClipRow>(
+      `SELECT * FROM audio_clips WHERE deck_id = ? AND rating >= 0
+         AND (duration_ms IS NULL OR duration_ms <= ?) ORDER BY ord ASC`,
+      [k.id, AUDIO_CLIP_MAX_MS],
+    );
+    if (!rows.length) continue;
+    out.push({
+      id: k.id,
+      name: k.name,
+      playMode: (k.play_mode === 'sequence' ? 'sequence' : 'random') as 'random' | 'sequence',
+      seqDate: k.seq_date,
+      seqStartOrd: k.seq_start_ord,
+      seqEndOrd: k.seq_end_ord,
+      clips: rows.map(rowToClip),
+    });
+  }
+  return out;
+}
+
+/** Ponto de partida da sequência de HOJE (fixo durante o dia). */
+export async function setAudioDeckSeqStart(id: number, date: string, startOrd: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_decks SET seq_date = ?, seq_start_ord = ? WHERE id = ?', [date, startOrd, id]);
+}
+
+/** Último trecho que de fato TOCOU: o dia seguinte continua depois dele. */
+export async function setAudioDeckSeqEnd(id: number, endOrd: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync('UPDATE audio_decks SET seq_end_ord = ? WHERE id = ?', [endOrd, id]);
+}
+
 interface InspirationPackRow {
   id: number;
   name: string;
@@ -2781,6 +3029,8 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM nudge_lines;
     DELETE FROM technique_stats;
     DELETE FROM habit_state;
+    DELETE FROM audio_clips;
+    DELETE FROM audio_decks;
     DELETE FROM mindful_sessions;
     DELETE FROM decision_points;
     DELETE FROM automaticity;

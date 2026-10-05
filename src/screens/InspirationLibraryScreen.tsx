@@ -279,8 +279,18 @@ export function InspirationLibraryScreen() {
               frases dos baralhos LIGADOS (pode combinar vários). Toque num
               baralho para ver os cards e dar 👍 (aparece mais) ou 👎 (nunca mais).
             </Text>
+            <Pressable onPress={() => navigation.navigate('AudioDecks')}>
+              <Card style={styles.importCard}>
+                <Text style={styles.importTitle}>🎧 Baralhos de áudio ›</Text>
+                <Text style={styles.importLine}>
+                  Importe trechos de áudio prontos (zip) — por exemplo, de um audiolivro — e o app os toca nos alertas,
+                  sem gastar a API. Cada baralho conta 👍, 👎 e execuções, e tem backup. Com um baralho de áudio
+                  ligado, os alertas tocam só os áudios, a menos que você ative &quot;Misturar com as frases de texto&quot; lá.
+                </Text>
+              </Card>
+            </Pressable>
             <Card style={styles.importCard}>
-              <Text style={styles.importTitle}>Importar baralho</Text>
+              <Text style={styles.importTitle}>Importar baralho de texto</Text>
               <Text style={styles.importLine}>• Arquivo CSV (UTF-8), uma frase por linha.</Text>
               <Text style={styles.importLine}>
                 • 4 colunas: Texto do Card · Autor · Data (opcional) · Tipo (Citação ou Fato Histórico).

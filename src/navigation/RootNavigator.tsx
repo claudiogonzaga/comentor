@@ -20,6 +20,7 @@ import { SoundsVoiceScreen } from '../screens/SoundsVoiceScreen';
 import { AboutYouScreen } from '../screens/AboutYouScreen';
 import { BrainVoiceScreen } from '../screens/BrainVoiceScreen';
 import { InspirationLibraryScreen } from '../screens/InspirationLibraryScreen';
+import { AudioDecksScreen } from '../screens/AudioDecksScreen';
 import { YogaNidraScreen } from '../screens/YogaNidraScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
@@ -43,7 +44,7 @@ import {
 import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
 import { handleMorningResponse, MORNING_TYPE } from '../services/morning';
 import { REVIEW_TYPE } from '../services/review';
-import { rateInspirationCard } from '../services/inspiration';
+import { rateAudioClip, rateInspirationCard } from '../services/inspiration';
 import { ReviewScreen } from '../screens/ReviewScreen';
 import { recordSampleAnswer, todayISO as formationToday } from '../services/habitFormation';
 import { addChatMessage, addSnoozeFeedback, bumpTechnique } from '../services/database';
@@ -79,6 +80,7 @@ export type RootStackParamList = {
   AboutYou: undefined;
   BrainVoice: undefined;
   InspirationLibrary: undefined;
+  AudioDecks: undefined;
   YogaNidra: undefined;
 };
 
@@ -262,10 +264,12 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         nav.navigate('Home');
       } else if (type === 'inspiration') {
         // 👍/👎 no alerta de inspiração: grava a nota sem abrir o app.
-        const cardId = (data as { cardId?: number }).cardId;
-        if (typeof cardId === 'number' && (action === INSPIRATION_LIKE_ACTION || action === INSPIRATION_DISLIKE_ACTION)) {
+        const { cardId, clipId } = data as { cardId?: number; clipId?: number };
+        if (action === INSPIRATION_LIKE_ACTION || action === INSPIRATION_DISLIKE_ACTION) {
+          const rating = action === INSPIRATION_LIKE_ACTION ? 1 : -1;
           try {
-            await rateInspirationCard(cardId, action === INSPIRATION_LIKE_ACTION ? 1 : -1);
+            if (typeof clipId === 'number') await rateAudioClip(clipId, rating);
+            else if (typeof cardId === 'number') await rateInspirationCard(cardId, rating);
           } catch {
             /* best-effort */
           }
@@ -510,6 +514,11 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         <Stack.Screen
           name="InspirationLibrary"
           component={InspirationLibraryScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="AudioDecks"
+          component={AudioDecksScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
         <Stack.Screen

@@ -431,7 +431,7 @@ function singleFlight<T>(run: (items: T) => Promise<void>): (items: T) => Promis
 export const syncSpokenInspirations = singleFlight(syncSpokenInspirationsOnce);
 
 async function syncSpokenInspirationsOnce(
-  items: { text: string; hour: number; minute: number }[],
+  items: { text: string; hour: number; minute: number; audioPath?: string }[],
 ): Promise<void> {
   if (!native) return;
 
@@ -476,8 +476,9 @@ async function syncSpokenInspirationsOnce(
   let preparedAny = false;
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    let audioPath = '';
-    if (renderGemini) {
+    // Trecho de ÁUDIO de baralho: já é a voz — toca o arquivo, sem API.
+    let audioPath = it.audioPath ?? '';
+    if (!it.audioPath && renderGemini) {
       try {
         const { uri, key } = await prepareNudgeAudio(it.text, {
           voiceName,

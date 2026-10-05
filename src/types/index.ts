@@ -240,6 +240,39 @@ export interface InspirationCard {
   rating: -1 | 0 | 1;
 }
 
+/** Baralho de ÁUDIO: trechos curtos que o usuário importa (zip) e o app toca. */
+export interface AudioDeck {
+  id: number;
+  name: string;
+  /** random = sorteio (👍 pesa mais); sequence = na ordem, de um dia para o outro. */
+  playMode: 'random' | 'sequence';
+  enabled: boolean;
+  clipCount: number;
+  /** Trechos que valem nos alertas (sem 👎 e dentro da duração). */
+  activeCount: number;
+  likes: number;
+  dislikes: number;
+  plays: number;
+}
+
+export interface AudioClip {
+  id: number;
+  deckId: number;
+  ord: number;
+  fileName: string;
+  title: string;
+  text: string | null;
+  author: string | null;
+  durationMs: number | null;
+  /** Opinião atual: 1 gostei, -1 eliminado, 0 sem nota. */
+  rating: -1 | 0 | 1;
+  /** Contadores de eventos (só crescem): cada toque em 👍/👎 e cada execução. */
+  likes: number;
+  dislikes: number;
+  plays: number;
+  lastPlayedAt: string | null;
+}
+
 /** Texto salvo na tela "Leia para mim" (visualização, oração, hipnose…). */
 export interface ReadAloudText {
   id: number;

@@ -21,6 +21,8 @@ import { deleteApiKey } from '../services/secureStore';
 import { deleteAllDownloadedModels } from '../services/modelDownload';
 import { releaseModel } from '../services/localModel';
 import { resetAllUserData } from '../services/database';
+import { deleteAllAudioDeckFiles } from '../services/audioDecks';
+import { scheduleInspirationNotifications } from '../services/inspiration';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
 import { confirmAndRestoreBackup, exportBackup } from '../services/backup';
 import { hasUsageAccess, openAppDetails, openUsageAccessSettings } from '../services/spokenNudges';
@@ -119,6 +121,8 @@ export function SettingsScreen() {
               await deleteAllDownloadedModels();
               await deleteApiKey();
               await resetAllUserData();
+              deleteAllAudioDeckFiles();
+              void scheduleInspirationNotifications().catch(() => {});
               await refreshConfig();
               Alert.alert(
                 'Dados apagados',

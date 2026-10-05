@@ -34,7 +34,7 @@ function csvField(v: string | null): string {
  * linhas. Sem separador consistente (arquivo de texto, uma frase por linha),
  * devolve null — a linha inteira é o texto, vírgulas e tudo.
  */
-function detectDelimiter(text: string): string | null {
+export function detectDelimiter(text: string): string | null {
   const lines = text
     .replace(/^﻿/, '')
     .split(/\r\n|\n|\r/)
@@ -69,7 +69,7 @@ function detectDelimiter(text: string): string | null {
 }
 
 /** Parser de CSV tolerante a campos com aspas e quebras de linha internas. */
-function parseCsv(text: string, delimiter: string | null = ','): string[][] {
+export function parseCsv(text: string, delimiter: string | null = ','): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';

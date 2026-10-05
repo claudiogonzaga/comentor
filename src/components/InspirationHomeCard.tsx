@@ -5,8 +5,10 @@ import { Card } from './Card';
 import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { getInspirationCardById, listActiveInspirationCards } from '../services/database';
-import { getCurrentInspirationCard, rateInspirationCard } from '../services/inspiration';
-import type { InspirationCard } from '../types';
+import { getCurrentInspiration, rateAudioClip, rateInspirationCard } from '../services/inspiration';
+import { getAudioClip } from '../services/database';
+import { stopClip, subscribeClipPlayback, toggleClip } from '../services/audioDecks';
+import type { AudioClip, InspirationCard } from '../types';
 
 // Painel de INSPIRAÇÃO (separado do painel de lembretes).
 //
@@ -26,6 +28,10 @@ const REFRESH_MS = 60_000;
 
 export function InspirationHomeCard() {
   const [card, setCard] = useState<InspirationCard | null>(null);
+  // Trecho de ÁUDIO do último alerta (baralho de áudio) e o nome do baralho.
+  const [clip, setClip] = useState<AudioClip | null>(null);
+  const [deckName, setDeckName] = useState('');
+  const [playingId, setPlayingId] = useState<number | null>(null);
   // true = veio de um alerta disparado; false = frase do dia (modo desligado)
   const [fromAlert, setFromAlert] = useState(false);
   const [dayPool, setDayPool] = useState<InspirationCard[] | null>(null);
@@ -34,11 +40,19 @@ export function InspirationHomeCard() {
 
   const load = useCallback(async () => {
     try {
-      const current = await getCurrentInspirationCard();
-      if (current) {
+      const current = await getCurrentInspiration();
+      if (current?.kind === 'clip') {
+        setClip(current.clip);
+        setDeckName(current.deckName);
+        setCard(null);
+        setFromAlert(true);
+        return;
+      }
+      setClip(null);
+      if (current?.kind === 'card') {
         // o card pode ter sido excluído da biblioteca depois do alerta
-        if (!current.deleted) {
-          setCard(current);
+        if (!current.card.deleted) {
+          setCard(current.card);
           setFromAlert(true);
           return;
         }
@@ -58,9 +72,25 @@ export function InspirationHomeCard() {
     useCallback(() => {
       void load();
       const t = setInterval(() => void load(), REFRESH_MS);
-      return () => clearInterval(t);
+      return () => {
+        clearInterval(t);
+        stopClip();
+      };
     }, [load]),
   );
+
+  useEffect(() => subscribeClipPlayback(setPlayingId), []);
+
+  const rateClip = useCallback(async (target: AudioClip, rating: -1 | 0 | 1) => {
+    setClip((c) => (c && c.id === target.id ? { ...c, rating } : c));
+    try {
+      await rateAudioClip(target.id, rating);
+      const fresh = await getAudioClip(target.id);
+      if (fresh) setClip((c) => (c && c.id === fresh.id ? fresh : c));
+    } catch {
+      /* a nota fica só na tela; tenta de novo no próximo toque */
+    }
+  }, []);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
@@ -93,6 +123,68 @@ export function InspirationHomeCard() {
     },
     [],
   );
+
+  // ——— Trecho de ÁUDIO: toca o arquivo importado (sem API) e deixa avaliar ———
+  if (fromAlert && clip) {
+    const cDisliked = clip.rating < 0;
+    const cLiked = clip.rating > 0;
+    return (
+      <Card style={styles.card}>
+        <View style={styles.head}>
+          <View style={styles.headLeft}>
+            <GreekIcon name="sun" size={18} color={colors.accent.gold} />
+            <Text style={styles.title}>ÚLTIMA INSPIRAÇÃO · ÁUDIO</Text>
+          </View>
+        </View>
+        {cDisliked ? (
+          <View>
+            <Text style={styles.dislikedText}>Combinado: este trecho não vai mais tocar.</Text>
+            <Pressable onPress={() => void rateClip(clip, 0)} hitSlop={8} style={styles.undo}>
+              <Text style={styles.undoText}>desfazer</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.author}>{deckName}</Text>
+            <Text style={styles.text}>{clip.text?.trim() || clip.title}</Text>
+            {clip.author ? <Text style={styles.author}>— {clip.author}</Text> : null}
+            <View style={styles.rateRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={playingId === clip.id ? 'Parar o trecho' : 'Ouvir o trecho'}
+                onPress={() => toggleClip(clip)}
+                style={[styles.rateBtn, playingId === clip.id && styles.rateBtnOn]}
+                hitSlop={6}
+              >
+                <Text style={[styles.rateText, playingId === clip.id && styles.rateTextOn]}>
+                  {playingId === clip.id ? '⏹ Parar' : '▶ Ouvir'}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Gostei deste trecho"
+                accessibilityState={{ selected: cLiked }}
+                onPress={() => void rateClip(clip, cLiked ? 0 : 1)}
+                style={[styles.rateBtn, cLiked && styles.rateBtnOn]}
+                hitSlop={6}
+              >
+                <Text style={[styles.rateText, cLiked && styles.rateTextOn]}>👍</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Não quero mais este trecho"
+                onPress={() => void rateClip(clip, -1)}
+                style={styles.rateBtn}
+                hitSlop={6}
+              >
+                <Text style={styles.rateText}>👎</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+      </Card>
+    );
+  }
 
   const shown: InspirationCard | null = fromAlert ? card : dayPool?.[idx] ?? null;
   if (!shown) return null;
