@@ -192,7 +192,7 @@ export function HealthCard() {
       {status === 'denied' && (
         <>
           <Text style={styles.subtitle}>
-            Conecte o Health Connect para a Comentora acompanhar seu sono e
+            Conecte o Health Connect para o Askeo acompanhar seu sono e
             seus exercícios — e te conhecer melhor nas conversas.
           </Text>
           <Button

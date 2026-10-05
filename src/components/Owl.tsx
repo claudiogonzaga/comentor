@@ -3,7 +3,7 @@ import { Animated, Easing, Image, View } from 'react-native';
 import type { OwlMood } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
-// A Comentora é representada pela coruja de Atena num medalhão de vaso grego
+// O Askeo é representada pela coruja de Atena num medalhão de vaso grego
 // (figura negra sobre terracota, cercada por louro e meandro). A ARTE ORIGINAL
 // É INTOCÁVEL — toda a vida vem de camadas desenhadas POR CIMA dela, com
 // posições medidas pixel a pixel no PNG:

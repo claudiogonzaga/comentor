@@ -3,24 +3,28 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { Card } from './Card';
 import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
-import { GEMINI_VOICES } from '../services/geminiTTS';
+import { GEMINI_VOICES, TTS_MODELS } from '../services/geminiTTS';
 import { previewGeminiVoice, stopSpeaking } from '../services/voice';
 import type { VoiceProvider } from '../types';
 
 interface Props {
   provider: VoiceProvider;
   geminiVoiceName: string;
+  geminiTtsModel: string;
   hasApiKey: boolean;
   onProviderChange: (provider: VoiceProvider) => void;
   onGeminiVoiceChange: (name: string) => void;
+  onGeminiModelChange: (id: string) => void;
 }
 
 export function VoiceProviderCard({
   provider,
   geminiVoiceName,
+  geminiTtsModel,
   hasApiKey,
   onProviderChange,
   onGeminiVoiceChange,
+  onGeminiModelChange,
 }: Props) {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -96,7 +100,26 @@ export function VoiceProviderCard({
 
       {provider === 'gemini' ? (
         <View style={{ marginTop: spacing.md }}>
-          <Text style={styles.label}>Escolha a voz</Text>
+          <Text style={styles.label}>Modelo de voz</Text>
+          {TTS_MODELS.map((m) => {
+            const selected = m.id === geminiTtsModel;
+            return (
+              <Pressable
+                key={m.id}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={[styles.row, selected && styles.rowSelected]}
+                onPress={() => onGeminiModelChange(m.id)}
+              >
+                <View style={styles.rowMain}>
+                  <Text style={styles.rowTitle}>{m.label}</Text>
+                  <Text style={styles.rowSub}>{m.description}</Text>
+                </View>
+                <View style={[styles.radio, selected && styles.radioActive]} />
+              </Pressable>
+            );
+          })}
+          <Text style={[styles.label, { marginTop: spacing.md }]}>Escolha a voz (30 vozes)</Text>
           {GEMINI_VOICES.map((v) => {
             const selected = v.name === geminiVoiceName;
             return (
@@ -151,7 +174,7 @@ export function VoiceProviderCard({
             <Text style={styles.err}>{previewError}</Text>
           ) : null}
           <Text style={styles.hint}>
-            Cada preview e cada fala da Comentora no chat fazem uma chamada à
+            Cada preview e cada fala do Askeo no chat fazem uma chamada à
             API. No plano grátis do AI Studio, é gerenciável; se você usar
             muito, considere o sistema.
           </Text>

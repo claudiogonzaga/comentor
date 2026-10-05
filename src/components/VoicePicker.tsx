@@ -25,13 +25,13 @@ interface Props {
   value: string | null;
   /** called when the user picks a different voice */
   onChange: (voice: EnrichedVoice | null) => void;
-  /** título do card (padrão: "Voz da Comentora") */
+  /** título do card (padrão: "Voz do Askeo") */
   title?: string;
 }
 
 const PLAY_HOLD_MS = 6000;
 
-export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Props) {
+export function VoicePicker({ value, onChange, title = 'Voz do Askeo' }: Props) {
   const [voices, setVoices] = useState<EnrichedVoice[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -116,7 +116,7 @@ export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Pro
             Nenhuma voz em português instalada
           </Text>
           <Text style={styles.warningBody}>
-            Seu celular não tem voz em português. Sem isso, a Comentora vai usar
+            Seu celular não tem voz em português. Sem isso, o Askeo vai usar
             a voz padrão (provavelmente em inglês).
           </Text>
           <Pressable style={styles.installBtn} onPress={handleOpenSettings}>
@@ -131,7 +131,7 @@ export function VoicePicker({ value, onChange, title = 'Voz da Comentora' }: Pro
             Você só tem voz de Portugal (pt-PT)
           </Text>
           <Text style={styles.warningBody}>
-            Pra ouvir a Comentora em português brasileiro, instale as vozes
+            Pra ouvir o Askeo em português brasileiro, instale as vozes
             pt-BR do Google: <Text style={styles.warningBold}>
             Acessibilidade → Saída de texto para voz → motor do Google →
             Instalar dados de voz → Português (Brasil) → marcar todas

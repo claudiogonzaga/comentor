@@ -4,7 +4,7 @@ import { ensureChannel, gatedSchedule } from './notifications';
 
 /**
  * Nudge de "trabalho sentado": durante a janela de expediente que a pessoa
- * marca (dias + horário de início/fim), a Comentora lembra de levantar e mover
+ * marca (dias + horário de início/fim), o Askeo lembra de levantar e mover
  * o corpo a cada `sedentaryIntervalMin` minutos. Implementado com gatilhos
  * WEEKLY do expo-notifications (um por dia × horário), espelhando a abordagem
  * dos medicamentos.

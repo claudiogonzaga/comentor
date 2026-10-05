@@ -1,6 +1,8 @@
-// Síntese de voz via Gemini 2.5 Flash Preview TTS.
+// Síntese de voz via Gemini TTS (3.8 Flash, 3.8 Flash-Lite ou o 2.5 antigo).
 //
-// O modelo retorna PCM 16-bit LE mono em 24 kHz como base64. Para que o
+// O modelo retorna áudio 16-bit LE mono em 24 kHz como base64 — PCM cru nos
+// modelos antigos e, nos 3.8, WAV completo (com cabeçalho). Aqui tudo vira PCM
+// antes do resto do pipeline (normalização de volume, cache, WAV próprio). Para que o
 // expo-audio player consiga reproduzir, montamos um cabeçalho WAV (44
 // bytes) na frente do PCM e salvamos como arquivo no diretório de cache.
 //
@@ -12,8 +14,61 @@ import { File, Paths } from 'expo-file-system';
 import { getApiKey } from './secureStore';
 import { getSavedAudioUris } from './database';
 
-const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
-const TTS_URL = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent`;
+const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+/** Modelos de TTS que o app sabe usar. */
+export interface TtsModel {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const TTS_MODELS: TtsModel[] = [
+  {
+    id: 'gemini-3.8-flash-lite-tts',
+    label: 'Flash-Lite (3.8)',
+    description: 'a mais rápida e barata — boa para avisos e frases curtas',
+  },
+  {
+    id: 'gemini-3.8-flash-tts',
+    label: 'Flash (3.8)',
+    description: 'mais expressiva e natural — melhor para leituras longas',
+  },
+  {
+    id: 'gemini-2.5-flash-preview-tts',
+    label: '2.5 Flash (antiga)',
+    description: 'a versão anterior; só se as novas falharem na sua conta',
+  },
+];
+
+export const DEFAULT_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
+/** Reserva: se um modelo novo não existir para a chave, volta a este. */
+const LEGACY_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+
+let activeTtsModel: string = DEFAULT_TTS_MODEL;
+
+/** Define o modelo de TTS em uso (vem da configuração). Ids desconhecidos são ignorados. */
+export function setActiveTtsModel(id?: string | null): void {
+  if (id && TTS_MODELS.some((m) => m.id === id)) activeTtsModel = id;
+}
+
+export function getActiveTtsModel(): string {
+  return activeTtsModel;
+}
+
+// Aprendido em tempo de execução, por modelo: a documentação dos 3.8 só mostra a
+// Interactions API; se ela recusar (400/404/405), usamos o generateContent. Se o
+// modelo nem existir para esta chave (404), cai no 2.5 — a voz continua saindo.
+const generateOnly = new Set<string>();
+const unavailableModels = new Set<string>();
+
+function effectiveModel(): string {
+  return unavailableModels.has(activeTtsModel) ? LEGACY_TTS_MODEL : activeTtsModel;
+}
+
+function usesInteractions(model: string): boolean {
+  return model.startsWith('gemini-3.8') && !generateOnly.has(model);
+}
 const SAMPLE_RATE = 24000;
 const CHANNELS = 1;
 const BITS_PER_SAMPLE = 16;
@@ -28,13 +83,35 @@ export interface GeminiVoice {
 
 export const GEMINI_VOICES: GeminiVoice[] = [
   { name: 'Aoede', label: 'Aoede', gender: 'female', description: 'feminina, leve e expressiva' },
-  { name: 'Kore', label: 'Kore', gender: 'female', description: 'feminina, casual e direta' },
+  { name: 'Kore', label: 'Kore', gender: 'female', description: 'feminina, firme, casual e direta' },
   { name: 'Leda', label: 'Leda', gender: 'female', description: 'feminina, jovem e alegre' },
-  { name: 'Zephyr', label: 'Zephyr', gender: 'female', description: 'feminina, suave e calma' },
-  { name: 'Charon', label: 'Charon', gender: 'male', description: 'masculina, articulada e neutra' },
-  { name: 'Puck', label: 'Puck', gender: 'male', description: 'masculina, leve e simpática' },
-  { name: 'Fenrir', label: 'Fenrir', gender: 'male', description: 'masculina, firme e grave' },
-  { name: 'Orus', label: 'Orus', gender: 'male', description: 'masculina, calma e ponderada' },
+  { name: 'Zephyr', label: 'Zephyr', gender: 'female', description: 'feminina, brilhante, suave e calma' },
+  { name: 'Callirrhoe', label: 'Callirrhoe', gender: 'female', description: 'feminina, descontraída' },
+  { name: 'Autonoe', label: 'Autonoe', gender: 'female', description: 'feminina, brilhante' },
+  { name: 'Despina', label: 'Despina', gender: 'female', description: 'feminina, suave' },
+  { name: 'Erinome', label: 'Erinome', gender: 'female', description: 'feminina, clara' },
+  { name: 'Laomedeia', label: 'Laomedeia', gender: 'female', description: 'feminina, animada' },
+  { name: 'Achernar', label: 'Achernar', gender: 'female', description: 'feminina, macia' },
+  { name: 'Gacrux', label: 'Gacrux', gender: 'female', description: 'feminina, madura' },
+  { name: 'Pulcherrima', label: 'Pulcherrima', gender: 'female', description: 'feminina, direta e à frente' },
+  { name: 'Vindemiatrix', label: 'Vindemiatrix', gender: 'female', description: 'feminina, gentil' },
+  { name: 'Sulafat', label: 'Sulafat', gender: 'female', description: 'feminina, calorosa' },
+  { name: 'Charon', label: 'Charon', gender: 'male', description: 'masculina, articulada e informativa' },
+  { name: 'Puck', label: 'Puck', gender: 'male', description: 'masculina, animada e simpática' },
+  { name: 'Fenrir', label: 'Fenrir', gender: 'male', description: 'masculina, firme e empolgada' },
+  { name: 'Orus', label: 'Orus', gender: 'male', description: 'masculina, firme, calma e ponderada' },
+  { name: 'Enceladus', label: 'Enceladus', gender: 'male', description: 'masculina, soprada e suave' },
+  { name: 'Iapetus', label: 'Iapetus', gender: 'male', description: 'masculina, clara' },
+  { name: 'Umbriel', label: 'Umbriel', gender: 'male', description: 'masculina, descontraída' },
+  { name: 'Algieba', label: 'Algieba', gender: 'male', description: 'masculina, suave' },
+  { name: 'Algenib', label: 'Algenib', gender: 'male', description: 'masculina, rouca' },
+  { name: 'Rasalgethi', label: 'Rasalgethi', gender: 'male', description: 'masculina, informativa' },
+  { name: 'Alnilam', label: 'Alnilam', gender: 'male', description: 'masculina, firme' },
+  { name: 'Schedar', label: 'Schedar', gender: 'male', description: 'masculina, uniforme' },
+  { name: 'Achird', label: 'Achird', gender: 'male', description: 'masculina, amigável' },
+  { name: 'Zubenelgenubi', label: 'Zubenelgenubi', gender: 'male', description: 'masculina, casual' },
+  { name: 'Sadachbia', label: 'Sadachbia', gender: 'male', description: 'masculina, viva' },
+  { name: 'Sadaltager', label: 'Sadaltager', gender: 'male', description: 'masculina, conhecedora' },
 ];
 
 export const DEFAULT_GEMINI_VOICE = 'Aoede';
@@ -275,7 +352,8 @@ async function acquireRpmSlot(signal?: TtsSignal): Promise<void> {
  * reset real, e se ainda estiver esgotado a própria API re-bloqueia com 1 chamada
  * — assim NUNCA sobre-bloqueia além do reset.
  */
-let dailyBlockUntil = 0;
+// Cota diária (RPD) é POR MODELO: esgotar o Flash não bloqueia o Flash-Lite.
+const dailyBlockUntil = new Map<string, number>();
 function nextPacificMidnight(): number {
   const now = new Date();
   const next = new Date(now);
@@ -345,6 +423,7 @@ function describeEmpty(json: {
   const c = json.candidates?.[0];
   const bits: string[] = [];
   bits.push(`candidatos=${json.candidates?.length ?? 0}`);
+  bits.push(`chaves=${Object.keys(json).join(',')}`);
   if (c?.finishReason) bits.push(`finishReason=${c.finishReason}`);
   if (c?.finishMessage) bits.push(`finishMessage="${c.finishMessage.slice(0, 120)}"`);
   if (json.promptFeedback?.blockReason) bits.push(`blockReason=${json.promptFeedback.blockReason}`);
@@ -367,6 +446,46 @@ function timeoutForChunk(text: string): number {
   return Math.max(TTS_TIMEOUT_MS, text.length * 90);
 }
 
+/** Acha o áudio (base64) em qualquer formato de resposta: generateContent ou Interactions. */
+function pickAudioBase64(json: unknown): string | undefined {
+  let best: string | undefined;
+  const walk = (o: unknown, depth: number) => {
+    if (depth > 10 || o == null) return;
+    if (typeof o === 'string') {
+      if (o.length > 1000 && (!best || o.length > best.length) && /^[A-Za-z0-9+/_=\s-]+$/.test(o.slice(0, 200))) best = o;
+      return;
+    }
+    if (Array.isArray(o)) {
+      for (const v of o) walk(v, depth + 1);
+    } else if (typeof o === 'object') {
+      for (const v of Object.values(o as Record<string, unknown>)) walk(v, depth + 1);
+    }
+  };
+  walk(json, 0);
+  return best;
+}
+
+/**
+ * Entrega PCM cru. Os modelos 3.8 respondem WAV completo ("RIFF…"): tira o
+ * cabeçalho e fica com o chunk 'data'. PCM cru passa direto.
+ */
+function audioToPcm(bytes: Uint8Array): Uint8Array {
+  const isRiff = bytes.length > 44 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+  if (!isRiff) return bytes;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let off = 12;
+  while (off + 8 <= bytes.length) {
+    const id = String.fromCharCode(bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]);
+    const size = dv.getUint32(off + 4, true);
+    if (id === 'data') {
+      const end = size > 0 && off + 8 + size <= bytes.length ? off + 8 + size : bytes.length;
+      return bytes.subarray(off + 8, end);
+    }
+    off += 8 + size + (size % 2);
+  }
+  return bytes.subarray(44);
+}
+
 /**
  * Faz a chamada à API e devolve o PCM (24kHz mono 16-bit) do trecho. Re-tenta
  * (com backoff) em TODOS os erros transitórios — 429 (limite), 5xx (erro
@@ -384,7 +503,8 @@ async function fetchPcm(
 ): Promise<Uint8Array> {
   throwIfAborted(signal);
   // Bloqueio diário (RPD) ativo? Nem chama a API — cai direto para o fallback.
-  if (dailyBlockUntil && Date.now() < dailyBlockUntil) {
+  const blockedUntil = dailyBlockUntil.get(effectiveModel()) ?? 0;
+  if (blockedUntil && Date.now() < blockedUntil) {
     throw new GeminiTTSError('Gemini TTS: cota diária da API esgotada', {
       httpStatus: 429,
       quotaExceeded: true,
@@ -396,14 +516,25 @@ async function fetchPcm(
   const tQueue = Date.now();
   await acquireRpmSlot(signal);
   const queueMs = Date.now() - tQueue;
-  const url = `${TTS_URL}?key=${encodeURIComponent(apiKey)}`;
-  const body = {
-    contents: [{ parts: [{ text }] }],
-    generationConfig: {
-      responseModalities: ['AUDIO'],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-    },
-  };
+  const model = effectiveModel();
+  const interactions = usesInteractions(model);
+  const url = interactions
+    ? `${API_BASE}/interactions`
+    : `${API_BASE}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const body = interactions
+    ? {
+        model,
+        input: [{ type: 'user_input', content: [{ type: 'text', text }] }],
+        response_format: { type: 'audio', mime_type: 'audio/wav', sample_rate: SAMPLE_RATE },
+        generation_config: { speech_config: [{ voice: voiceName }] },
+      }
+    : {
+        contents: [{ parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+        },
+      };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const tFetch = Date.now();
@@ -411,7 +542,9 @@ async function fetchPcm(
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: interactions
+        ? { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -441,13 +574,32 @@ async function fetchPcm(
   }
 
   if (!res.ok) {
-    const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    const rawErr = await res.text().catch(() => '');
+    let j: { error?: { message?: string } } = {};
+    try {
+      j = JSON.parse(rawErr) as typeof j;
+    } catch {
+      /* corpo não é JSON */
+    }
+    const keyProblem = /api key|API_KEY|permission/i.test(rawErr);
+    // A API nova recusou o formato: tenta o generateContent, uma vez por modelo.
+    if (interactions && [400, 404, 405].includes(res.status) && !keyProblem) {
+      console.warn(`[GeminiTTS] ${model}: Interactions API recusou (HTTP ${res.status}) — usando generateContent`);
+      generateOnly.add(model);
+      return fetchPcm(text, voiceName, apiKey, attempt, signal, timeoutMs);
+    }
+    // O modelo nem existe para esta chave: volta ao 2.5, uma vez.
+    if (!interactions && res.status === 404 && model !== LEGACY_TTS_MODEL) {
+      console.warn(`[GeminiTTS] ${model} indisponível (404) — usando ${LEGACY_TTS_MODEL}`);
+      unavailableModels.add(activeTtsModel);
+      return fetchPcm(text, voiceName, apiKey, attempt, signal, timeoutMs);
+    }
     // 429: distinguir DIÁRIO (RPD — não re-tentar hoje; bloqueia e cai para o
     // sistema) de POR-MINUTO (RPM/TPM — transitório, re-tenta com o delay certo).
     if (res.status === 429) {
       const { daily, retryMs } = classify429(j);
       if (daily) {
-        dailyBlockUntil = nextPacificMidnight();
+        dailyBlockUntil.set(model, nextPacificMidnight());
         throw new GeminiTTSError(
           'Gemini TTS: cota diária da API esgotada — reseta à meia-noite no Pacífico',
           { httpStatus: 429, quotaExceeded: true, dailyQuota: true },
@@ -481,7 +633,7 @@ async function fetchPcm(
     promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
   };
-  const audioBase64 = json.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  const audioBase64 = pickAudioBase64(json);
   logAttempt(text, attempt, queueMs, Date.now() - tFetch, timeoutMs,
     audioBase64
       ? `ok ${Math.round((audioBase64.length * 3) / 4 / 1024)} KiB`
@@ -495,7 +647,7 @@ async function fetchPcm(
     }
     throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
   }
-  return base64ToBytes(audioBase64);
+  return audioToPcm(base64ToBytes(audioBase64));
 }
 
 /**
@@ -514,7 +666,7 @@ export async function synthesizeSpeechGemini(
     throw new GeminiTTSError('Sem chave do Gemini — configure em "Como você quer usar?"');
   }
 
-  const cacheKey = shortHash(`${voiceName}:${trimmed}`);
+  const cacheKey = shortHash(`${activeTtsModel}|${voiceName}:${trimmed}`);
   const file = new File(Paths.cache, `gemini_tts_${cacheKey}.wav`);
   if (file.exists) {
     return { uri: file.uri, cached: true };
@@ -550,7 +702,7 @@ export async function prepareNudgeAudio(
   const voiceName = opts.voiceName || DEFAULT_GEMINI_VOICE;
   const trimmed = text.trim();
   if (!trimmed) throw new GeminiTTSError('texto vazio');
-  const key = shortHash(`nudge:${voiceName}:${trimmed}`);
+  const key = shortHash(`nudge:${activeTtsModel}|${voiceName}:${trimmed}`);
 
   // Texto dinâmico (JITAI): não persiste — usa o cache volátil do motor.
   if (!opts.persist) {
@@ -667,7 +819,7 @@ export async function synthesizeFullSpeechGemini(
     throw new GeminiTTSError('Sem chave do Gemini — configure em "Como você quer usar?"');
   }
 
-  const cacheKey = shortHash(`${voiceName}:full:${clean.join('')}`);
+  const cacheKey = shortHash(`${activeTtsModel}|${voiceName}:full:${clean.join('')}`);
   const file = new File(Paths.document, `readaloud_${cacheKey}.wav`);
   if (file.exists) {
     return { uri: file.uri, cached: true };
@@ -688,7 +840,7 @@ export async function synthesizeFullSpeechGemini(
     onProgress?.(i, clean.length);
     const chunkFile = new File(
       Paths.cache,
-      `readaloud_chunk_${shortHash(`${voiceName}:chunk:${clean[i]}`)}.pcm`,
+      `readaloud_chunk_${shortHash(`${activeTtsModel}|${voiceName}:chunk:${clean[i]}`)}.pcm`,
     );
     chunkFiles.push(chunkFile);
     let pcm: Uint8Array | null = null;
@@ -776,7 +928,7 @@ export async function synthesizeFullSpeechGemini(
 /** Mesmo arquivo/chave do WAV completo usado por synthesizeFullSpeechGemini. */
 function fullReadAloudFile(chunks: string[], voiceName: string): File {
   const clean = chunks.map((c) => c.trim()).filter(Boolean);
-  const cacheKey = shortHash(`${voiceName}:full:${clean.join('')}`);
+  const cacheKey = shortHash(`${activeTtsModel}|${voiceName}:full:${clean.join('')}`);
   return new File(Paths.document, `readaloud_${cacheKey}.wav`);
 }
 
@@ -811,7 +963,7 @@ export async function synthesizeChunkGemini(
   if (!apiKey) {
     throw new GeminiTTSError('Sem chave do Gemini — configure em "Como você quer usar?"');
   }
-  const cacheKey = shortHash(`${voiceName}:${trimmed}`);
+  const cacheKey = shortHash(`${activeTtsModel}|${voiceName}:${trimmed}`);
   const file = new File(Paths.cache, `gemini_tts_${cacheKey}.wav`);
   if (file.exists) {
     try {

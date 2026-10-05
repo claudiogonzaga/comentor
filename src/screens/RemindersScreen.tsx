@@ -42,7 +42,7 @@ import type { Medication } from '../types';
 
 /**
  * #7 — Tela única "Lembretes e hábitos": junta os nudges diários da
- * Comentora (respiração, pôr do sol…) com os lembretes personalizados do
+ * Askeo (respiração, pôr do sol…) com os lembretes personalizados do
  * usuário — que agora cobrem qualquer hábito saudável: remédios, suplementos,
  * beber água, comer algo, jejum, café, etc. No horário, a coruja insiste até
  * a pessoa marcar como feito.
@@ -453,7 +453,7 @@ export function RemindersScreen() {
         {/* Jejum intermitente — hábito pré-definido configurável, abaixo do Sono. */}
         <FastingCard />
 
-        {/* Nudges diários da Comentora (respiração, pôr do sol…). */}
+        {/* Nudges diários do Askeo (respiração, pôr do sol…). */}
         <NudgesCard />
 
         <Text style={styles.sectionTitle}>Meus hábitos</Text>

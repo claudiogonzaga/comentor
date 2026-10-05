@@ -3,6 +3,7 @@ import type { UserConfig } from '../types';
 import { getUserConfig, updateUserConfig } from '../services/database';
 import { getApiKey, saveApiKey } from '../services/secureStore';
 import { setActiveVoice, setActiveVoiceProvider } from '../services/voice';
+import { setActiveTtsModel } from '../services/geminiTTS';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
@@ -29,6 +30,7 @@ interface AppState {
 function syncVoiceFromConfig(config: UserConfig) {
   setActiveVoice(config.voiceId ?? null, config.voiceLanguage ?? null);
   setActiveVoiceProvider(config.voiceProvider, config.geminiVoiceName);
+  setActiveTtsModel(config.geminiTtsModel);
 }
 
 /**

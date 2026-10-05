@@ -115,7 +115,7 @@ export function ChatScreen() {
               setOffline(r.offline);
             }
           } else {
-            // A Comentora conduz: abre comentando o progresso e onde melhorar.
+            // O Askeo conduz: abre comentando o progresso e onde melhorar.
             const r = await getChatOpenerForNow();
             if (mounted) {
               setLevel(r.level);
@@ -140,7 +140,7 @@ export function ChatScreen() {
     };
   }, []);
 
-  // Read the most recent Comentora message aloud — only when the user has
+  // Read the most recent Askeo message aloud — only when the user has
   // explicitly turned the speaker on.
   useEffect(() => {
     if (!speechEnabled || messages.length === 0) return;
@@ -256,7 +256,7 @@ export function ChatScreen() {
     navigation.navigate('SnoozeFeedback', { habitId, level });
   };
 
-  // Reload messages when returning from SnoozeFeedback so the new Comentora
+  // Reload messages when returning from SnoozeFeedback so the new Askeo
   // counter-argument shows up.
   useFocusEffect(
     useCallback(() => {
@@ -293,7 +293,7 @@ export function ChatScreen() {
             <Owl mood={owlMood} size={48} animated={false} />
             <View>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Comentora
+                Askeo
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 {INTENSITY_LEVELS[level].title} · nível {level}/5
@@ -341,7 +341,7 @@ export function ChatScreen() {
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                A Comentora está pensando…
+                O Askeo está pensando…
               </Text>
             </View>
           ) : (

@@ -1,6 +1,6 @@
 // PRÁTICAS FEITAS NO APP (respiração, Ioga Nidra) como EVIDÊNCIA.
 //
-// Até aqui a Comentora cobrava "fez a respiração?" mesmo depois de a pessoa
+// Até aqui o Askeo cobrava "fez a respiração?" mesmo depois de a pessoa
 // fazer os 16 minutos DENTRO do próprio app. Agora cada sessão é registrada em
 // mindful_sessions e, se foi de verdade (terminou, ou durou o bastante),
 // confirma sozinha o hábito correspondente — via 'sensor', com a evidência

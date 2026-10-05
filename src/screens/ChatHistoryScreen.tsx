@@ -10,7 +10,7 @@ import { getAllChat } from '../services/database';
 import type { ChatMessage } from '../types';
 
 // Histórico de conversas: TODAS as mensagens salvas no aparelho, agrupadas por
-// dia. Somente leitura — a conversa do dia continua no "Chat com Comentora".
+// dia. Somente leitura — a conversa do dia continua no "Chat com Askeo".
 
 function dayKey(iso: string): string {
   const d = new Date(iso);

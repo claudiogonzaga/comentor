@@ -1,7 +1,7 @@
 // TREINO NO RELÓGIO confirma o hábito de exercício.
 //
 // Se a pessoa gravou um treino no relógio (chega ao Health Connect pelo Huawei
-// Health / Health Sync), a Comentora não precisa perguntar "fez o exercício?".
+// Health / Health Sync), o Askeo não precisa perguntar "fez o exercício?".
 // Regras conservadoras, porque uma confirmação falsa é pior que uma pergunta:
 //  - só origens CONFIÁVEIS (as que trazem o relógio), nunca passos do celular;
 //  - o tipo de treino precisa bater com o hábito, quando o título diz qual é

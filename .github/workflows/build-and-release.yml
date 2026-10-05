@@ -29,7 +29,7 @@ on:
       notes:
         description: 'Texto que aparece na release do GitHub'
         required: false
-        default: 'Nova versão do CoMentor'
+        default: 'Nova versão do Askeo'
 
 # Um push novo cancela o run anterior que ainda estiver de pé, em vez de deixar
 # os dois disputando o mesmo build.
@@ -71,7 +71,7 @@ jobs:
           VERSION=$(node -p "require('./app.json').expo.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Texto da release: a mensagem do commit, sem os trailers de autoria.
-          # Sem isto a release sairia com "Nova versão do CoMentor", que é o que
+          # Sem isto a release sairia com "Nova versão do Askeo", que é o que
           # o usuário lê no banner de atualização dentro do app.
           {
             echo "notes<<COMENTOR_EOF"
@@ -160,6 +160,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
-          name: CoMentor v${{ steps.ver.outputs.version }}
+          name: Askeo v${{ steps.ver.outputs.version }}
           body: ${{ inputs.notes || steps.ver.outputs.notes }}
           files: comentor-${{ steps.ver.outputs.version }}.apk

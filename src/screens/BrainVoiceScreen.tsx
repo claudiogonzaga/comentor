@@ -32,6 +32,7 @@ import { releaseModel } from '../services/localModel';
 import { LOCAL_MODEL_LIST, formatModelSize } from '../constants/models';
 import { DEFAULT_SYSTEM_PROMPT, PROMPT_PLACEHOLDERS } from '../constants/promptTemplate';
 import type { AIBackend, GeminiModel, LocalModelId } from '../types';
+import { DEFAULT_TTS_MODEL } from '../services/geminiTTS';
 
 const MODELS: { value: GeminiModel; label: string; sub: string }[] = [
   { value: 'gemini-3.1-flash-lite', label: '3.1 Flash Lite', sub: 'novo, mais econômico (default)' },
@@ -43,7 +44,7 @@ const MODELS: { value: GeminiModel; label: string; sub: string }[] = [
 ];
 
 /**
- * "Cérebro e Voz da Comentora" — reúne o que define COMO a Comentora pensa e
+ * "Cérebro e Voz do Askeo" — reúne o que define COMO o Askeo pensa e
  * fala: a voz (provedor sistema/Gemini + voz do sistema), a inteligência
  * (API Gemini ou modelo local) e o prompt. Veio de Configurações.
  */
@@ -234,20 +235,24 @@ export function BrainVoiceScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
-          A voz com que a Comentora fala, a inteligência que ela usa para pensar
-          e o prompt com a personalidade dela.
+          A voz com que o Askeo fala, a inteligência que ele usa para pensar
+          e o prompt com a personalidade dele.
         </Text>
 
-        {/* ——— Voz da Comentora ——— */}
+        {/* ——— Voz do Askeo ——— */}
         <VoiceProviderCard
           provider={config?.voiceProvider ?? 'system'}
           geminiVoiceName={config?.geminiVoiceName ?? 'Aoede'}
+          geminiTtsModel={config?.geminiTtsModel ?? DEFAULT_TTS_MODEL}
           hasApiKey={!!config?.hasApiKey}
           onProviderChange={async (p) => {
             await setConfig({ voiceProvider: p });
           }}
           onGeminiVoiceChange={async (name) => {
             await setConfig({ geminiVoiceName: name });
+          }}
+          onGeminiModelChange={async (id) => {
+            await setConfig({ geminiTtsModel: id });
           }}
         />
 
@@ -470,7 +475,7 @@ export function BrainVoiceScreen() {
         {/* ——— Prompt ——— */}
         <Card style={styles.card}>
           <View style={styles.promptHeader}>
-            <Text style={styles.section}>Prompt da Comentora</Text>
+            <Text style={styles.section}>Prompt do Askeo</Text>
             <Pressable
               onPress={() => setPromptExpanded((v) => !v)}
               style={styles.promptToggleBtn}
@@ -483,7 +488,7 @@ export function BrainVoiceScreen() {
           {!promptExpanded ? (
             <Text style={[typography.small, { color: colors.text.secondary }]}>
               {systemPrompt.length} caracteres. As regras e a personalidade do
-              Comentora estão escondidas pra não tomar espaço. Toque em
+              Askeo estão escondidas pra não tomar espaço. Toque em
               &quot;Editar prompt&quot; pra ler ou alterar.
             </Text>
           ) : (
@@ -521,7 +526,7 @@ export function BrainVoiceScreen() {
                 multiline
                 textAlignVertical="top"
                 style={[styles.input, styles.promptInput]}
-                placeholder="Prompt da Comentora…"
+                placeholder="Prompt do Askeo…"
                 placeholderTextColor={colors.text.tertiary}
               />
               <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>

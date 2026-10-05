@@ -1,4 +1,4 @@
-# Sons de coruja — notificações da Comentora
+# Sons de coruja — notificações do Askeo
 
 Cada arquivo `.wav` é o som de notificação de uma espécie de coruja. O usuário
 escolhe a espécie em **Configurações → Som das notificações**.

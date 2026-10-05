@@ -408,7 +408,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN sedentary_interval_min INTEGER NOT NULL DEFAULT 60`,
     );
   }
-  // v1.28: voz da leitura igual à da Comentora (provider + Gemini) + velocidade.
+  // v1.28: voz da leitura igual à do Askeo (provider + Gemini) + velocidade.
   if (!colNames.includes('read_aloud_provider')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN read_aloud_provider TEXT NOT NULL DEFAULT 'system'`,
@@ -578,6 +578,12 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN review_enabled INTEGER NOT NULL DEFAULT 1`,
     );
   }
+  // v1.107: modelo do Gemini TTS (os novos 3.8 Flash-Lite e Flash).
+  if (!colNames.includes('gemini_tts_model')) {
+    await database.execAsync(
+      `ALTER TABLE user_config ADD COLUMN gemini_tts_model TEXT NOT NULL DEFAULT 'gemini-3.8-flash-lite-tts'`,
+    );
+  }
   // v1.106: pausa (segundos) entre o canto da coruja e a fala — tempo para a
   // pessoa baixar o volume ou calar a fala se o ambiente não permitir.
   if (!colNames.includes('owl_pause_seconds')) {
@@ -721,7 +727,18 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  // v1.107: like/dislike por card. rating 1 = gostei (sorteado com mais
+  // frequência), -1 = não gostei (sai do sorteio), 0 = sem nota.
+  const inspCols = await database.getAllAsync<{ name: string }>("PRAGMA table_info('inspiration_cards')");
+  if (!inspCols.some((c) => c.name === 'rating')) {
+    await database.execAsync(`ALTER TABLE inspiration_cards ADD COLUMN rating INTEGER NOT NULL DEFAULT 0`);
+    await database.execAsync(`ALTER TABLE inspiration_cards ADD COLUMN rated_at TEXT`);
+  }
   await seedInspirationBuiltins(database);
+  // v1.107: o app passou a se chamar Askeo — renomeia o baralho embutido que já existia.
+  await database.runAsync(
+    `UPDATE inspiration_packs SET name = 'Frases do Askeo' WHERE builtin = 1 AND name = 'Frases da Comentora'`,
+  );
 
   // v1.34: cada texto salvo guarda o seu próprio áudio (não regera nem gasta
   // token). Migração defensiva para instalações que já tinham a tabela.
@@ -867,6 +884,7 @@ interface UserConfigRow {
   snooze_minutes: number | null;
   voice_provider: string | null;
   gemini_voice_name: string | null;
+  gemini_tts_model: string | null;
   dnd_bypass_enabled: number | null;
   voice_nudges_enabled: number | null;
   spoken_nudges_enabled: number | null;
@@ -929,6 +947,7 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   notificationsPerDay: r.notifications_per_day ?? 4,
   voiceProvider: (r.voice_provider ?? 'system') as UserConfig['voiceProvider'],
   geminiVoiceName: r.gemini_voice_name ?? 'Aoede',
+  geminiTtsModel: r.gemini_tts_model ?? 'gemini-3.8-flash-lite-tts',
   dndBypassEnabled: (r.dnd_bypass_enabled ?? 0) === 1,
   voiceNudgesEnabled: (r.voice_nudges_enabled ?? 0) === 1,
   spokenNudgesEnabled: (r.spoken_nudges_enabled ?? 0) === 1,
@@ -1003,6 +1022,7 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     notificationsPerDay: 'notifications_per_day',
     voiceProvider: 'voice_provider',
     geminiVoiceName: 'gemini_voice_name',
+    geminiTtsModel: 'gemini_tts_model',
     dndBypassEnabled: 'dnd_bypass_enabled',
     voiceNudgesEnabled: 'voice_nudges_enabled',
     spokenNudgesEnabled: 'spoken_nudges_enabled',
@@ -2526,7 +2546,7 @@ export async function setKV(key: string, value: string): Promise<void> {
 
 /**
  * Semeia os DOIS packs embutidos uma única vez (marcado em app_kv). Idempotente:
- * se já semeou, sai. Cria "Frases da Comentora" (motivacionais) e "Citações e
+ * se já semeou, sai. Cria "Frases do Askeo" (motivacionais) e "Citações e
  * fatos inspiradores" (372 cards do anexo) com builtin=1, dentro de uma
  * transação para inserir centenas de linhas rápido.
  */
@@ -2577,7 +2597,7 @@ export async function listInspirationPacks(): Promise<InspirationPack[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<InspirationPackRow>(`
     SELECT p.id, p.name, p.builtin, p.enabled,
-      (SELECT COUNT(*) FROM inspiration_cards c WHERE c.pack_id = p.id AND c.deleted = 0) AS card_count
+      (SELECT COUNT(*) FROM inspiration_cards c WHERE c.pack_id = p.id AND c.deleted = 0 AND c.rating >= 0) AS card_count
     FROM inspiration_packs p
     ORDER BY p.builtin DESC, p.id ASC
   `);
@@ -2604,6 +2624,7 @@ interface InspirationCardRow {
   ref_date: string | null;
   deleted: number;
   builtin: number;
+  rating: number | null;
 }
 
 const rowToCard = (r: InspirationCardRow): InspirationCard => ({
@@ -2615,6 +2636,7 @@ const rowToCard = (r: InspirationCardRow): InspirationCard => ({
   refDate: r.ref_date,
   deleted: r.deleted === 1,
   builtin: r.builtin === 1,
+  rating: r.rating != null && r.rating > 0 ? 1 : r.rating != null && r.rating < 0 ? -1 : 0,
 });
 
 /** Cards de um pack (inclui os excluídos, para a UI mostrar/ restaurar). */
@@ -2636,10 +2658,26 @@ export async function listActiveInspirationCards(): Promise<InspirationCard[]> {
   const rows = await d.getAllAsync<InspirationCardRow>(`
     SELECT c.* FROM inspiration_cards c
     JOIN inspiration_packs p ON p.id = c.pack_id
-    WHERE c.deleted = 0 AND p.enabled = 1
+    WHERE c.deleted = 0 AND c.rating >= 0 AND p.enabled = 1
     ORDER BY c.id ASC
   `);
   return rows.map(rowToCard);
+}
+
+/** Um card pelo id (mesmo excluído/descurtido — a Home mostra o estado e deixa desfazer). */
+export async function getInspirationCardById(cardId: number): Promise<InspirationCard | null> {
+  const d = await getDb();
+  const r = await d.getFirstAsync<InspirationCardRow>('SELECT * FROM inspiration_cards WHERE id = ?', [cardId]);
+  return r ? rowToCard(r) : null;
+}
+
+/** Grava a nota do card: 1 gostei, -1 não gostei, 0 limpa. */
+export async function setInspirationCardRating(cardId: number, rating: -1 | 0 | 1): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `UPDATE inspiration_cards SET rating = ?, rated_at = ? WHERE id = ?`,
+    [rating, rating === 0 ? null : new Date().toISOString(), cardId],
+  );
 }
 
 export async function setInspirationCardDeleted(cardId: number, deleted: boolean): Promise<void> {
@@ -2653,6 +2691,7 @@ export async function restoreInspirationDefaults(): Promise<void> {
   await d.execAsync(`
     UPDATE inspiration_packs SET enabled = 1 WHERE builtin = 1;
     UPDATE inspiration_cards SET deleted = 0 WHERE builtin = 1;
+    UPDATE inspiration_cards SET rating = 0, rated_at = NULL WHERE builtin = 1 AND rating < 0;
   `);
 }
 

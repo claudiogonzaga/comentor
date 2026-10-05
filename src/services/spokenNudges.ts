@@ -218,8 +218,8 @@ export function isSpokenQuietNow(cfg: QuietConfig | null | undefined): boolean {
 }
 
 /**
- * Diagnóstico da VOZ: lista, em português, tudo que poderia estar impedindo a
- * Comentora de falar os avisos — para o usuário (e a gente) entender por que
+ * Diagnóstico da VOZ: lista, em português, tudo que poderia estar impedindo o
+ * Askeo de falar os avisos — para o usuário (e a gente) entender por que
  * está mudo. Mostrado num Alert pelo botão "Por que a voz não fala?".
  */
 export async function getVoiceDiagnostics(): Promise<string> {
@@ -318,7 +318,7 @@ async function scheduleSpokenOneShot(
   id: string,
   text: string,
   atEpochMs: number,
-  title = 'Comentora',
+  title = 'Askeo',
 ): Promise<{ ok: boolean; usedGemini: boolean }> {
   if (!native) return { ok: false, usedGemini: false };
   const trimmed = (text || '').trim();
@@ -364,7 +364,7 @@ async function scheduleSpokenOneShot(
 
 /**
  * Agenda um alarme falado de TESTE daqui a `seconds`. Ótimo para validar o
- * mecanismo: agendar, travar a tela / fechar o app, e ouvir a Comentora falar.
+ * mecanismo: agendar, travar a tela / fechar o app, e ouvir o Askeo falar.
  * Usa a MESMA voz que os nudges (Gemini se configurado; senão, voz do sistema).
  */
 export async function scheduleSpokenTest(
@@ -372,7 +372,7 @@ export async function scheduleSpokenTest(
 ): Promise<{ ok: boolean; reason?: string }> {
   if (!native) return { ok: false, reason: 'recurso indisponível neste aparelho' };
   const text =
-    'Oi! Aqui é a Comentora, falando com você em voz alta — mesmo com a tela apagada. ' +
+    'Oi! Aqui é o Askeo, falando com você em voz alta — mesmo com a tela apagada. ' +
     'Se você está ouvindo isto, os lembretes falados estão funcionando.';
   const r = await scheduleSpokenOneShot(TEST_ID, text, Date.now() + seconds * 1000);
   return r.ok ? { ok: true } : { ok: false, reason: 'falha ao agendar' };
@@ -497,7 +497,7 @@ async function syncSpokenInspirationsOnce(
         nextDailyEpoch(it.hour, it.minute),
         audioPath,
         true,
-        'Comentora',
+        'Askeo',
         it.text,
       );
     } catch {
@@ -609,7 +609,7 @@ async function syncSpokenMedicationsOnce(
           nextDailyEpoch(it.hour, it.minute),
           audioPath,
           true,
-          'Comentora',
+          'Askeo',
           text,
         );
       } catch {
@@ -623,7 +623,7 @@ async function syncSpokenMedicationsOnce(
             nextWeeklyEpoch(dow, it.hour, it.minute),
             audioPath,
             false, // one-shot; re-armado no próximo scheduleAllMedications
-            'Comentora',
+            'Askeo',
             text,
           );
         } catch {

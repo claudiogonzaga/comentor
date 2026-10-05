@@ -175,7 +175,7 @@ export function AboutYouScreen() {
                   ✓ Conectado
                 </Text>
                 <Text style={styles.hint}>
-                  A Comentora acompanha seu sono, zona 2, FC alta, passos, peso e
+                  O Askeo acompanha seu sono, zona 2, FC alta, passos, peso e
                   gordura corporal no painel de Saúde da tela inicial.
                 </Text>
                 <Pressable onPress={openHealthSettings} hitSlop={6} style={{ marginTop: spacing.sm }}>
@@ -187,7 +187,7 @@ export function AboutYouScreen() {
             ) : (
               <>
                 <Text style={styles.hint}>
-                  Conecte o Health Connect para a Comentora acompanhar seu sono,
+                  Conecte o Health Connect para o Askeo acompanhar seu sono,
                   exercícios (zona 2 e FC alta), passos, peso e gordura corporal
                   — e te conhecer melhor nas conversas.
                 </Text>
@@ -208,7 +208,7 @@ export function AboutYouScreen() {
           <Text style={styles.hint}>
             {config?.interviewCompletedAt
               ? 'Você já fez a entrevista inicial. Pode refazer ou aprofundar a qualquer momento.'
-              : 'Faça uma entrevista guiada para a Comentora entender melhor suas dificuldades.'}
+              : 'Faça uma entrevista guiada para o Askeo entender melhor suas dificuldades.'}
           </Text>
           <View style={{ height: spacing.sm }} />
           <Button

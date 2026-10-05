@@ -159,7 +159,7 @@ export function SnoozeFeedbackScreen() {
             <View style={styles.busyBox}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                A Comentora está pensando no contra-argumento…
+                O Askeo está pensando no contra-argumento…
               </Text>
             </View>
           )}

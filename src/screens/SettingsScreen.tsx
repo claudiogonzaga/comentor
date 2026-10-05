@@ -190,7 +190,7 @@ export function SettingsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.linkTitle}>Configurar Sons e Notificações</Text>
               <Text style={styles.linkSub}>
-                Canto da coruja, voz da Comentora, avisos falados, lembretes do
+                Canto da coruja, voz do Askeo, avisos falados, lembretes do
                 dia, modo inspiração, Não Perturbe e volume.
               </Text>
             </View>
@@ -204,10 +204,10 @@ export function SettingsScreen() {
               <GreekIcon name="brain" size={24} color={colors.accent.gold} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.linkTitle}>Cérebro e Voz da Comentora</Text>
+              <Text style={styles.linkTitle}>Cérebro e Voz do Askeo</Text>
               <Text style={styles.linkSub}>
-                A voz com que ela fala, a inteligência (API ou no celular) e o
-                prompt com a personalidade dela.
+                A voz com que ele fala, a inteligência (API ou no celular) e o
+                prompt com a personalidade dele.
               </Text>
             </View>
             <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
@@ -215,7 +215,7 @@ export function SettingsScreen() {
         </Pressable>
 
         <Card style={styles.card}>
-          <Text style={styles.section}>Tom da Comentora</Text>
+          <Text style={styles.section}>Tom do Askeo</Text>
           <View style={styles.row}>
             {TONES.map((t) => (
               <Pressable
@@ -243,7 +243,7 @@ export function SettingsScreen() {
         <Card style={styles.card}>
           <Text style={styles.section}>Uso do celular</Text>
           <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
-            Com o &quot;Acesso ao uso&quot;, a Comentora poderá perceber sozinha coisas
+            Com o &quot;Acesso ao uso&quot;, o Askeo poderá perceber sozinho coisas
             como tela acesa depois da hora de dormir, redes sociais na cama ou uma
             meditação feita em outro app — sem você precisar contar. Os dados ficam
             só no aparelho. Nesta versão, só a permissão; a leitura vem na próxima.

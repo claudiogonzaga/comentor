@@ -11,7 +11,7 @@ const INTERVAL_OPTIONS = [30, 45, 60, 90];
 
 /**
  * Card "Trabalho sentado": a pessoa marca os dias e a janela de horário em que
- * trabalha sentada, e a Comentora manda um nudge para levantar/mover a cada
+ * trabalha sentada, e o Askeo manda um nudge para levantar/mover a cada
  * X minutos durante esse período.
  */
 export function SedentaryCard() {

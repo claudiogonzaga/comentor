@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Card } from './Card';
 import { GreekIcon } from './GreekIcon';
-import { colors, spacing, typography } from '../theme';
-import { listActiveInspirationCards } from '../services/database';
+import { colors, radius, spacing, typography } from '../theme';
+import { getInspirationCardById, listActiveInspirationCards } from '../services/database';
+import { getCurrentInspirationCard, rateInspirationCard } from '../services/inspiration';
 import type { InspirationCard } from '../types';
 
-// Painel de INSPIRAÇÃO (separado do painel de lembretes). Mostra uma frase/fato
-// da biblioteca ativa — uma por dia (determinístico) — e deixa trocar por outra.
+// Painel de INSPIRAÇÃO (separado do painel de lembretes).
+//
+// Mostra o card do ÚLTIMO alerta de inspiração que disparou — falado ou só
+// notificação — e o mantém visível até o próximo chegar, para a pessoa poder
+// avaliar com 👍/👎 (curtido aparece mais; descurtido nunca mais). Se o modo
+// inspiração está desligado (nada disparou), mostra uma frase do dia, como antes.
 
 function dayOfYear(): number {
   const now = new Date();
@@ -15,46 +21,140 @@ function dayOfYear(): number {
   return Math.floor((now.getTime() - start.getTime()) / 86_400_000);
 }
 
-export function InspirationHomeCard() {
-  const [cards, setCards] = useState<InspirationCard[] | null>(null);
-  const [idx, setIdx] = useState(0);
+/** Relê o card atual a cada minuto: o próximo alerta troca o card sem abrir a tela de novo. */
+const REFRESH_MS = 60_000;
 
-  useEffect(() => {
-    listActiveInspirationCards()
-      .then((cs) => {
-        setCards(cs);
-        if (cs.length) setIdx(dayOfYear() % cs.length);
-      })
-      .catch(() => setCards([]));
+export function InspirationHomeCard() {
+  const [card, setCard] = useState<InspirationCard | null>(null);
+  // true = veio de um alerta disparado; false = frase do dia (modo desligado)
+  const [fromAlert, setFromAlert] = useState(false);
+  const [dayPool, setDayPool] = useState<InspirationCard[] | null>(null);
+  const [idx, setIdx] = useState(0);
+  const idxTouched = useRef(false);
+
+  const load = useCallback(async () => {
+    try {
+      const current = await getCurrentInspirationCard();
+      if (current) {
+        // o card pode ter sido excluído da biblioteca depois do alerta
+        if (!current.deleted) {
+          setCard(current);
+          setFromAlert(true);
+          return;
+        }
+      }
+      setFromAlert(false);
+      const pool = await listActiveInspirationCards();
+      setDayPool(pool);
+      if (!idxTouched.current && pool.length) setIdx(dayOfYear() % pool.length);
+      setCard(null);
+    } catch {
+      setCard(null);
+      setDayPool([]);
+    }
   }, []);
 
-  const shuffle = useCallback(() => {
-    if (cards && cards.length > 1) setIdx((i) => (i + 1) % cards.length);
-  }, [cards]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      const t = setInterval(() => void load(), REFRESH_MS);
+      return () => clearInterval(t);
+    }, [load]),
+  );
 
-  if (!cards || cards.length === 0) return null;
-  const card = cards[idx];
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') void load();
+    });
+    return () => sub.remove();
+  }, [load]);
+
+  const shuffle = useCallback(() => {
+    if (dayPool && dayPool.length > 1) {
+      idxTouched.current = true;
+      setIdx((i) => (i + 1) % dayPool.length);
+    }
+  }, [dayPool]);
+
+  const rate = useCallback(
+    async (target: InspirationCard, rating: -1 | 0 | 1) => {
+      // Atualiza na hora; a gravação e o reagendamento seguem em segundo plano.
+      setCard((c) => (c && c.id === target.id ? { ...c, rating } : c));
+      setDayPool((p) => p && p.map((x) => (x.id === target.id ? { ...x, rating } : x)));
+      try {
+        await rateInspirationCard(target.id, rating);
+        const fresh = await getInspirationCardById(target.id);
+        if (fresh) {
+          setCard((c) => (c && c.id === fresh.id ? fresh : c));
+        }
+      } catch {
+        /* a nota fica só na tela; tenta de novo no próximo toque */
+      }
+    },
+    [],
+  );
+
+  const shown: InspirationCard | null = fromAlert ? card : dayPool?.[idx] ?? null;
+  if (!shown) return null;
+
   // Alguns cards já trazem o autor embutido no texto (ex.: '"…" — Fulano') e
   // também no campo author — então só mostramos a linha do autor se ela ainda
   // NÃO estiver no texto. Também não adicionamos aspas se o texto já tem.
-  const text = card.text.trim();
+  const text = shown.text.trim();
   const hasOwnQuotes = /["“”']/.test(text.charAt(0));
-  const display = card.type === 'quote' && !hasOwnQuotes ? `“${text}”` : text;
-  const showAuthor = !!card.author && !text.includes(card.author);
+  const display = shown.type === 'quote' && !hasOwnQuotes ? `“${text}”` : text;
+  const showAuthor = !!shown.author && !text.includes(shown.author);
+  const disliked = shown.rating < 0;
+  const liked = shown.rating > 0;
 
   return (
     <Card style={styles.card}>
       <View style={styles.head}>
         <View style={styles.headLeft}>
           <GreekIcon name="sun" size={18} color={colors.accent.gold} />
-          <Text style={styles.title}>INSPIRAÇÃO</Text>
+          <Text style={styles.title}>{fromAlert ? 'ÚLTIMA INSPIRAÇÃO' : 'INSPIRAÇÃO'}</Text>
         </View>
-        <Pressable onPress={shuffle} hitSlop={8}>
-          <Text style={styles.another}>outra ↻</Text>
-        </Pressable>
+        {!fromAlert ? (
+          <Pressable onPress={shuffle} hitSlop={8}>
+            <Text style={styles.another}>outra ↻</Text>
+          </Pressable>
+        ) : null}
       </View>
-      <Text style={styles.text}>{display}</Text>
-      {showAuthor ? <Text style={styles.author}>— {card.author}</Text> : null}
+
+      {disliked ? (
+        <View>
+          <Text style={styles.dislikedText}>Combinado: esta frase não vai mais aparecer.</Text>
+          <Pressable onPress={() => void rate(shown, 0)} hitSlop={8} style={styles.undo}>
+            <Text style={styles.undoText}>desfazer</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.text}>{display}</Text>
+          {showAuthor ? <Text style={styles.author}>— {shown.author}</Text> : null}
+          <View style={styles.rateRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Gostei desta frase"
+              accessibilityState={{ selected: liked }}
+              onPress={() => void rate(shown, liked ? 0 : 1)}
+              style={[styles.rateBtn, liked && styles.rateBtnOn]}
+              hitSlop={6}
+            >
+              <Text style={[styles.rateText, liked && styles.rateTextOn]}>👍 {liked ? 'Vai aparecer mais' : 'Gostei'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Não quero mais ver esta frase"
+              onPress={() => void rate(shown, -1)}
+              style={styles.rateBtn}
+              hitSlop={6}
+            >
+              <Text style={styles.rateText}>👎 Não quero mais</Text>
+            </Pressable>
+          </View>
+        </>
+      )}
     </Card>
   );
 }
@@ -72,4 +172,18 @@ const styles = StyleSheet.create({
   another: { ...typography.small, color: colors.text.tertiary },
   text: { ...typography.body, color: colors.text.primary, lineHeight: 22 },
   author: { ...typography.small, color: colors.text.secondary, marginTop: spacing.sm },
+  rateRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  rateBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.bg.surfaceStrong,
+  },
+  rateBtnOn: { borderColor: colors.accent.gold, backgroundColor: colors.bg.surfaceStrong },
+  rateText: { ...typography.small, color: colors.text.secondary },
+  rateTextOn: { color: colors.accent.gold },
+  dislikedText: { ...typography.body, color: colors.text.secondary },
+  undo: { alignSelf: 'flex-start', marginTop: spacing.xs },
+  undoText: { ...typography.small, color: colors.accent.gold },
 });

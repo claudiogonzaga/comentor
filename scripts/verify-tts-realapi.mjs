@@ -83,7 +83,7 @@ const VOICE = 'Aoede';
 let workingMode = null;
 
 console.log('== TESTE 1: trecho curto, descobrindo o esquema de auth do token ==');
-const shortText = 'Olá! Esta é a Comentora testando a voz do Gemini. Se você está ouvindo isto com clareza, o áudio foi gerado e decodificado corretamente.';
+const shortText = 'Olá! Este é o Askeo testando a voz do Gemini. Se você está ouvindo isto com clareza, o áudio foi gerado e decodificado corretamente.';
 for (const mode of ['key', 'bearer', 'access_token']) {
   process.stdout.write(`  auth='${mode}' … `);
   const r = await callOnce(shortText, VOICE, mode);
@@ -104,7 +104,7 @@ if (!workingMode) {
 console.log(`\n→ esquema que funciona: '${workingMode}'  (app usa 'key')\n`);
 
 console.log('== TESTE 2: trecho ~800 chars (tamanho do app no v1.36.0) — prova que NÃO dá "Aborted" ==');
-const big = ('A Comentora é uma assistente que te ajuda a cuidar de hábitos saudáveis ao longo do dia. ').repeat(9).slice(0, 800);
+const big = ('O Askeo é um assistente que te ajuda a cuidar de hábitos saudáveis ao longo do dia. ').repeat(9).slice(0, 800);
 console.log(`  enviando ${big.length} chars…`);
 const r2 = await callOnce(big, VOICE, workingMode);
 if (r2.ok) {

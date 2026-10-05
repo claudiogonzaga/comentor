@@ -1,13 +1,20 @@
 import * as Notifications from 'expo-notifications';
-import { getUserConfig, listActiveInspirationCards } from './database';
-import { ensureChannel, gatedSchedule } from './notifications';
+import {
+  getInspirationCardById,
+  getKV,
+  getUserConfig,
+  listActiveInspirationCards,
+  setInspirationCardRating,
+  setKV,
+} from './database';
+import { INSPIRATION_CATEGORY, ensureChannel, ensureNotificationCategories, gatedSchedule } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenInspirations } from './spokenNudges';
 import { COMENTORA_MESSAGES } from '../constants/inspirationDefaults';
 import type { InspirationCard } from '../types';
 
 /**
- * Modo "inspiração": quando ligado, a Comentora dispara um alerta a cada hora
+ * Modo "inspiração": quando ligado, o Askeo dispara um alerta a cada hora
  * cheia dentro de uma janela diurna, com mensagens curtas de otimismo,
  * persistência e inspiração. São lembretes locais DIÁRIOS (um por hora), então
  * funcionam mesmo com o app fechado, e se repetem todo dia até o usuário
@@ -28,7 +35,14 @@ interface InspirationMessage {
   body: string;
   /** Texto lido em voz alta (sem aspas decorativas). */
   speak: string;
+  /** Card de origem (null nas frases padrão de reserva). */
+  cardId: number | null;
+  /** Peso no sorteio: card curtido pesa mais. */
+  weight: number;
 }
+
+/** Quanto um card com 👍 pesa no sorteio, frente a um card sem nota (1). */
+const LIKED_WEIGHT = 4;
 
 /**
  * Converte um card da biblioteca em mensagem de notificação. Citação ganha
@@ -46,17 +60,21 @@ function cardToMessage(c: InspirationCard): InspirationMessage {
     title: c.type === 'fact' ? '📜 Aconteceu um dia' : '✨ Inspiração',
     body,
     speak,
+    cardId: c.id,
+    weight: c.rating > 0 ? LIKED_WEIGHT : 1,
   };
 }
 
 /**
- * Mensagens padrão da Comentora (fallback se a biblioteca estiver vazia — ex.:
+ * Mensagens padrão do Askeo (fallback se a biblioteca estiver vazia — ex.:
  * todos os packs desligados). Mantém o app sempre com algo a dizer.
  */
 const FALLBACK_MESSAGES: InspirationMessage[] = COMENTORA_MESSAGES.map((m) => ({
   title: m.title,
   body: m.body,
   speak: m.body,
+  cardId: null,
+  weight: 1,
 }));
 
 /**
@@ -89,6 +107,175 @@ function shuffledForToday<T>(arr: T[]): T[] {
   return a;
 }
 
+function hash01(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // mistura final (murmur3) para espalhar bem strings curtas parecidas
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return ((h >>> 0) + 0.5) / 4294967296; // (0, 1)
+}
+
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Ordem do dia com PESO: sorteio exponencial (menor -ln(u)/peso vence), com u
+ * fixo por (dia, card). Mantém o que o embaralhamento por dia já garantia — a
+ * mesma ordem em todas as chamadas do dia — e acrescenta duas propriedades:
+ *  - card curtido (peso 4) cai entre os escolhidos ~4× mais vezes;
+ *  - mudar a nota de UM card só mexe naquele card (os demais mantêm a ordem
+ *    relativa), então um 👍/👎 não obriga a gerar de novo a voz de todas as
+ *    frases do dia.
+ */
+function weightedOrderForToday(pool: InspirationMessage[]): InspirationMessage[] {
+  const day = dayKey(new Date());
+  return pool
+    .map((m) => ({ m, k: -Math.log(hash01(`${day}:${m.cardId}`)) / m.weight }))
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.m);
+}
+
+// ——— O QUE DISPAROU (para a Home mostrar o card até o próximo chegar) ———
+// Os alertas são gatilhos DIÁRIOS cujo conteúdo é fixado a cada agendamento, e as
+// falas nativas rodam com o app fechado: o JS não vê o disparo. Guardamos o que
+// ficou armado em cada horário e, a cada reagendamento, o que já disparou hoje.
+
+interface Slot {
+  hour: number;
+  minute: number;
+  cardId: number | null;
+}
+interface FiredState {
+  date: string;
+  /** "h:m" → card que disparou naquele horário hoje. */
+  slots: Record<string, number>;
+  /** O card do último disparo (atravessa a virada do dia). */
+  last: number | null;
+}
+const ARMED_KEY = 'inspiration_armed';
+const FIRED_KEY = 'inspiration_fired';
+
+async function readJson<T>(key: string): Promise<T | null> {
+  try {
+    const raw = await getKV(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Instante (ms) em que o horário `s` cai no dia de `base` (dayOffset: -1 = ontem). */
+function slotTime(base: Date, s: Slot, dayOffset = 0): number {
+  const d = new Date(base);
+  d.setDate(d.getDate() + dayOffset);
+  d.setHours(s.hour, s.minute, 0, 0);
+  return d.getTime();
+}
+
+interface ArmedState {
+  /** Quando os horários foram armados: um horário só "disparou" depois disso. */
+  armedAt: number;
+  slots: Slot[];
+}
+
+/** Antes de reagendar: registra o que, do armado anterior, já disparou hoje. */
+async function recordFired(now: Date): Promise<void> {
+  const armed = await readJson<ArmedState>(ARMED_KEY);
+  if (!armed?.slots?.length) return;
+  const armedAt = armed.armedAt ?? 0;
+  const today = dayKey(now);
+  const prev = await readJson<FiredState>(FIRED_KEY);
+  let fired: FiredState;
+  if (prev && prev.date === today) {
+    fired = prev;
+  } else {
+    // Virou o dia: o "último disparado" é o horário mais tarde que já tinha
+    // disparado ONTEM (os alertas são diários e tocam com o app fechado).
+    let last = prev?.last ?? null;
+    let latest = -1;
+    for (const s of armed.slots) {
+      const m = s.hour * 60 + s.minute;
+      if (s.cardId != null && armedAt <= slotTime(now, s, -1) && m > latest) {
+        latest = m;
+        last = s.cardId;
+      }
+    }
+    fired = { date: today, slots: {}, last };
+  }
+  const nowMs = now.getTime();
+  for (const s of armed.slots) {
+    const key = `${s.hour}:${s.minute}`;
+    const t = slotTime(now, s);
+    // só disparou hoje se já era hora E já estava armado antes dessa hora
+    if (t <= nowMs && armedAt <= t && s.cardId != null && !(key in fired.slots)) {
+      fired.slots[key] = s.cardId;
+    }
+  }
+  let latest = -1;
+  for (const [key, id] of Object.entries(fired.slots)) {
+    const [h, m] = key.split(':').map(Number);
+    if (h * 60 + m > latest) {
+      latest = h * 60 + m;
+      fired.last = id;
+    }
+  }
+  await setKV(FIRED_KEY, JSON.stringify(fired));
+}
+
+/**
+ * O card do ÚLTIMO alerta de inspiração disparado (falado ou só notificação),
+ * ou null se o modo está desligado / nada foi agendado ainda. É o card que a
+ * Home mantém visível até o próximo chegar, para a pessoa avaliar.
+ */
+export async function getCurrentInspirationCard(now = new Date()) {
+  const armed = await readJson<ArmedState>(ARMED_KEY);
+  if (!armed?.slots?.length) return null;
+  const armedAt = armed.armedAt ?? 0;
+  const today = dayKey(now);
+  const fired = await readJson<FiredState>(FIRED_KEY);
+  const firedToday = fired && fired.date === today ? fired.slots : {};
+  const nowMs = now.getTime();
+  let best: { m: number; id: number } | null = null;
+  for (const s of armed.slots) {
+    const t = slotTime(now, s);
+    const key = `${s.hour}:${s.minute}`;
+    const recorded = firedToday[key];
+    // Disparou hoje se já era hora e já estava armado antes dessa hora (ou está
+    // registrado). Ligar o modo às 15h não faz os horários das 8h–14h valerem.
+    const id = recorded ?? (armedAt <= t ? s.cardId : null);
+    if (id == null || t > nowMs) continue;
+    if (!best || t > best.m) best = { m: t, id };
+  }
+  // Antes do 1º alerta de hoje: vale o último de ontem. O registro só é
+  // atualizado ao reagendar, então também olhamos o armado: o horário mais
+  // tarde que já estava armado antes do seu horário de ontem.
+  let yesterday: { m: number; id: number } | null = null;
+  for (const s of armed.slots) {
+    const t = slotTime(now, s, -1);
+    if (s.cardId != null && armedAt <= t && (!yesterday || t > yesterday.m)) yesterday = { m: t, id: s.cardId };
+  }
+  const id = best?.id ?? yesterday?.id ?? fired?.last ?? null;
+  return id == null ? null : getInspirationCardById(id);
+}
+
+/**
+ * Dá nota a um card (1 gostei, -1 não quero mais, 0 limpa) e reagenda: o que
+ * recebe 👍 passa a ser sorteado mais vezes; o que recebe 👎 sai dos alertas
+ * (inclusive dos já agendados para hoje).
+ */
+export async function rateInspirationCard(cardId: number, rating: -1 | 0 | 1): Promise<void> {
+  await setInspirationCardRating(cardId, rating);
+  void scheduleInspirationNotifications().catch(() => {});
+}
+
 /** Cancela apenas as notificações do modo inspiração. */
 export async function cancelInspirationNotifications(): Promise<void> {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -106,7 +293,36 @@ export async function cancelInspirationNotifications(): Promise<void> {
  * cada um com uma mensagem distinta (embaralhada). Idempotente — seguro
  * chamar a cada save / ao abrir o app.
  */
-export async function scheduleInspirationNotifications(): Promise<void> {
+let schedRunning: Promise<void> | null = null;
+let schedPending = false;
+
+/**
+ * Serializa o reagendamento: 👍/👎 em sequência, a abertura do app e as telas de
+ * configuração chamam isto ao mesmo tempo, e duas execuções entrelaçadas
+ * deixavam alertas DIÁRIOS duplicados. Uma roda; as demais viram UMA pendente.
+ */
+export function scheduleInspirationNotifications(): Promise<void> {
+  if (schedRunning) {
+    schedPending = true;
+    return schedRunning;
+  }
+  schedRunning = (async () => {
+    try {
+      do {
+        schedPending = false;
+        await scheduleInspirationNotificationsOnce();
+      } while (schedPending);
+    } finally {
+      schedRunning = null;
+    }
+  })();
+  return schedRunning;
+}
+
+async function scheduleInspirationNotificationsOnce(): Promise<void> {
+  // O que já disparou hoje (do armado anterior) precisa ser guardado ANTES de
+  // reatribuir os cards dos horários.
+  await recordFired(new Date()).catch(() => {});
   await cancelInspirationNotifications();
 
   let enabled = false;
@@ -123,12 +339,14 @@ export async function scheduleInspirationNotifications(): Promise<void> {
   if (!enabled) {
     // limpa também os alarmes FALADOS de inspiração (se houver)
     void syncSpokenInspirations([]).catch(() => {});
+    await setKV(ARMED_KEY, JSON.stringify({ armedAt: Date.now(), slots: [] })).catch(() => {});
     return;
   }
 
   const channelId = await ensureChannel();
+  await ensureNotificationCategories();
   // Monta a fila a partir da BIBLIOTECA (packs habilitados, cards não excluídos);
-  // se estiver vazia, cai nas frases padrão da Comentora.
+  // se estiver vazia, cai nas frases padrão do Askeo.
   let pool: InspirationMessage[];
   try {
     const cards = await listActiveInspirationCards();
@@ -136,7 +354,8 @@ export async function scheduleInspirationNotifications(): Promise<void> {
   } catch {
     pool = FALLBACK_MESSAGES;
   }
-  const messages = shuffledForToday(pool);
+  const messages = pool === FALLBACK_MESSAGES ? shuffledForToday(pool) : weightedOrderForToday(pool);
+  const armedSlots: Slot[] = [];
   // coletados para, ao final, agendar as versões FALADAS (se o recurso estiver on)
   const spokenItems: { text: string; hour: number; minute: number }[] = [];
 
@@ -155,13 +374,15 @@ export async function scheduleInspirationNotifications(): Promise<void> {
     const msg = messages[i % messages.length];
     // a versão falada lê o texto limpo (sem aspas; o título é decorativo)
     spokenItems.push({ text: msg.speak, hour, minute });
+    armedSlots.push({ hour, minute, cardId: msg.cardId });
     try {
       await gatedSchedule({
         content: {
           title: msg.title,
           body: msg.body,
-          data: { type: INSPIRATION_TYPE, hour },
+          data: { type: INSPIRATION_TYPE, hour, cardId: msg.cardId },
           sound,
+          ...(msg.cardId != null ? { categoryIdentifier: INSPIRATION_CATEGORY } : {}),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
@@ -174,6 +395,8 @@ export async function scheduleInspirationNotifications(): Promise<void> {
       console.warn(`failed to schedule inspiration alert @${hour}:${minute}:`, err);
     }
   }
+
+  await setKV(ARMED_KEY, JSON.stringify({ armedAt: Date.now(), slots: armedSlots })).catch(() => {});
 
   // Agenda as versões FALADAS em background (pré-renderiza a voz Gemini e arma
   // os alarmes nativos). Best-effort e fora do caminho crítico do agendamento.

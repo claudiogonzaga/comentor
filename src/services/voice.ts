@@ -347,7 +347,7 @@ function releaseGeminiPlayer(player: AudioPlayer) {
 }
 
 const PREVIEW_TEXT =
-  'Oi, eu sou a Comentora, sua coruja de sabedoria. Vou te ajudar a dormir melhor.';
+  'Oi, eu sou o Askeo, sua coruja de sabedoria. Vou te ajudar a dormir melhor.';
 
 export async function previewVoice(voice: EnrichedVoice): Promise<void> {
   await speak(PREVIEW_TEXT, {

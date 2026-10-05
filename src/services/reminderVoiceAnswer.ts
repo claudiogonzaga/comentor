@@ -1,9 +1,9 @@
-// Resposta por VOZ ao lembrete: depois que a Comentora fala a cobrança, ela
+// Resposta por VOZ ao lembrete: depois que o Askeo fala a cobrança, ele
 // lista as opções e ABRE O MICROFONE para o usuário responder falando:
 //   "a" / "já fiz" / "já tomei"      → marca como feito
 //   "b" / "mais tempo" / "depois"    → adia (snoozeMinutes)
 //   "c" / "não vou hoje" / "pular"   → pula hoje (sem contar como feito)
-// A Comentora confirma em voz o que entendeu. Se não entender, orienta a usar
+// O Askeo confirma em voz o que entendeu. Se não entender, orienta a usar
 // os botões da notificação (nada é marcado por engano).
 //
 // Limite honesto: o microfone só abre com o APP EM PRIMEIRO PLANO — o Android

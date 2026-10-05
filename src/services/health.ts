@@ -771,7 +771,7 @@ export async function getHealthDiagnostics(): Promise<string> {
   };
 
   // Passos de hoje: soma crua × deduplicada. Se a crua for bem maior, há duas
-  // fontes contando os mesmos passos (e a Comentora usa a deduplicada).
+  // fontes contando os mesmos passos (e o Askeo usa a deduplicada).
   const stepsLine = async (): Promise<string> => {
     const t0 = new Date(now);
     t0.setHours(0, 0, 0, 0);
@@ -947,7 +947,7 @@ export function formatSleepDuration(minutes: number): string {
 
 /**
  * Resume o retrato de saúde numa frase curta para alimentar o contexto da
- * Comentora (coach). Retorna string vazia se não houver nada útil.
+ * Askeo (coach). Retorna string vazia se não houver nada útil.
  */
 export function formatHealthForCoach(s: HealthSnapshot): string {
   const parts: string[] = [];

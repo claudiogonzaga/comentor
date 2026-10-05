@@ -36,11 +36,14 @@ import {
   MED_SKIP_ACTION,
   SAMPLE_YES_ACTION,
   SAMPLE_NO_ACTION,
+  INSPIRATION_LIKE_ACTION,
+  INSPIRATION_DISLIKE_ACTION,
   cancelSleepEscalationReminders,
 } from '../services/notifications';
 import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
 import { handleMorningResponse, MORNING_TYPE } from '../services/morning';
 import { REVIEW_TYPE } from '../services/review';
+import { rateInspirationCard } from '../services/inspiration';
 import { ReviewScreen } from '../screens/ReviewScreen';
 import { recordSampleAnswer, todayISO as formationToday } from '../services/habitFormation';
 import { addChatMessage, addSnoozeFeedback, bumpTechnique } from '../services/database';
@@ -257,6 +260,18 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           return;
         }
         nav.navigate('Home');
+      } else if (type === 'inspiration') {
+        // 👍/👎 no alerta de inspiração: grava a nota sem abrir o app.
+        const cardId = (data as { cardId?: number }).cardId;
+        if (typeof cardId === 'number' && (action === INSPIRATION_LIKE_ACTION || action === INSPIRATION_DISLIKE_ACTION)) {
+          try {
+            await rateInspirationCard(cardId, action === INSPIRATION_LIKE_ACTION ? 1 : -1);
+          } catch {
+            /* best-effort */
+          }
+          return;
+        }
+        nav.navigate('Home');
       } else if (type === REVIEW_TYPE) {
         nav.navigate('Review');
       }
@@ -342,7 +357,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           await new Promise((r) => setTimeout(r, due - Date.now()));
           // Saiu do app ou apagou a tela durante a pausa: os timers do JS
           // CONGELAM em segundo plano e este só dispara na volta, atrasado — aí
-          // a Comentora falaria um aviso velho, na hora errada. Atraso > 2 s =
+          // o Askeo falaria um aviso velho, na hora errada. Atraso > 2 s =
           // ficou fora; esta fala morre. (Uma ida e volta rápida, como tocar na
           // própria notificação, não atrasa o timer e não conta.)
           if (Date.now() - due > 2000) return;
@@ -385,7 +400,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           void speak(text, { volume, onDone: resolve, onError: () => resolve() });
         });
         // RESPOSTA POR VOZ: para lembretes acionáveis (hábito/remédio), a
-        // Comentora lista as opções (a/b/c) e abre o MICROFONE. A resposta
+        // Askeo lista as opções (a/b/c) e abre o MICROFONE. A resposta
         // falada marca feito / adia / pula — sem tocar na tela.
         const dd = (notification.request.content.data ?? {}) as {
           medId?: number;

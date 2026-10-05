@@ -172,7 +172,7 @@ export function HomeScreen() {
       if (next && !isHeadphonesConnected()) {
         Alert.alert(
           'Sem fone agora',
-          'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
+          'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, o Askeo volta a falar — pelo fone.',
         );
       }
     } catch (err) {
@@ -537,9 +537,9 @@ export function HomeScreen() {
         <HealthCard />
 
         <View style={styles.actions}>
-          {/* A Comentora conduz: abre o chat já comentando saúde/hábitos do dia. */}
+          {/* O Askeo conduz: abre o chat já comentando saúde/hábitos do dia. */}
           <Button
-            label="Chat com Comentora"
+            label="Chat com Askeo"
             onPress={() => navigation.navigate('Chat')}
           />
           {!data?.todayLog?.completed && (

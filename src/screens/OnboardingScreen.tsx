@@ -21,7 +21,7 @@ import { useAppStore } from '../store/useAppStore';
 
 const STEPS = [
   {
-    title: 'Olá! Eu sou a Comentora.',
+    title: 'Olá! Eu sou o Askeo.',
     subtitle: 'Sua co-mentora de sabedoria.',
     paragraph: 'Vou te ajudar a dormir melhor, ler mais e se mover.',
     cta: 'Me conta mais',

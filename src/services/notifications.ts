@@ -53,6 +53,10 @@ export const MORNING_TEXT_ACTION = 'morning-text';
 
 /** Amostragem de hábito já formado: "ainda fazendo isso?" Sim / Não. */
 export const SAMPLE_CATEGORY = 'comentor-sample-actions';
+/** Alerta do modo inspiração: 👍 gostei / 👎 não quero mais ver. */
+export const INSPIRATION_CATEGORY = 'comentor-inspiration-actions';
+export const INSPIRATION_LIKE_ACTION = 'inspiration-like';
+export const INSPIRATION_DISLIKE_ACTION = 'inspiration-dislike';
 export const SAMPLE_YES_ACTION = 'sample-yes';
 export const SAMPLE_NO_ACTION = 'sample-no';
 
@@ -159,6 +163,10 @@ export async function ensureNotificationCategories() {
       options: bg,
     },
   ]);
+  await Notifications.setNotificationCategoryAsync(INSPIRATION_CATEGORY, [
+    { identifier: INSPIRATION_LIKE_ACTION, buttonTitle: 'Gostei 👍', options: bg },
+    { identifier: INSPIRATION_DISLIKE_ACTION, buttonTitle: 'Não quero mais 👎', options: bg },
+  ]);
   await Notifications.setNotificationCategoryAsync(SAMPLE_CATEGORY, [
     { identifier: SAMPLE_YES_ACTION, buttonTitle: 'Sim, continuo ✅', options: bg },
     { identifier: SAMPLE_NO_ACTION, buttonTitle: 'Não…', options: bg },
@@ -252,7 +260,7 @@ export async function ensureChannel(
   // (importância alta = texto visível), mas sem piado. "Só texto".
   if (silent) {
     await Notifications.setNotificationChannelAsync(id, {
-      name: 'Comentora — silencioso',
+      name: 'Askeo — silencioso',
       description: 'Notificações sem som nem vibração (modo silencioso).',
       importance: Notifications.AndroidImportance.HIGH,
       sound: null,
@@ -267,8 +275,8 @@ export async function ensureChannel(
   const spec = getOwlSpecies(sp);
   await Notifications.setNotificationChannelAsync(id, {
     name: dnd
-      ? `Comentora — ${spec.name} (Não Perturbe)`
-      : `Comentora — ${spec.name}`,
+      ? `Askeo — ${spec.name} (Não Perturbe)`
+      : `Askeo — ${spec.name}`,
     description: dnd
       ? 'Atravessa o Não Perturbe e ainda toca o canto da coruja.'
       : 'Lembretes de sono e nudges, com som de coruja',
@@ -347,7 +355,7 @@ export async function ensureSilentChannel(): Promise<string> {
   const id = `comentor-silent-v${CHANNEL_VERSION}`;
   if (Platform.OS !== 'android') return id;
   await Notifications.setNotificationChannelAsync(id, {
-    name: 'Comentora — sem som (não perturbe)',
+    name: 'Askeo — sem som (não perturbe)',
     description: 'Notificações sem som nem vibração durante os períodos de não-perturbe.',
     importance: Notifications.AndroidImportance.HIGH,
     sound: null,
@@ -527,8 +535,8 @@ export async function listScheduled() {
 const ANDROID_PACKAGE = 'com.claudiogonzaga.comentor';
 
 /**
- * Abre a tela do sistema "Acesso ao Não Perturbe", onde o usuário libera a
- * Comentora a atravessar o modo Não Perturbe. Sem essa permissão o canal de
+ * Abre a tela do sistema "Acesso ao Não Perturbe", onde o usuário libera o
+ * Askeo a atravessar o modo Não Perturbe. Sem essa permissão o canal de
  * bypass é criado mas o Android ignora o bypass.
  */
 export async function openDndAccessSettings(): Promise<void> {
@@ -599,7 +607,7 @@ export async function sendTestNotification(): Promise<{
   await Notifications.scheduleNotificationAsync({
     content: {
       title: 'Teste de notificação',
-      body: 'Funcionou! Se você está vendo isto, os lembretes da Comentora conseguem chegar no seu celular.',
+      body: 'Funcionou! Se você está vendo isto, os lembretes do Askeo conseguem chegar no seu celular.',
       sound,
       data: { type: 'test' },
     },

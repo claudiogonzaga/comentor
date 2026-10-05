@@ -333,7 +333,7 @@ function experimentComparison(e: Experiment, days: DayRecord[]): string {
   );
 }
 
-const ANALYSIS_PROMPT = `Você é um coach de saúde comportamental, rigoroso e direto, ajudando uma pessoa a melhorar sono, saúde física e mental a partir dos próprios dados. Abaixo estão os registros que o app dela (CoMentor) coletou no período: noites de sono (horário-alvo, horário real, como acordou e o que escreveu), hábitos diários (feito / não fez / sem resposta, por onde respondeu, em qual cobrança, com que atraso e o motivo), dados do relógio quando disponíveis, experimentos em andamento e o que já se sabe sobre as causas.
+const ANALYSIS_PROMPT = `Você é um coach de saúde comportamental, rigoroso e direto, ajudando uma pessoa a melhorar sono, saúde física e mental a partir dos próprios dados. Abaixo estão os registros que o app dela (Askeo) coletou no período: noites de sono (horário-alvo, horário real, como acordou e o que escreveu), hábitos diários (feito / não fez / sem resposta, por onde respondeu, em qual cobrança, com que atraso e o motivo), dados do relógio quando disponíveis, experimentos em andamento e o que já se sabe sobre as causas.
 
 Faça, nesta ordem:
 1. Padrões: o que se repete (dias da semana, sequências, gatilhos que aparecem nas falas dela).
@@ -347,7 +347,7 @@ Use as falas dela quando forem relevantes, citando literalmente. Não moralize. 
 function md(c: Collected): string {
   const { fromISO, toISO, config, days, summary: s, experiments, techniques, states, chat, interview, followups, decisions, automaticity } = c;
   const out: string[] = [];
-  out.push(`# CoMentor — exportação de sinais (${days.length} dias: ${fromISO} → ${toISO})`);
+  out.push(`# Askeo — exportação de sinais (${days.length} dias: ${fromISO} → ${toISO})`);
   out.push('');
   out.push('## Instruções para a IA (cole junto com os dados)');
   out.push('');
@@ -598,9 +598,9 @@ export async function shareExport(formatKind: ExportFormat, opts: ExportOptions)
     const built = await buildExport(opts);
     const content = formatKind === 'md' ? built.markdown : formatKind === 'csv' ? built.csv : built.json;
     const mime = formatKind === 'md' ? 'text/markdown' : formatKind === 'csv' ? 'text/csv' : 'application/json';
-    const dest = `${FileSystem.cacheDirectory}comentor-sinais_${iso(new Date())}_${opts.days}d.${formatKind}`;
+    const dest = `${FileSystem.cacheDirectory}askeo-sinais_${iso(new Date())}_${opts.days}d.${formatKind}`;
     await FileSystem.writeAsStringAsync(dest, content, { encoding: FileSystem.EncodingType.UTF8 });
-    await Sharing.shareAsync(dest, { mimeType: mime, dialogTitle: 'Exportar sinais do CoMentor' });
+    await Sharing.shareAsync(dest, { mimeType: mime, dialogTitle: 'Exportar sinais do Askeo' });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };

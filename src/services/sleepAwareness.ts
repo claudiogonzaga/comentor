@@ -1,4 +1,4 @@
-// Notificações de conscientização sobre o sono — os "lembretes da Comentora".
+// Notificações de conscientização sobre o sono — os "lembretes do Askeo".
 //
 // Ao longo do dia o app dispara pequenos lembretes — citações da base
 // SLEEP_AWARENESS_CARDS. Quantos por dia é configurável
@@ -121,7 +121,7 @@ export async function cancelSleepAwarenessNotifications(): Promise<void> {
 }
 
 /**
- * Cancela e reagenda os lembretes da Comentora para os próximos dias.
+ * Cancela e reagenda os lembretes do Askeo para os próximos dias.
  * Se a opção estiver desligada, apenas cancela. Idempotente.
  */
 export async function scheduleSleepAwarenessNotifications(): Promise<void> {

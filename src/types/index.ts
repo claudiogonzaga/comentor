@@ -77,9 +77,11 @@ export interface UserConfig {
   voiceProvider: VoiceProvider;
   /** Nome da voz Gemini pré-construída (Aoede, Charon, Kore, ...). */
   geminiVoiceName: string;
+  /** Modelo do Gemini TTS (gemini-3.8-flash-lite-tts, gemini-3.8-flash-tts, 2.5 antigo). */
+  geminiTtsModel: string;
   owlSpecies: OwlSpeciesId;
   sleepAwarenessEnabled: boolean;
-  /** Quantos lembretes da Comentora por dia (a densidade dobra após o pôr do sol). */
+  /** Quantos lembretes do Askeo por dia (a densidade dobra após o pôr do sol). */
   notificationsPerDay: number;
   /**
    * Quando true, a coruja usa um canal que atravessa o "Não Perturbe": ela
@@ -89,7 +91,7 @@ export interface UserConfig {
   dndBypassEnabled: boolean;
   /**
    * Quando true e o app está em primeiro plano (sem áudio tocando/gravando),
-   * a Comentora também FALA o nudge por voz (TTS), além de mostrar o texto.
+   * o Askeo também FALA o nudge por voz (TTS), além de mostrar o texto.
    */
   voiceNudgesEnabled: boolean;
   /**
@@ -116,7 +118,7 @@ export interface UserConfig {
   spokenQuietEnd: string; // HH:MM
   spokenQuietDays: number; // bitmask 0–6
   /**
-   * Modo "inspiração": quando true, a Comentora envia alertas de hora em hora
+   * Modo "inspiração": quando true, o Askeo envia alertas de hora em hora
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */
   inspirationModeEnabled: boolean;
@@ -170,7 +172,7 @@ export interface UserConfig {
    * informado (a métrica de FC alta fica oculta).
    */
   birthYear: number | null;
-  /** Sexo (contexto p/ a Comentora e futuras faixas de saúde). */
+  /** Sexo (contexto p/ o Askeo e futuras faixas de saúde). */
   sex: 'feminino' | 'masculino' | null;
   /**
    * Modo silencioso (botão da Home): notificações e nudges continuam, mas SEM
@@ -234,6 +236,8 @@ export interface InspirationCard {
   refDate: string | null;
   deleted: boolean;
   builtin: boolean;
+  /** 1 = gostei (aparece mais), 0 = sem nota, -1 = não gostei (não aparece mais). */
+  rating: -1 | 0 | 1;
 }
 
 /** Texto salvo na tela "Leia para mim" (visualização, oração, hipnose…). */

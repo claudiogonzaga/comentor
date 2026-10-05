@@ -24,10 +24,12 @@ import {
   setInspirationPackEnabled,
 } from '../services/database';
 import {
+  copyDeckPrompt,
   exportInspirationDeck,
   importInspirationPackFromFile,
+  shareDeckTemplate,
 } from '../services/inspirationLibrary';
-import { scheduleInspirationNotifications } from '../services/inspiration';
+import { rateInspirationCard, scheduleInspirationNotifications } from '../services/inspiration';
 import type { InspirationCard, InspirationPack } from '../types';
 
 /**
@@ -83,6 +85,27 @@ export function InspirationLibraryScreen() {
     reschedule();
   };
 
+  const rateCard = async (card: InspirationCard, rating: -1 | 0 | 1) => {
+    await rateInspirationCard(card.id, rating);
+    if (openPack) setCards(await listInspirationCards(openPack.id));
+    await reloadPacks();
+  };
+
+  const handleCopyPrompt = async () => {
+    const ok = await copyDeckPrompt();
+    Alert.alert(
+      ok ? 'Instruções copiadas' : 'Não consegui copiar',
+      ok
+        ? 'Cole numa IA (ChatGPT, Claude, Gemini…), troque o tema e a quantidade, salve a resposta como arquivo .csv e importe aqui.'
+        : 'Tente de novo.',
+    );
+  };
+
+  const handleTemplate = async () => {
+    const r = await shareDeckTemplate();
+    if (!r.ok && r.error) Alert.alert('Modelo de baralho', r.error);
+  };
+
   const handleImport = async () => {
     setBusy(true);
     try {
@@ -112,7 +135,7 @@ export function InspirationLibraryScreen() {
   const handleRestore = () => {
     Alert.alert(
       'Restaurar padrão',
-      'Reativa os pacotes embutidos e restaura todas as citações/fatos que você excluiu deles. Pacotes importados por você não são afetados.',
+      'Reativa os pacotes embutidos e restaura todas as citações/fatos que você excluiu ou marcou com 👎 neles. Pacotes importados por você não são afetados.',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -180,7 +203,7 @@ export function InspirationLibraryScreen() {
               </Text>
             }
             renderItem={({ item }) => (
-              <Card style={StyleSheet.flatten([styles.cardRow, item.deleted && styles.cardRowDeleted])}>
+              <Card style={StyleSheet.flatten([styles.cardRow, (item.deleted || item.rating < 0) && styles.cardRowDeleted])}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardType}>
                     {item.type === 'fact' ? '📜 Fato' : '✨ Citação'}
@@ -193,11 +216,37 @@ export function InspirationLibraryScreen() {
                     {item.text}
                   </Text>
                 </View>
-                <Pressable onPress={() => toggleCard(item)} hitSlop={8} style={styles.cardAction}>
-                  <Text style={item.deleted ? styles.restoreLink : styles.deleteLink}>
-                    {item.deleted ? 'Restaurar' : 'Excluir'}
-                  </Text>
-                </Pressable>
+                <View style={styles.cardActions}>
+                  {!item.deleted ? (
+                    <View style={styles.rateRow}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Gostei: aparece com mais frequência"
+                        accessibilityState={{ selected: item.rating > 0 }}
+                        onPress={() => rateCard(item, item.rating > 0 ? 0 : 1)}
+                        hitSlop={6}
+                        style={[styles.rateBtn, item.rating > 0 && styles.rateBtnOn]}
+                      >
+                        <Text style={styles.rateGlyph}>👍</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Não quero mais: não aparece"
+                        accessibilityState={{ selected: item.rating < 0 }}
+                        onPress={() => rateCard(item, item.rating < 0 ? 0 : -1)}
+                        hitSlop={6}
+                        style={[styles.rateBtn, item.rating < 0 && styles.rateBtnOn]}
+                      >
+                        <Text style={styles.rateGlyph}>👎</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  <Pressable onPress={() => toggleCard(item)} hitSlop={8} style={styles.cardAction}>
+                    <Text style={item.deleted ? styles.restoreLink : styles.deleteLink}>
+                      {item.deleted ? 'Restaurar' : 'Excluir'}
+                    </Text>
+                  </Pressable>
+                </View>
               </Card>
             )}
           />
@@ -224,11 +273,42 @@ export function InspirationLibraryScreen() {
         keyExtractor={(p) => String(p.id)}
         contentContainerStyle={styles.scroll}
         ListHeaderComponent={
-          <Text style={styles.hint}>
-            Os alertas do modo inspiração sorteiam frases dos pacotes LIGADOS.
-            Toque num pacote para ver e editar os cards. Importe pacotes de
-            planilha (CSV) ou exporte o seu baralho.
-          </Text>
+          <View>
+            <Text style={styles.hint}>
+              Cada pacote é um baralho. Os alertas do modo inspiração sorteiam
+              frases dos baralhos LIGADOS (pode combinar vários). Toque num
+              baralho para ver os cards e dar 👍 (aparece mais) ou 👎 (nunca mais).
+            </Text>
+            <Card style={styles.importCard}>
+              <Text style={styles.importTitle}>Importar baralho</Text>
+              <Text style={styles.importLine}>• Arquivo CSV (UTF-8), uma frase por linha.</Text>
+              <Text style={styles.importLine}>
+                • 4 colunas: Texto do Card · Autor · Data (opcional) · Tipo (Citação ou Fato Histórico).
+              </Text>
+              <Text style={styles.importLine}>• Só o texto é obrigatório. A 1ª linha é o cabeçalho.</Text>
+              <Text style={styles.importLine}>
+                • Frases curtas (até ~250 caracteres) ficam melhores quando lidas em voz alta.
+              </Text>
+              <Text style={styles.importLine}>
+                • O nome do arquivo vira o nome do baralho. Vale CSV do Excel ou do Google Sheets.
+              </Text>
+              <View style={{ height: spacing.sm }} />
+              <Button
+                label="Escolher arquivo CSV"
+                variant="secondary"
+                onPress={handleImport}
+                loading={busy}
+              />
+              <View style={styles.importLinks}>
+                <Pressable onPress={handleTemplate} hitSlop={6}>
+                  <Text style={styles.linkText}>Baixar modelo</Text>
+                </Pressable>
+                <Pressable onPress={handleCopyPrompt} hitSlop={6}>
+                  <Text style={styles.linkText}>Copiar instruções para gerar com IA</Text>
+                </Pressable>
+              </View>
+            </Card>
+          </View>
         }
         renderItem={({ item }) => (
           <Pressable onPress={() => openCards(item)}>
@@ -256,13 +336,6 @@ export function InspirationLibraryScreen() {
         ListFooterComponent={
           <View style={{ marginTop: spacing.md }}>
             <Button
-              label="Importar pacote (planilha CSV)"
-              variant="secondary"
-              onPress={handleImport}
-              loading={busy}
-            />
-            <View style={{ height: spacing.sm }} />
-            <Button
               label="Exportar meu baralho"
               variant="secondary"
               onPress={handleExport}
@@ -273,8 +346,8 @@ export function InspirationLibraryScreen() {
               <Text style={styles.restoreBtnText}>Restaurar pacotes padrão</Text>
             </Pressable>
             <Text style={styles.footHint}>
-              Formato da planilha: colunas Texto · Autor · Data · Tipo (Citação ou
-              Fato Histórico). Salve como CSV no Excel/Sheets para importar.
+              Exportar gera um CSV no mesmo formato da importação — dá para editar
+              na planilha e importar de novo.
             </Text>
           </View>
         }
@@ -320,6 +393,22 @@ const styles = StyleSheet.create({
   cardText: { ...typography.body, color: colors.text.primary, lineHeight: 20 },
   cardTextDeleted: { textDecorationLine: 'line-through', color: colors.text.tertiary },
   cardAction: { paddingTop: 2 },
+  cardActions: { alignItems: 'flex-end', gap: spacing.sm },
+  rateRow: { flexDirection: 'row', gap: spacing.xs },
+  rateBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.bg.surfaceStrong,
+  },
+  rateBtnOn: { borderColor: colors.accent.gold, backgroundColor: colors.bg.surfaceStrong },
+  rateGlyph: { fontSize: 15 },
+  importCard: { marginBottom: spacing.md },
+  importTitle: { ...typography.bodyMedium, color: colors.text.primary, marginBottom: spacing.xs },
+  importLine: { ...typography.small, color: colors.text.secondary, lineHeight: 18, marginBottom: 2 },
+  importLinks: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
+  linkText: { ...typography.small, color: colors.accent.gold },
   deleteLink: { ...typography.small, color: colors.accent.danger },
   restoreLink: { ...typography.small, color: colors.accent.gold },
   deletePackLink: { color: colors.accent.danger },

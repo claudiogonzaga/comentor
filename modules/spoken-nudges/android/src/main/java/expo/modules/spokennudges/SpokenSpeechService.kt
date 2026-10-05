@@ -90,7 +90,7 @@ class SpokenSpeechService : Service() {
       return START_NOT_STICKY
     }
     val audioPath = intent?.getStringExtra("audioPath")
-    val title = intent?.getStringExtra("title")?.ifEmpty { "Comentora" } ?: "Comentora"
+    val title = intent?.getStringExtra("title")?.ifEmpty { "Askeo" } ?: "Askeo"
     val body = intent?.getStringExtra("body") ?: ""
     val u = Utterance(audioPath, title, body)
 
@@ -263,7 +263,7 @@ class SpokenSpeechService : Service() {
   /**
    * Os portões de antes do canto, reavaliados DEPOIS da pausa: entrou numa
    * chamada/reunião, tirou o fone, ligou "só com fone", entrou no horário
-   * silencioso ou zerou o volume da Comentora. Atualiza o roteamento se um fone
+   * silencioso ou zerou o volume do Askeo. Atualiza o roteamento se um fone
    * foi conectado durante a pausa. false = não fala.
    */
   private fun gatesStillOpen(): Boolean {
@@ -290,7 +290,7 @@ class SpokenSpeechService : Service() {
       return false
     }
     if (SpokenStore.getNudgeVolume(this) <= 0f) {
-      Log.i(SpokenScheduler.TAG, "pausa: volume da Comentora zerado — não fala")
+      Log.i(SpokenScheduler.TAG, "pausa: volume do Askeo zerado — não fala")
       return false
     }
     if (device != null && !routeToHeadphones) {
@@ -371,7 +371,7 @@ class SpokenSpeechService : Service() {
         })
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "nudge")
-        // O volume da Comentora (barra da Home) vale também para a voz do sistema.
+        // O volume do Askeo (barra da Home) vale também para a voz do sistema.
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, SpokenStore.getNudgeVolume(this@SpokenSpeechService))
         val res = t.speak(text, TextToSpeech.QUEUE_FLUSH, params, "nudge")
         if (res == TextToSpeech.ERROR) {
@@ -523,7 +523,7 @@ class SpokenSpeechService : Service() {
     savedMusicVolume = -1
   }
 
-  private var currentTitle = "Comentora"
+  private var currentTitle = "Askeo"
 
   private fun buildNotification(title: String, text: String): Notification {
     val channelId = "comentor-spoken-fgs"
@@ -531,10 +531,10 @@ class SpokenSpeechService : Service() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val ch = NotificationChannel(
         channelId,
-        "Comentora falando",
+        "Askeo falando",
         NotificationManager.IMPORTANCE_LOW,
       )
-      ch.description = "Aparece enquanto a Comentora fala um lembrete em voz alta."
+      ch.description = "Aparece enquanto o Askeo fala um lembrete em voz alta."
       ch.setShowBadge(false)
       nm.createNotificationChannel(ch)
     }

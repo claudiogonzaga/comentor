@@ -478,9 +478,9 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   return { message: result.text, level, offline: result.offline, habitId: habit.id };
 }
 
-// Prompt do ABRIR-CHAT: a Comentora puxa conversa comentando o progresso e
+// Prompt do ABRIR-CHAT: o Askeo puxa conversa comentando o progresso e
 // apontando, com gentileza, onde dá pra melhorar — terminando com uma pergunta.
-const CHAT_OPENER_PROMPT = `Você é a Comentora, uma coruja-coach calorosa, humana e direta. A pessoa ACABOU de abrir o chat com você. NÃO espere ela falar — INICIE a conversa.
+const CHAT_OPENER_PROMPT = `Você é o Askeo, uma coruja-coach calorosa, humana e direta. A pessoa ACABOU de abrir o chat com você. NÃO espere ela falar — INICIE a conversa.
 
 Em 2 a 4 frases curtas: comente o PROGRESSO recente dela usando os dados abaixo (sono, exercício, passos, peso, hábitos), elogie sinceramente o que foi bem e aponte com gentileza UM ponto onde ela pode melhorar. Termine com UMA pergunta aberta e específica para engajar a conversa.
 
@@ -489,7 +489,7 @@ Histórico recente: {recentLogsSummary}
 Tom: {tone}. Seja breve, natural e acolhedora. NÃO cite números crus nem soe robótica. NUNCA use saudações genéricas tipo "Olá, como posso ajudar?".`;
 
 /**
- * Mensagem de ABERTURA do chat (quando o usuário toca "Chat com Comentora"):
+ * Mensagem de ABERTURA do chat (quando o usuário toca "Chat com Askeo"):
  * a coruja conduz, comentando o progresso e onde melhorar. Persiste a fala e a
  * devolve. Independente do fluxo de "convencer a dormir".
  */
@@ -591,7 +591,7 @@ function pickConvinceFocus(bedtime: string): ConvinceFocus {
 
 /**
  * Abre uma conversa de persuasão: escolhe o comportamento de sono mais
- * relevante para o momento e gera a primeira fala da Comentora convencendo
+ * relevante para o momento e gera a primeira fala do Askeo convencendo
  * a pessoa a adotá-lo agora. A instrução enviada à IA é efêmera — só a
  * resposta dela é salva no histórico.
  */
@@ -730,7 +730,7 @@ export async function markSleepDone(habitId: number) {
 }
 
 /**
- * Re-registers every Comentora notification (night escalation chain + daily
+ * Re-registers every Askeo notification (night escalation chain + daily
  * nudges) onto the channel for the user's currently selected owl sound.
  * Call after the owl species changes so the new sound takes effect without
  * waiting for the next Settings save.

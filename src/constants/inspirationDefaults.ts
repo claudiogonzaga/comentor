@@ -1,6 +1,6 @@
-// Frases padrão da Comentora (motivacionais curtas). Ficavam embutidas no
+// Frases padrão do Askeo (motivacionais curtas). Ficavam embutidas no
 // inspiration.ts; foram extraídas para cá para servir de SEED do pack embutido
-// "Frases da Comentora" na biblioteca de inspiração (database.ts) sem criar
+// "Frases do Askeo" na biblioteca de inspiração (database.ts) sem criar
 // ciclo de import (constantes não importam serviços).
 
 export interface ComentoraMessage {
@@ -37,5 +37,5 @@ export const COMENTORA_MESSAGES: ComentoraMessage[] = [
 ];
 
 /** Nomes dos packs embutidos (usados no seed e no restaurar-padrão). */
-export const PACK_COMENTORA = 'Frases da Comentora';
+export const PACK_COMENTORA = 'Frases do Askeo';
 export const PACK_CITACOES = 'Citações e fatos inspiradores';

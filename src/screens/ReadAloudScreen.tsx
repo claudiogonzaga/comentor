@@ -124,7 +124,7 @@ function PlayerBar() {
 
 /**
  * Tela "Leia para mim": cola/sobe um texto grande (visualização, auto-hipnose,
- * oração) e a Comentora lê em voz alta. Na voz do Gemini, gera o áudio COMPLETO
+ * oração) e o Askeo lê em voz alta. Na voz do Gemini, gera o áudio COMPLETO
  * (em background — pode sair da tela) e toca num player com ▶/⏸/⏹ + barra
  * ARRASTÁVEL. Na voz do sistema, lê direto (sem barra). A leitura roda num store
  * GLOBAL, então continua tocando em qualquer tela.
@@ -509,8 +509,8 @@ export function ReadAloudScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
-          Cole ou importe um texto — visualização, oração, auto-hipnose — e a
-          Comentora lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
+          Cole ou importe um texto — visualização, oração, auto-hipnose — e o
+          Askeo lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
           para voltar/avançar. Enquanto o áudio é preparado, a tela fica acesa —
           não saia do app até terminar.
         </Text>
