@@ -8,7 +8,7 @@ import { loadVoiceMeta } from '../services/geminiVoices';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
-import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
+import { migrateAwarenessToInspiration, scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { backfillHealthDailyOnce } from '../services/health';
 import {
@@ -50,6 +50,8 @@ export const useAppStore = create<AppState>((set) => ({
   config: null,
   hasApiKey: false,
   init: async () => {
+    // Quem recebia os "lembretes de sono" passa a receber o mesmo pelo modo inspiração.
+    await migrateAwarenessToInspiration();
     const config = await getUserConfig();
     const apiKey = await getApiKey();
     const hasApiKey = !!apiKey;

@@ -24,7 +24,6 @@ import {
   openDndAccessSettings,
   openOwlChannelSettings,
 } from '../services/notifications';
-import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { scheduleAllMedications } from '../services/medications';
 import {
@@ -67,8 +66,6 @@ export function SoundsVoiceScreen() {
 
   const voiceEnabled = config?.voiceModeEnabled ?? false;
   const voiceNudges = config?.voiceNudgesEnabled ?? false;
-  const awarenessEnabled = config?.sleepAwarenessEnabled ?? true;
-  const notifPerDay = config?.notificationsPerDay ?? 4;
   const inspirationMode = config?.inspirationModeEnabled ?? false;
   const inspPerDay = config?.inspirationPerDay ?? 6;
   const spokenNudges = config?.spokenNudgesEnabled ?? false;
@@ -333,59 +330,14 @@ export function SoundsVoiceScreen() {
           <View style={styles.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Lembretes do Askeo
-              </Text>
-              <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Pequenas notificações ao longo do dia com fatos sobre a
-                importância do sono, em horários variados.
-              </Text>
-            </View>
-            <Switch
-              value={awarenessEnabled}
-              onValueChange={async (next) => {
-                try {
-                  await setConfig({ sleepAwarenessEnabled: next });
-                  await scheduleSleepAwarenessNotifications();
-                } catch (err) {
-                  console.warn('toggle sleep awareness failed:', err);
-                }
-              }}
-              trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
-              thumbColor={awarenessEnabled ? colors.text.onGold : colors.text.tertiary}
-            />
-          </View>
-
-          {awarenessEnabled && (
-            <View style={styles.toggleRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                  Quantos por dia
-                </Text>
-                <Text style={[typography.small, { color: colors.text.secondary }]}>
-                  Número de lembretes por dia. A frequência dobra depois do
-                  pôr do sol (~18h), conforme a hora de dormir se aproxima.
-                </Text>
-              </View>
-              {stepper(notifPerDay, 1, 12, async (n) => {
-                try {
-                  await setConfig({ notificationsPerDay: n });
-                  await scheduleSleepAwarenessNotifications();
-                } catch (err) {
-                  console.warn('set notifications per day failed:', err);
-                }
-              })}
-            </View>
-          )}
-
-          <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
                 Modo inspiração
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Ao longo do dia (8h–21h) o Askeo te manda mensagens curtas de
-                otimismo, persistência e inspiração. Escolha quantas você quer
-                receber logo abaixo.
+                Ao longo do dia (8h–21h) o Askeo te manda uma frase: citações,
+                fatos históricos e ciência do sono. Não são lembretes — lembrete é
+                o que você tem para FAZER (hábitos, remédios, tarefas), e fica em
+                "Hábitos saudáveis e lembretes". Escolha quantas você quer receber
+                logo abaixo.
               </Text>
             </View>
             <Switch

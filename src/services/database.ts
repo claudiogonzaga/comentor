@@ -33,6 +33,7 @@ import {
   PACK_CITACOES,
 } from '../constants/inspirationDefaults';
 import { INSPIRATION_PACK_365 } from '../constants/inspirationPack365';
+import { SLEEP_AWARENESS_CARDS } from '../constants/sleepAwarenessCards';
 
 const DB_NAME = 'comentor.db';
 // Cacheia a Promise (não a instância) — chamadas concorrentes durante o boot
@@ -735,6 +736,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     await database.execAsync(`ALTER TABLE inspiration_cards ADD COLUMN rated_at TEXT`);
   }
   await seedInspirationBuiltins(database);
+  await seedSleepSciencePack(database);
   // v1.107: o app passou a se chamar Askeo — renomeia o baralho embutido que já existia.
   await database.runAsync(
     `UPDATE inspiration_packs SET name = 'Frases do Askeo' WHERE builtin = 1 AND name = 'Frases da Comentora'`,
@@ -2583,6 +2585,34 @@ async function seedInspirationBuiltins(database: SQLite.SQLiteDatabase): Promise
   await database.runAsync(
     "INSERT OR REPLACE INTO app_kv (key, value) VALUES ('inspiration_seeded', '1')",
   );
+}
+
+/**
+ * v1.109: os antigos "lembretes de sono" (citações e fatos da ciência do sono)
+ * viram um baralho embutido da biblioteca de inspiração — lembrete é algo para
+ * fazer; citação e fato é inspiração. Semeado uma vez (marcado em app_kv).
+ */
+async function seedSleepSciencePack(database: SQLite.SQLiteDatabase): Promise<void> {
+  const flag = await database.getFirstAsync<{ value: string }>(
+    "SELECT value FROM app_kv WHERE key = 'inspiration_sleep_pack_seeded'",
+  );
+  if (flag) return;
+  await database.withTransactionAsync(async () => {
+    const p = await database.runAsync(
+      'INSERT INTO inspiration_packs (name, builtin, enabled) VALUES (?, 1, 1)',
+      ['Ciência do sono'],
+    );
+    const packId = p.lastInsertRowId as number;
+    for (const c of SLEEP_AWARENESS_CARDS) {
+      await database.runAsync(
+        'INSERT INTO inspiration_cards (pack_id, type, text, author, ref_date, builtin) VALUES (?, ?, ?, ?, NULL, 1)',
+        [packId, 'quote', c.text, c.author || null],
+      );
+    }
+    await database.runAsync(
+      "INSERT OR REPLACE INTO app_kv (key, value) VALUES ('inspiration_sleep_pack_seeded', '1')",
+    );
+  });
 }
 
 interface InspirationPackRow {

@@ -9,6 +9,16 @@ import { getKV, setKV } from './database';
 
 const KEY = 'last_notification';
 
+/**
+ * "Último lembrete" é o último aviso de algo para FAZER (hábito, remédio, tarefa,
+ * sono). Frases de inspiração e as antigas de ciência do sono são inspiração e têm
+ * o seu próprio card na Home — não entram aqui.
+ */
+const NOT_REMINDER_TYPES = new Set(['inspiration', 'awareness']);
+function isReminderType(type: string | undefined): boolean {
+  return !type || !NOT_REMINDER_TYPES.has(type);
+}
+
 export interface LastNotification {
   title: string;
   body: string;
@@ -31,6 +41,7 @@ export async function saveLastNotification(
     const body = (content.body ?? '').trim();
     if (!title && !body) return;
     const data = content.data as { type?: string } | undefined;
+    if (!isReminderType(data?.type)) return;
     const payload: LastNotification = {
       title,
       body,
@@ -57,7 +68,9 @@ function normalizeNotifDate(date: number | undefined): number {
  */
 export async function syncLastNotificationFromTray(): Promise<void> {
   try {
-    const presented = await Notifications.getPresentedNotificationsAsync();
+    const presented = (await Notifications.getPresentedNotificationsAsync()).filter((p) =>
+      isReminderType((p.request.content.data as { type?: string } | undefined)?.type),
+    );
     if (!presented.length) return;
 
     let newest = presented[0];
@@ -97,6 +110,8 @@ export async function getLastNotification(): Promise<LastNotification | null> {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<LastNotification>;
     if (!parsed || (!parsed.title && !parsed.body)) return null;
+    // um "último" gravado pela versão antiga pode ser uma inspiração
+    if (!isReminderType(parsed.type)) return null;
     return {
       title: parsed.title ?? '',
       body: parsed.body ?? '',

@@ -36,11 +36,6 @@ import {
   resetMedicationToday,
 } from '../services/medications';
 import { confirmNudge, skipNudgeToday, snoozeNudge, resetNudgeToday } from '../services/nudges';
-import {
-  getLastNotification,
-  syncLastNotificationFromTray,
-  type LastNotification,
-} from '../services/lastNotification';
 import type { OwlMood } from '../types';
 import { cancelSleepEscalationReminders } from '../services/notifications';
 import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
@@ -64,6 +59,22 @@ function formatCountdown(mins: number): { value: string; unit: string } {
 }
 
 /** Remove emojis coloridos do texto da notificação para manter a estética. */
+function hhmmToMin(t: string): number | null {
+  const [h, m] = t.split(':').map((x) => parseInt(x, 10));
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+}
+
+/** "em 2h10" / "em 25 min" até o horário HH:MM de hoje. */
+function formatUntil(t: string): string {
+  const target = hhmmToMin(t);
+  if (target === null) return '';
+  const now = new Date();
+  const d = Math.max(0, target - (now.getHours() * 60 + now.getMinutes()));
+  const h = Math.floor(d / 60);
+  const m = d % 60;
+  return h > 0 ? `EM ${h}H${String(m).padStart(2, '0')}` : `EM ${m} MIN`;
+}
+
 function stripEmoji(s: string): string {
   return s
     .replace(
@@ -182,7 +193,6 @@ export function HomeScreen() {
 
   const [data, setData] = useState<Dashboard | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [lastNotif, setLastNotif] = useState<LastNotification | null>(null);
   const [marking, setMarking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   // Completude da coleta: dias seguidos em que todo item teve resposta.
@@ -216,13 +226,6 @@ export function HomeScreen() {
       setTodos(await getTodayTodos());
     } catch {
       /* todos optional */
-    }
-    try {
-      // Captura também lembretes que chegaram com o app fechado (bandeja).
-      await syncLastNotificationFromTray();
-      setLastNotif(await getLastNotification());
-    } catch {
-      /* last notif optional */
     }
   }, []);
 
@@ -291,8 +294,14 @@ export function HomeScreen() {
     return 'Boa noite';
   })();
 
-  const notifTitle = lastNotif ? stripEmoji(lastNotif.title) : '';
-  const notifBody = lastNotif ? stripEmoji(lastNotif.body) : '';
+  // Da lista do dia (só o que é para FAZER): o último que já passou do horário
+  // sem resposta e o próximo que ainda vai tocar.
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const pending = todos.filter((t) => !t.done && hhmmToMin(t.time) !== null);
+  const lastPending =
+    pending.filter((t) => hhmmToMin(t.time)! <= nowMin).sort((a, b) => hhmmToMin(b.time)! - hhmmToMin(a.time)!)[0] ?? null;
+  const nextPending =
+    pending.filter((t) => hhmmToMin(t.time)! > nowMin).sort((a, b) => hhmmToMin(a.time)! - hhmmToMin(b.time)!)[0] ?? null;
 
   return (
     <ScreenContainer>
@@ -370,15 +379,57 @@ export function HomeScreen() {
           <Owl mood={mood} size={180} />
         </View>
 
-        {/* #2 — O card exibido é o último lembrete que apareceu como notificação. */}
-        {lastNotif && (notifTitle || notifBody) && (
+        {/* LEMBRETES são coisas para FAZER. Dois cards, tirados da lista do dia:
+            o último que já passou do horário e segue sem resposta, e o próximo.
+            Os dois deixam marcar aqui mesmo. (Inspiração tem o card dela, abaixo.) */}
+        {lastPending && (
           <Card style={styles.notifCard}>
             <View style={styles.notifHeader}>
               <GreekIcon name="bell" size={18} color={colors.accent.gold} />
-              <Text style={styles.notifLabel}>ÚLTIMO LEMBRETE · {formatRelative(lastNotif.at)}</Text>
+              <Text style={styles.notifLabel}>
+                ÚLTIMO LEMBRETE · {lastPending.time} · SEM RESPOSTA
+              </Text>
             </View>
-            {notifTitle ? <Text style={styles.notifTitle}>{notifTitle}</Text> : null}
-            {notifBody ? <Text style={styles.notifBody}>{notifBody}</Text> : null}
+            <Text style={styles.notifTitle}>{lastPending.title}</Text>
+            {lastPending.subtitle ? <Text style={styles.notifBody}>{lastPending.subtitle}</Text> : null}
+            <View style={styles.remActions}>
+              <Pressable
+                accessibilityRole="button"
+                style={[styles.remBtn, styles.remBtnPrimary]}
+                onPress={() => void handleTodoAction(lastPending, 'done')}
+              >
+                <Text style={styles.remBtnPrimaryText}>Já fiz ✅</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.remBtn}
+                onPress={() => void handleTodoAction(lastPending, 'skip')}
+              >
+                <Text style={styles.remBtnText}>Não hoje</Text>
+              </Pressable>
+            </View>
+          </Card>
+        )}
+
+        {nextPending && (
+          <Card style={styles.notifCard}>
+            <View style={styles.notifHeader}>
+              <GreekIcon name="bell" size={18} color={colors.accent.gold} />
+              <Text style={styles.notifLabel}>
+                PRÓXIMO LEMBRETE · {nextPending.time} · {formatUntil(nextPending.time)}
+              </Text>
+            </View>
+            <Text style={styles.notifTitle}>{nextPending.title}</Text>
+            {nextPending.subtitle ? <Text style={styles.notifBody}>{nextPending.subtitle}</Text> : null}
+            <View style={styles.remActions}>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.remBtn}
+                onPress={() => void handleTodoAction(nextPending, 'done')}
+              >
+                <Text style={styles.remBtnText}>Já fiz ✅</Text>
+              </Pressable>
+            </View>
           </Card>
         )}
 
@@ -397,7 +448,7 @@ export function HomeScreen() {
         ) : countdown ? (
           <Card style={styles.bigCard}>
             <Text style={[typography.label, styles.label]}>
-              {data?.minutesToBedtime !== null && data!.minutesToBedtime < 0 ? 'ATRASADO' : 'PRÓXIMO LEMBRETE'}
+              {data?.minutesToBedtime !== null && data!.minutesToBedtime < 0 ? 'HORA DE DORMIR · ATRASADO' : 'HORA DE DORMIR'}
             </Text>
             <View style={styles.countdownRow}>
               <Text
@@ -636,6 +687,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  remActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  remBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  remBtnPrimary: { backgroundColor: colors.accent.gold },
+  remBtnText: { ...typography.bodyMedium, color: colors.accent.gold },
+  remBtnPrimaryText: { ...typography.bodyMedium, color: colors.text.onGold },
   notifCard: {
     marginBottom: spacing.lg,
   },
