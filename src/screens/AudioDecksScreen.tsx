@@ -81,6 +81,16 @@ export function AudioDecksScreen() {
   );
   useEffect(() => subscribeClipPlayback(setPlayingId), []);
 
+  // Tocar (ou parar) conta uma execução: relê os trechos para o contador aparecer.
+  const openId = open?.id ?? null;
+  useEffect(() => {
+    if (openId === null) return;
+    const t = setTimeout(() => {
+      void listAudioClips(openId).then(setClips);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [playingId, openId]);
+
   const reschedule = () => {
     void scheduleInspirationNotifications().catch(() => {});
   };
@@ -190,7 +200,10 @@ export function AudioDecksScreen() {
           >
             <Text style={styles.back}>‹ Baralhos</Text>
           </Pressable>
-          <Text style={[typography.subtitle, { color: colors.text.primary }]} numberOfLines={1}>
+          <Text
+            style={[typography.subtitle, { color: colors.text.primary, flex: 1, textAlign: 'center' }]}
+            numberOfLines={1}
+          >
             {open.name}
           </Text>
           <View style={{ width: 60 }} />
@@ -445,7 +458,7 @@ const styles = StyleSheet.create({
   chipOn: { borderColor: colors.accent.gold, backgroundColor: 'rgba(244,197,83,0.12)' },
   chipText: { ...typography.small, color: colors.text.secondary },
   chipTextOn: { color: colors.accent.gold },
-  deckActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
+  deckActions: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.lg, rowGap: spacing.xs, marginTop: spacing.md },
   link: { ...typography.small, color: colors.accent.gold },
   linkDanger: { ...typography.small, color: colors.accent.danger },
   mixRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.md },
