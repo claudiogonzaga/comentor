@@ -28,6 +28,8 @@ import {
 import {
   AUDIO_DECK_SPEC,
   clipAvailable,
+  copyClipText,
+  shareClipAudio,
   deleteAudioDeck,
   exportAudioDeck,
   importAudioDeckFromZip,
@@ -279,6 +281,22 @@ export function AudioDecksScreen() {
                         </Text>
                       </Pressable>
                     ) : null}
+                    <View style={styles.clipShare}>
+                      <Pressable onPress={() => void copyClipText(item, open.name)} hitSlop={6}>
+                        <Text style={styles.link}>Copiar texto</Text>
+                      </Pressable>
+                      <Pressable
+                        disabled={missing}
+                        onPress={async () => {
+                          const r = await shareClipAudio(item);
+                          if (!r.ok && r.error) Alert.alert('Compartilhar áudio', r.error);
+                        }}
+                        hitSlop={6}
+                        style={missing && { opacity: 0.35 }}
+                      >
+                        <Text style={styles.link}>Compartilhar áudio</Text>
+                      </Pressable>
+                    </View>
                     {tooLong ? (
                       <Text style={styles.warnText}>Mais de {AUDIO_DECK_SPEC.maxClipSeconds} s — não toca nos alertas.</Text>
                     ) : null}
@@ -512,6 +530,7 @@ const styles = StyleSheet.create({
   playGlyph: { color: colors.accent.gold, fontSize: 16 },
   clipTitle: { ...typography.bodyMedium, color: colors.text.primary },
   clipText: { ...typography.small, color: colors.text.secondary, marginTop: 2, lineHeight: 17 },
+  clipShare: { flexDirection: 'row', columnGap: spacing.lg, marginTop: 6 },
   clipPos: { ...typography.small, color: colors.accent.gold, marginTop: 4 },
   clipMeta: { ...typography.small, color: colors.text.tertiary, marginTop: 2 },
   rateCol: { gap: spacing.xs },

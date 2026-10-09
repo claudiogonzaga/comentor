@@ -7,7 +7,16 @@ import { colors, radius, spacing, typography } from '../theme';
 import { getInspirationCardById, listActiveInspirationCards } from '../services/database';
 import { getCurrentInspiration, rateAudioClip, rateInspirationCard } from '../services/inspiration';
 import { getAudioClip } from '../services/database';
-import { stopClip, subscribeClipPlayback, toggleClip } from '../services/audioDecks';
+import {
+  copyClipText,
+  notifyShort,
+  shareClipAudio,
+  stopClip,
+  subscribeClipPlayback,
+  toggleClip,
+} from '../services/audioDecks';
+import * as Clipboard from 'expo-clipboard';
+import { Alert } from 'react-native';
 import type { AudioClip, InspirationCard } from '../types';
 
 // Painel de INSPIRAÇÃO (separado do painel de lembretes).
@@ -128,6 +137,10 @@ export function InspirationHomeCard() {
 
   // ——— Trecho de ÁUDIO: toca o arquivo importado (sem API) e deixa avaliar ———
   if (fromAlert && clip) {
+    const onShareAudio = async () => {
+      const r = await shareClipAudio(clip);
+      if (!r.ok && r.error) Alert.alert('Compartilhar áudio', r.error);
+    };
     const cDisliked = clip.rating < 0;
     const cLiked = clip.rating > 0;
     return (
@@ -185,6 +198,24 @@ export function InspirationHomeCard() {
                 <Text style={styles.rateText}>👎</Text>
               </Pressable>
             </View>
+            <View style={styles.shareRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Copiar o texto do trecho"
+                onPress={() => void copyClipText(clip, deckName)}
+                hitSlop={6}
+              >
+                <Text style={styles.shareText}>⧉ Copiar texto</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Compartilhar o áudio do trecho"
+                onPress={() => void onShareAudio()}
+                hitSlop={6}
+              >
+                <Text style={styles.shareText}>↗ Compartilhar áudio</Text>
+              </Pressable>
+            </View>
           </>
         )}
       </Card>
@@ -203,6 +234,16 @@ export function InspirationHomeCard() {
   const showAuthor = !!shown.author && !text.includes(shown.author);
   const disliked = shown.rating < 0;
   const liked = shown.rating > 0;
+  const copyText = async () => {
+    try {
+      await Clipboard.setStringAsync(
+        `${display}${showAuthor ? `\n— ${shown.author}` : ''}`,
+      );
+      notifyShort('Texto copiado');
+    } catch {
+      /* a área de transferência pode estar indisponível */
+    }
+  };
 
   return (
     <Card style={styles.card}>
@@ -250,6 +291,11 @@ export function InspirationHomeCard() {
               <Text style={styles.rateText}>👎 Não quero mais</Text>
             </Pressable>
           </View>
+          <View style={styles.shareRow}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Copiar o texto da frase" onPress={() => void copyText()} hitSlop={6}>
+              <Text style={styles.shareText}>⧉ Copiar texto</Text>
+            </Pressable>
+          </View>
         </>
       )}
     </Card>
@@ -270,6 +316,8 @@ const styles = StyleSheet.create({
   text: { ...typography.body, color: colors.text.primary, lineHeight: 22 },
   author: { ...typography.small, color: colors.text.secondary, marginTop: spacing.sm },
   rateRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  shareRow: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.sm },
+  shareText: { ...typography.small, color: colors.accent.gold },
   rateBtn: {
     paddingVertical: 6,
     paddingHorizontal: spacing.md,

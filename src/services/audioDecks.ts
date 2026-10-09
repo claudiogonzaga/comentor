@@ -14,6 +14,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
+import * as Clipboard from 'expo-clipboard';
+import { Platform, ToastAndroid } from 'react-native';
 import { Unzip, UnzipInflate, UnzipPassThrough, Zip, ZipPassThrough, strFromU8, strToU8 } from 'fflate';
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import {
@@ -643,6 +645,67 @@ export function stopClip(): void {
 }
 
 registerPlayer('audiodeck', stopClip);
+
+/** Aviso curto ("Copiado") — Toast no Android; no resto, silencioso. */
+export function notifyShort(msg: string): void {
+  if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
+}
+
+/** Texto de um trecho para copiar: a fala + quem disse + onde está na obra. */
+export function clipShareText(c: Pick<AudioClip, 'text' | 'title' | 'author' | 'reference' | 'ord'>, deckName?: string): string {
+  const body = (c.text ?? '').trim() || c.title;
+  const who = [c.author, c.reference].filter(Boolean).join(' · ');
+  const where = deckName ? `${deckName} · trecho ${c.ord + 1}` : '';
+  return `${body}${who ? `\n— ${who}` : ''}${where ? `\n(${where})` : ''}`;
+}
+
+/** Copia o texto do trecho para a área de transferência. */
+export async function copyClipText(c: AudioClip, deckName?: string): Promise<boolean> {
+  try {
+    await Clipboard.setStringAsync(clipShareText(c, deckName));
+    notifyShort('Texto copiado');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compartilha o ÁUDIO do trecho (WhatsApp, Telegram, e-mail…). Copia para o cache
+ * com um nome legível — o arquivo do baralho se chama 0007.mp3 — e abre a folha
+ * de compartilhamento do sistema.
+ */
+export async function shareClipAudio(c: AudioClip): Promise<{ ok: boolean; error?: string }> {
+  try {
+    if (!(await Sharing.isAvailableAsync())) {
+      return { ok: false, error: 'Compartilhamento não disponível neste aparelho.' };
+    }
+    const src = new File(Paths.document, 'audiodecks', String(c.deckId), c.fileName);
+    if (!src.exists) return { ok: false, error: 'O arquivo de áudio deste trecho não está no aparelho.' };
+    const ext = extOf(c.fileName) || 'mp3';
+    const out = new File(Paths.cache, `${String(c.ord + 1).padStart(3, '0')}-${safeName(c.title)}.${ext}`);
+    try {
+      if (out.exists) out.delete();
+    } catch {
+      /* ignore */
+    }
+    src.copy(out);
+    const mime =
+      ext === 'm4a' || ext === 'aac' ? 'audio/mp4' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' || ext === 'opus' ? 'audio/ogg' : ext === 'flac' ? 'audio/flac' : 'audio/mpeg';
+    try {
+      await Sharing.shareAsync(out.uri, { mimeType: mime, dialogTitle: 'Compartilhar trecho de áudio' });
+    } finally {
+      try {
+        out.delete();
+      } catch {
+        /* ignore */
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };
+  }
+}
 
 /** Toca (ou para, se já estiver tocando) o trecho e conta uma execução. */
 export function toggleClip(clip: AudioClip): void {
