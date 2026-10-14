@@ -42,7 +42,7 @@ import type { Medication } from '../types';
 
 /**
  * #7 — Tela única "Lembretes e hábitos": junta os nudges diários da
- * Askeo (respiração, pôr do sol…) com os lembretes personalizados do
+ * Comentora (respiração, pôr do sol…) com os lembretes personalizados do
  * usuário — que agora cobrem qualquer hábito saudável: remédios, suplementos,
  * beber água, comer algo, jejum, café, etc. No horário, a coruja insiste até
  * a pessoa marcar como feito.
@@ -165,6 +165,11 @@ export function RemindersScreen() {
           prepRemindersEnabled: config?.prepRemindersEnabled ?? true,
         });
         await scheduleSleepAwarenessNotifications();
+        // O intervalo e o horário de dormir também regem as correntes de HOJE
+        // dos hábitos e lembretes (espaço entre cobranças, silêncio pós-dormir):
+        // sem reagendar, seguiam com os valores antigos até o próximo cold start.
+        await scheduleAllNudges();
+        await scheduleAllMedications();
       }
     } catch (err) {
       console.warn('saveSleep failed:', err);
@@ -376,6 +381,9 @@ export function RemindersScreen() {
             {'\n\n'}
             Esgotadas as cobranças sem você marcar nada, ela desiste e registra o item
             como não feito. 0 desliga a insistência.
+            {'\n\n'}
+            Vale para os hábitos da Comentora. Os lembretes que você criou (remédios e
+            “Meus hábitos”) são cobrados no intervalo fixo, sem dobrar, até você responder.
           </Text>
         </Card>
 
@@ -453,7 +461,7 @@ export function RemindersScreen() {
         {/* Jejum intermitente — hábito pré-definido configurável, abaixo do Sono. */}
         <FastingCard />
 
-        {/* Nudges diários do Askeo (respiração, pôr do sol…). */}
+        {/* Nudges diários da Comentora (respiração, pôr do sol…). */}
         <NudgesCard />
 
         <Text style={styles.sectionTitle}>Meus hábitos</Text>

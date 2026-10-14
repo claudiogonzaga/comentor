@@ -22,6 +22,7 @@ import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import org.json.JSONArray
 import java.util.Calendar
 import java.util.Locale
 
@@ -90,7 +91,7 @@ class SpokenSpeechService : Service() {
       return START_NOT_STICKY
     }
     val audioPath = intent?.getStringExtra("audioPath")
-    val title = intent?.getStringExtra("title")?.ifEmpty { "Askeo" } ?: "Askeo"
+    val title = intent?.getStringExtra("title")?.ifEmpty { "Comentora" } ?: "Comentora"
     val body = intent?.getStringExtra("body") ?: ""
     val u = Utterance(audioPath, title, body)
 
@@ -263,7 +264,7 @@ class SpokenSpeechService : Service() {
   /**
    * Os portões de antes do canto, reavaliados DEPOIS da pausa: entrou numa
    * chamada/reunião, tirou o fone, ligou "só com fone", entrou no horário
-   * silencioso ou zerou o volume do Askeo. Atualiza o roteamento se um fone
+   * silencioso ou zerou o volume da Comentora. Atualiza o roteamento se um fone
    * foi conectado durante a pausa. false = não fala.
    */
   private fun gatesStillOpen(): Boolean {
@@ -290,7 +291,7 @@ class SpokenSpeechService : Service() {
       return false
     }
     if (SpokenStore.getNudgeVolume(this) <= 0f) {
-      Log.i(SpokenScheduler.TAG, "pausa: volume do Askeo zerado — não fala")
+      Log.i(SpokenScheduler.TAG, "pausa: volume da Comentora zerado — não fala")
       return false
     }
     if (device != null && !routeToHeadphones) {
@@ -303,7 +304,7 @@ class SpokenSpeechService : Service() {
 
   private fun playVoiceNow(audioPath: String?, body: String) {
     if (!audioPath.isNullOrEmpty()) {
-      playWav(audioPath)
+      playWav(audioPath, body)
     } else if (body.isNotEmpty()) {
       speakWithSystemTts(body)
     } else {
@@ -312,10 +313,18 @@ class SpokenSpeechService : Service() {
     }
   }
 
-  private fun playWav(audioPath: String) {
+  /**
+   * Toca o WAV pré-renderizado. Se o arquivo sumiu ou está corrompido (baralho de
+   * áudio removido/reimportado, cache limpo pelo sistema), cai na VOZ DO SISTEMA
+   * com o texto — o alarme diário guarda o caminho e repetiria canto + pausa +
+   * silêncio todo dia.
+   */
+  private fun playWav(audioPath: String, body: String) {
+    var created: MediaPlayer? = null
     try {
       val path = if (audioPath.startsWith("file://")) Uri.parse(audioPath).path ?: audioPath else audioPath
       val mp = MediaPlayer()
+      created = mp
       mp.setAudioAttributes(speechAttrs())
       // Crava a saída no fone detectado (reforça o roteamento do USAGE_MEDIA).
       if (routeToHeadphones && preferredDevice != null &&
@@ -327,14 +336,24 @@ class SpokenSpeechService : Service() {
       }
       mp.setDataSource(path)
       val vol = SpokenStore.getNudgeVolume(this)
+      // Erro depois de começar a tocar (rota Bluetooth caiu, media server morreu)
+      // não pode repetir o texto inteiro na voz do sistema: só encerra.
+      var started = false
       mp.setOnPreparedListener {
         try { it.setVolume(vol, vol) } catch (_: Exception) {}
+        started = true
         it.start()
       }
       mp.setOnCompletionListener { finishCurrent() }
-      mp.setOnErrorListener { _, what, extra ->
-        Log.e(SpokenScheduler.TAG, "MediaPlayer error what=$what extra=$extra")
-        finishCurrent()
+      mp.setOnErrorListener { p, what, extra ->
+        Log.e(SpokenScheduler.TAG, "MediaPlayer error what=$what extra=$extra; tentando voz do sistema")
+        // Já solto/substituído (Calar agora, próxima fala): não é mais a fala atual.
+        if (player !== p) return@setOnErrorListener true
+        player = null
+        try { p.release() } catch (_: Exception) {}
+        // Só cai para a voz do sistema se o WAV nem chegou a tocar (arquivo
+        // ausente/corrompido); no meio da fala, a pessoa já ouviu parte dela.
+        if (started) finishCurrent() else fallbackToSystemVoice(body)
         true
       }
       mp.prepareAsync()
@@ -342,8 +361,16 @@ class SpokenSpeechService : Service() {
       Log.d(SpokenScheduler.TAG, "service: tocando WAV $path")
     } catch (e: Exception) {
       Log.e(SpokenScheduler.TAG, "service: WAV falhou ${e.message}; tentando voz do sistema")
-      finishCurrent()
+      // O player ainda não foi guardado em `player`: solta aqui para não vazar.
+      if (player === created) player = null
+      try { created?.release() } catch (_: Exception) {}
+      fallbackToSystemVoice(body)
     }
+  }
+
+  /** WAV indisponível: fala o texto na voz do sistema; sem texto, encerra a fala. */
+  private fun fallbackToSystemVoice(body: String) {
+    if (body.isNotEmpty()) speakWithSystemTts(body) else finishCurrent()
   }
 
   private fun speakWithSystemTts(text: String) {
@@ -371,7 +398,7 @@ class SpokenSpeechService : Service() {
         })
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "nudge")
-        // O volume do Askeo (barra da Home) vale também para a voz do sistema.
+        // O volume da Comentora (barra da Home) vale também para a voz do sistema.
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, SpokenStore.getNudgeVolume(this@SpokenSpeechService))
         val res = t.speak(text, TextToSpeech.QUEUE_FLUSH, params, "nudge")
         if (res == TextToSpeech.ERROR) {
@@ -523,7 +550,7 @@ class SpokenSpeechService : Service() {
     savedMusicVolume = -1
   }
 
-  private var currentTitle = "Askeo"
+  private var currentTitle = "Comentora"
 
   private fun buildNotification(title: String, text: String): Notification {
     val channelId = "comentor-spoken-fgs"
@@ -531,10 +558,10 @@ class SpokenSpeechService : Service() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val ch = NotificationChannel(
         channelId,
-        "Askeo falando",
+        "Comentora falando",
         NotificationManager.IMPORTANCE_LOW,
       )
-      ch.description = "Aparece enquanto o Askeo fala um lembrete em voz alta."
+      ch.description = "Aparece enquanto a Comentora fala um lembrete em voz alta."
       ch.setShowBadge(false)
       nm.createNotificationChannel(ch)
     }
@@ -724,8 +751,12 @@ fun headphonesConnected(ctx: Context): Boolean = mediaHeadphoneDevice(ctx) != nu
 /**
  * Estamos AGORA dentro do "horário silencioso" (janela + dia escolhidos)? Se sim,
  * os avisos não falam. `quietDays` é bitmask (bit d = dia d, 0=domingo).
+ * Quando o JS espelhou a LISTA de períodos sem som (trabalho, sono…), vale ela;
+ * a janela única fica só para instalações cujo JS ainda não a espelhou.
  */
 fun isQuietNow(ctx: Context): Boolean {
+  val periods = SpokenStore.getQuietPeriods(ctx)
+  if (periods != null) return isInAnyQuietPeriod(periods)
   if (!SpokenStore.getQuietEnabled(ctx)) return false
   return try {
     val cal = Calendar.getInstance()
@@ -736,6 +767,39 @@ fun isQuietNow(ctx: Context): Boolean {
     val end = SpokenStore.getQuietEnd(ctx)
     if (start <= end) nowMin >= start && nowMin < end
     else nowMin >= start || nowMin < end // janela que cruza a meia-noite
+  } catch (e: Exception) {
+    false
+  }
+}
+
+/**
+ * Alguma janela da lista (JSON [{start,end,days}], minutos do dia + bitmask) está
+ * ativa agora? Mesma regra do JS (quietHours.periodActiveAt): início == fim é
+ * vazia; cruzando a meia-noite, o dia marcado vale de início até 24h e de 0h até
+ * o fim. JSON ilegível → não silencia (melhor falar de mais do que emudecer).
+ */
+private fun isInAnyQuietPeriod(json: String): Boolean {
+  return try {
+    val cal = Calendar.getInstance()
+    val dow = cal.get(Calendar.DAY_OF_WEEK) - 1 // Calendar: domingo=1 → 0
+    val nowMin = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+    val arr = JSONArray(json)
+    var quiet = false
+    for (i in 0 until arr.length()) {
+      val o = arr.optJSONObject(i) ?: continue
+      if ((o.optInt("days", 0) shr dow) and 1 == 0) continue
+      val start = o.optInt("start", 0)
+      val end = o.optInt("end", 0)
+      if (start == end) continue
+      val active =
+        if (start < end) nowMin >= start && nowMin < end
+        else nowMin >= start || nowMin < end
+      if (active) {
+        quiet = true
+        break
+      }
+    }
+    quiet
   } catch (e: Exception) {
     false
   }

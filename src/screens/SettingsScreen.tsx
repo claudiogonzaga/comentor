@@ -22,10 +22,20 @@ import { deleteAllDownloadedModels } from '../services/modelDownload';
 import { releaseModel } from '../services/localModel';
 import { resetAllUserData } from '../services/database';
 import { deleteAllAudioDeckFiles } from '../services/audioDecks';
+import { deleteClaudeKey } from '../services/claude';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
-import { confirmAndRestoreBackup, exportBackup } from '../services/backup';
-import { hasUsageAccess, openAppDetails, openUsageAccessSettings } from '../services/spokenNudges';
+import { confirmAndRestoreBackup, deleteLocalDataCopies, exportBackup } from '../services/backup';
+import {
+  cancelAllSpoken,
+  hasUsageAccess,
+  openAppDetails,
+  openUsageAccessSettings,
+} from '../services/spokenNudges';
+import { cancelAllReminders } from '../services/notifications';
+import { scheduleAllNudges } from '../services/nudges';
+import { scheduleAllMedications } from '../services/medications';
+import { scheduleSedentaryNudges } from '../services/sedentary';
 import type { Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
@@ -120,8 +130,20 @@ export function SettingsScreen() {
               await releaseModel();
               await deleteAllDownloadedModels();
               await deleteApiKey();
+              await deleteClaudeKey().catch(() => {});
               await resetAllUserData();
               deleteAllAudioDeckFiles();
+              await deleteLocalDataCopies();
+              // O que já estava agendado no sistema (âncoras, correntes de
+              // insistência) e os alarmes FALADOS nativos — persistidos e
+              // rearmados no boot — continuariam disparando com nomes de
+              // remédios e hábitos apagados. Cancela tudo e reagenda a partir
+              // do banco limpo, como o init() faz num cold start.
+              await cancelAllReminders().catch(() => {});
+              await cancelAllSpoken();
+              await scheduleAllNudges().catch(() => {});
+              await scheduleAllMedications().catch(() => {});
+              await scheduleSedentaryNudges().catch(() => {});
               void scheduleInspirationNotifications().catch(() => {});
               await refreshConfig();
               Alert.alert(
@@ -194,7 +216,7 @@ export function SettingsScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.linkTitle}>Configurar Sons e Notificações</Text>
               <Text style={styles.linkSub}>
-                Canto da coruja, voz do Askeo, avisos falados, lembretes do
+                Canto da coruja, voz da Comentora, avisos falados, lembretes do
                 dia, modo inspiração, Não Perturbe e volume.
               </Text>
             </View>
@@ -208,10 +230,10 @@ export function SettingsScreen() {
               <GreekIcon name="brain" size={24} color={colors.accent.gold} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.linkTitle}>Cérebro e Voz do Askeo</Text>
+              <Text style={styles.linkTitle}>Cérebro e Voz da Comentora</Text>
               <Text style={styles.linkSub}>
-                A voz com que ele fala, a inteligência (API ou no celular) e o
-                prompt com a personalidade dele.
+                A voz com que ela fala, a inteligência (API ou no celular) e o
+                prompt com a personalidade dela.
               </Text>
             </View>
             <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
@@ -219,7 +241,7 @@ export function SettingsScreen() {
         </Pressable>
 
         <Card style={styles.card}>
-          <Text style={styles.section}>Tom do Askeo</Text>
+          <Text style={styles.section}>Tom da Comentora</Text>
           <View style={styles.row}>
             {TONES.map((t) => (
               <Pressable
@@ -247,7 +269,7 @@ export function SettingsScreen() {
         <Card style={styles.card}>
           <Text style={styles.section}>Uso do celular</Text>
           <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.sm }]}>
-            Com o &quot;Acesso ao uso&quot;, o Askeo poderá perceber sozinho coisas
+            Com o &quot;Acesso ao uso&quot;, a Comentora poderá perceber sozinha coisas
             como tela acesa depois da hora de dormir, redes sociais na cama ou uma
             meditação feita em outro app — sem você precisar contar. Os dados ficam
             só no aparelho. Nesta versão, só a permissão; a leitura vem na próxima.

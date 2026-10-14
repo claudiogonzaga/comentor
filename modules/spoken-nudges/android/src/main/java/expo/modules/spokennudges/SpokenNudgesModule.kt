@@ -93,6 +93,13 @@ class SpokenNudgesModule : Module() {
       SpokenStore.setQuiet(context, enabled, startMin, endMin, daysMask)
     }
 
+    // Lista COMPLETA dos períodos sem som (JSON [{start,end,days}], minutos do dia).
+    // Prevalece sobre a janela única acima: o app tem vários períodos (trabalho,
+    // sono derivado do horário de dormir) e o serviço precisa respeitar todos.
+    Function("setQuietPeriods") { json: String ->
+      SpokenStore.setQuietPeriods(context, json)
+    }
+
     // Volume da voz dos nudges (0–1), barra da Home. O serviço aplica no WAV.
     Function("setNudgeVolume") { volume: Double ->
       SpokenStore.setNudgeVolume(context, volume.toFloat())

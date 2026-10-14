@@ -60,6 +60,10 @@ let genAbort: AbortController | null = null;
 // Player único: quando OUTRO player (ex.: Minha sequência) assume, este para —
 // só o áudio/fala; a GERAÇÃO em segundo plano continua intacta.
 registerPlayer('readaloud', () => {
+  // Invalida o dono da geração em andamento: ao terminar, ela NÃO pode chamar
+  // attachAndPlay e roubar o player da Sequência/baralho que a pessoa escolheu.
+  // A geração segue (não aborta): o áudio fica no cache e toca quando pedido.
+  token++;
   try {
     void stopSpeaking();
   } catch {
@@ -158,6 +162,9 @@ function formatErr(e: unknown): string {
   if (low.includes('429') || low.includes('quota') || low.includes('rate')) {
     return 'limite POR MINUTO da API atingido — aguarde um pouquinho e tente de novo.';
   }
+  // Falta a chave do GEMINI (o chat pode estar no Claude, com outra chave):
+  // diz qual chave falta em vez do genérico "problema com a chave".
+  if (raw.startsWith('Sem chave do Gemini')) return raw;
   if (low.includes('chave') || low.includes('api key') || low.includes('api_key')) {
     return 'problema com a chave da API.';
   }

@@ -111,18 +111,26 @@ export function BreathingScreen() {
     sessionRef.current = { startedAt, plannedMin: Math.max(1, minutes) };
     setRemainingMs(totalMs);
     clearTick();
+    // Sessão sem trilha (nada tocou — ver o .then abaixo): sem o stopAfterMs do
+    // player, quem encerra é o próprio cronômetro.
+    let silent = false;
     // O intervalo abaixo é SÓ o cronômetro visual (congela com a tela apagada
     // e tudo bem — ninguém está olhando). Quem encerra o exercício de verdade
     // é o stopAfterMs do player, dirigido por eventos nativos do áudio, que
-    // continuam chegando no escuro.
+    // continuam chegando no escuro. Exceção: a sessão silenciosa, que termina
+    // aqui quando o tempo acaba (no escuro, só ao acender a tela — melhor que
+    // nunca terminar).
     tickRef.current = setInterval(() => {
       if (stoppedRef.current) {
         clearTick();
         return;
       }
-      setRemainingMs(Math.max(0, totalMs - (Date.now() - startedAt)));
+      const left = Math.max(0, totalMs - (Date.now() - startedAt));
+      setRemainingMs(left);
+      if (silent && left === 0) void finish();
     }, 500);
     // Trilha de fundo escolhida nas configurações (em loop durante o exercício).
+    const session = sessionRef.current;
     void playBreathingSound({
       id: config?.breathingSoundId ?? 'cello',
       customUri: resolveCustomUri(),
@@ -136,6 +144,13 @@ export function BreathingScreen() {
         setRunning(false);
         clearTick();
       },
+    }).then((ok) => {
+      // Nada tocou (ex.: som próprio que não carregou): quem encerraria a sessão
+      // é o stopAfterMs do player, que não existe. NÃO paramos a sessão — antes
+      // isso tornava o exercício impossível (parava ao começar, a cada nova
+      // tentativa); ela segue em silêncio e o cronômetro a finaliza. Só vale se
+      // esta ainda for a sessão em curso (parada/troca também devolve false).
+      if (!ok && !stoppedRef.current && sessionRef.current === session) silent = true;
     });
   };
 

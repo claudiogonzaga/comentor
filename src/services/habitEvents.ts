@@ -34,6 +34,26 @@ export interface ConfirmMeta {
    * calculada a partir daqui, não do momento em que o app percebeu.
    */
   occurredAt?: number;
+  /**
+   * Dia (yyyy-MM-dd) do LEMBRETE respondido, quando a resposta vem de uma
+   * notificação: um hábito das 23:30 respondido à 00:10 pertence a ontem.
+   * Passe sempre por `logicalDay` antes de usar.
+   */
+  day?: string | null;
+}
+
+/**
+ * Dia a que a resposta pertence. Só aceita "ontem" como alternativa a hoje —
+ * é o caso da notificação da noite respondida depois da meia-noite (ou vista
+ * na bandeja de manhã). Qualquer outra coisa vale como hoje.
+ */
+export function logicalDay(day?: string | null): string {
+  const now = new Date();
+  const today = format(now, 'yyyy-MM-dd');
+  if (!day || day === today) return today;
+  const y = new Date(now);
+  y.setDate(y.getDate() - 1);
+  return day === format(y, 'yyyy-MM-dd') ? day : today;
 }
 
 function minutesSince(hhmm: string, occurredAt: number, via: ConfirmVia | undefined): number | null {
@@ -65,7 +85,7 @@ export async function recordHabitEvent(
   try {
     await addHabitEvent({
       key,
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: logicalDay(meta.day),
       status,
       via: meta.via ?? null,
       k: meta.k ?? null,

@@ -64,6 +64,13 @@ export interface LineContext {
 const inFlight = new Set<string>();
 
 const GENERATION_TIMEOUT_MS = 9000;
+/**
+ * Teto da geração pela API. Bem maior que o do modelo local: a geração é
+ * adiada (deferGeneration) e não segura o agendamento, e o Claude raciocina
+ * antes de responder — com 9 s a resposta chegava depois do teto, era cobrada
+ * e descartada, e o cache nunca enchia (nova chamada a cada reagendamento).
+ */
+const REMOTE_GENERATION_TIMEOUT_MS = 40_000;
 
 function todayISO(): string {
   return format(new Date(), 'yyyy-MM-dd');
@@ -107,7 +114,7 @@ function rankTechniques(stats: TechniqueStat[]): string {
   return parts.join(' · ');
 }
 
-const SYSTEM_PROMPT = `Você é o Askeo, uma coruja-coach calorosa, direta e nada robótica. Você escreve as COBRANÇAS curtas que aparecem como notificação e são FALADAS em voz alta quando a pessoa ainda não fez um hábito que ela mesma escolheu.
+const SYSTEM_PROMPT = `Você é a Comentora, uma coruja-coach calorosa, direta e nada robótica. Você escreve as COBRANÇAS curtas que aparecem como notificação e são FALADAS em voz alta quando a pessoa ainda não fez um hábito que ela mesma escolheu.
 
 Regras invioláveis:
 - Português do Brasil, natural, como uma amiga que se importa. Sem moralismo, sem sermão.
@@ -195,9 +202,9 @@ async function generateWithModel(userPrompt: string, count: number): Promise<Nud
       json: true,
       temperature: 0.95,
       maxOutputTokens: 700,
-      timeoutMs: GENERATION_TIMEOUT_MS,
+      timeoutMs: REMOTE_GENERATION_TIMEOUT_MS,
     }),
-    GENERATION_TIMEOUT_MS + 500,
+    REMOTE_GENERATION_TIMEOUT_MS + 500,
   );
   return parseLines(raw, count);
 }

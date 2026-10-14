@@ -192,8 +192,11 @@ export function HealthCard() {
       {status === 'denied' && (
         <>
           <Text style={styles.subtitle}>
-            Conecte o Health Connect para o Askeo acompanhar seu sono e
-            seus exercícios — e te conhecer melhor nas conversas.
+            Conecte o Health Connect para a Comentora acompanhar seu sono e
+            seus exercícios — e te conhecer melhor nas conversas. Com a IA em
+            nuvem ativa, um resumo desses dados (sono, exercício, passos e, se
+            liberados, FC, peso e % de gordura) vai junto para o provedor de IA
+            escolhido.
           </Text>
           <Button
             label="Conectar Health Connect"
@@ -289,7 +292,8 @@ export function HealthCard() {
                 <ActivityIndicator size="small" color={colors.accent.gold} />
               ) : (
                 <Text style={styles.manageText}>
-                  Liberar FC e composição corporal no Health Connect →
+                  Liberar FC e composição corporal no Health Connect → (um
+                  resumo vai para o provedor de IA em nuvem, se ativo)
                 </Text>
               )}
             </Pressable>

@@ -220,7 +220,7 @@ export function InterviewScreen() {
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                O Askeo está pensando…
+                A Comentora está pensando…
               </Text>
             </View>
           ) : (
@@ -238,7 +238,7 @@ export function InterviewScreen() {
         {readyToFinish && (
           <View style={styles.finishBanner}>
             <Text style={[typography.small, { color: colors.text.secondary, textAlign: 'center' }]}>
-              Quando estiver pronta, finalize abaixo.
+              Quando quiser, finalize abaixo.
             </Text>
           </View>
         )}

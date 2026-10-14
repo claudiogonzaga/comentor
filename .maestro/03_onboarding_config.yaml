@@ -10,16 +10,16 @@ tags:
     text: "Allow|Permitir"
     optional: true
 - extendedWaitUntil:
-    visible: "Me conta mais"
+    visible: "Me conta mais.*"
     timeout: 15000
-- tapOn: "Me conta mais"
-- tapOn: "Gostei"
-- tapOn: "Vamos começar"
+- tapOn: "Me conta mais.*"
+- tapOn: "Gostei.*"
+- tapOn: "Vamos começar.*"
 - extendedWaitUntil:
-    visible: "Como devo te chamar"
+    visible: "Como te chamo.*"
     timeout: 8000
 - tapOn:
-    text: "Como devo te chamar"
+    text: "Seu nome ou apelido"
     optional: true
 - inputText: "TestUser"
 - hideKeyboard
@@ -27,11 +27,11 @@ tags:
 - tapOn: "Brutalmente honesta"
 - scrollUntilVisible:
     element:
-      text: "Continuar"
+      text: "Continuar.*"
     direction: DOWN
 - takeScreenshot: "03_config_filled"
-- tapOn: "Continuar"
+- tapOn: "Continuar.*"
 - extendedWaitUntil:
-    visible: "IA"
+    visible: "Como você quer usar.*"
     timeout: 10000
 - takeScreenshot: "04_ai_choice"

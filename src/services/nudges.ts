@@ -24,7 +24,7 @@ import {
   gatedSchedule,
 } from './notifications';
 import { getDailyInsistenceLines } from './insistenceLines';
-import { recordHabitEvent, type ConfirmMeta } from './habitEvents';
+import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
 import { refreshReviewNotification } from './review';
 import {
   evaluateFormation,
@@ -183,6 +183,13 @@ async function scheduleTimeOf(nudgeType: string): Promise<string | null> {
 }
 
 /** Constrói a data de hoje no horário HH:MM (pode estar no passado). */
+/**
+ * Resposta antecipada: por quantas semanas o dia da semana de HOJE fica com
+ * gatilhos DATE (os outros 6 dias seguem com SEMANAL). Margem para o app passar
+ * semanas sem reagendar (vivo em segundo plano, sem cold start).
+ */
+const EARLY_ANSWER_WEEKS = 8;
+
 function buildTodayAt(hour: number, minute: number): Date {
   const d = new Date();
   d.setHours(hour, minute, 0, 0);
@@ -274,6 +281,20 @@ export async function finalizeExpiredNudgeChains(): Promise<void> {
     const m = parts[1] ?? 0;
     if (!Number.isFinite(h) || !Number.isFinite(m)) continue;
     const base = buildTodayAt(Math.min(23, Math.max(0, h)), Math.min(59, Math.max(0, m)));
+    // Reaberto pelo usuário (desfez "Feito"/"Não feito" na Home) DEPOIS que a
+    // corrente de hoje já terminou: a coruja não volta a dar como perdido por
+    // conta própria — senão o ✕ não fazia nada. Reaberto ANTES (de manhã, um
+    // hábito da noite), a corrente toca de novo e, sem resposta, vence como
+    // qualquer outra — senão o "sem resposta" do dia se perdia.
+    const reopened = (await getKV(reopenedKey(n.type)).catch(() => null)) ?? '';
+    if (reopened === today) continue; // formato antigo (só a data): como antes
+    const reopenedAt = Number(reopened);
+    if (Number.isFinite(reopenedAt) && reopenedAt > base.getTime() + lastOffset * 1.2 * 60_000) continue;
+    // Só vence o lembrete que TOCOU: hábito ligado (ou com horário mudado) hoje
+    // depois do horário não tocou, e registrá-lo como "sem resposta" polui os dados.
+    if (!anchorRangToday(await getKV(`anchor_armed:${n.type}`).catch(() => null), n.scheduleTime, today)) {
+      continue;
+    }
     // Margem de 20%: o jitter pode empurrar a última batida um pouco além do
     // offset nominal, e não faz sentido dar como perdido antes de ela tocar.
     if (Date.now() <= base.getTime() + lastOffset * 1.2 * 60_000) continue;
@@ -287,7 +308,117 @@ export async function finalizeExpiredNudgeChains(): Promise<void> {
   }
 }
 
-export async function scheduleAllNudges(): Promise<string[]> {
+/**
+ * Chave em app_kv: instante (epoch ms) em que o usuário reabriu o item (desfez
+ * a marcação). Valores antigos guardavam só o dia (YYYY-MM-DD).
+ */
+function reopenedKey(nudgeType: string): string {
+  return `reopened:${nudgeType}`;
+}
+
+/** Chave em app_kv: até quando (epoch ms) vale o "Me dê mais tempo" do item. */
+function snoozeUntilKey(nudgeType: string): string {
+  return `snooze_until:${nudgeType}`;
+}
+
+function hhmmToMinutes(hhmm: string): number | null {
+  const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+}
+
+/**
+ * A âncora deste hábito tocou (ou vai tocar) HOJE, neste horário? O valor de
+ * `anchor_armed:<tipo>` é "HH:MM|dia|HH:MM-em-que-foi-armada" (o 3º campo é
+ * novo; valores antigos não o têm). Vale se foi armada antes de hoje, ou hoje
+ * antes do horário.
+ */
+function anchorRangToday(armed: string | null, scheduleTime: string, today: string): boolean {
+  const [armedHHMM, armedDate, armedAt] = (armed ?? '').split('|');
+  if (armedHHMM !== scheduleTime || !armedDate) return false;
+  if (armedDate < today) return true;
+  if (armedDate > today) return false;
+  const at = armedAt ? hhmmToMinutes(armedAt) : null;
+  const sched = hhmmToMinutes(scheduleTime);
+  return at !== null && sched !== null && at < sched;
+}
+
+// EXCLUSÃO: scheduleAllNudges cancela tudo e reagenda item a item, com dezenas
+// de awaits no meio. Duas execuções ao mesmo tempo (no cold start há duas: o
+// init da store e o efeito do App) se intercalavam — uma cancelava o que a
+// outra acabara de agendar e o resto sobrava em dobro (âncoras DIÁRIAS e
+// cobranças duplicadas). Agora só uma roda por vez; quem chega no meio marca
+// `nudgeRunDirty` e recebe a mesma promise, que roda mais uma passada no fim.
+let nudgeRun: Promise<string[]> | null = null;
+let nudgeRunDirty = false;
+
+export function scheduleAllNudges(): Promise<string[]> {
+  if (nudgeRun) {
+    nudgeRunDirty = true;
+    return nudgeRun;
+  }
+  const run = (async () => {
+    let ids: string[] = [];
+    do {
+      nudgeRunDirty = false;
+      ids = await scheduleAllNudgesOnce();
+    } while (nudgeRunDirty);
+    return ids;
+  })().finally(() => {
+    nudgeRun = null;
+    // Pedido que chegou entre o fim do laço e este finally (ou antes de uma
+    // passada que falhou): não pode ficar sem execução.
+    if (nudgeRunDirty) {
+      nudgeRunDirty = false;
+      void scheduleAllNudges().catch(() => {});
+    }
+  });
+  nudgeRun = run;
+  return run;
+}
+
+/**
+ * Espera o reagendamento em curso terminar. Quem vai CANCELAR ou ACRESCENTAR
+ * notificações de um item (Já fiz, Não fiz, Me dê mais tempo) precisa disto:
+ * uma passada que leu o estado antes da resposta agendaria a corrente DEPOIS
+ * do cancelamento, e a coruja seguiria cobrando o que já foi respondido.
+ */
+async function settleNudgeScheduling(): Promise<void> {
+  // Laço: ao terminar, uma passada pendente pode ter começado em seguida.
+  while (nudgeRun) await nudgeRun.catch(() => {});
+}
+
+/** Notificação única do "Me dê mais tempo" (também recriada ao reagendar). */
+async function scheduleSnoozeNotification(
+  n: Nudge,
+  fireAt: Date,
+  sound: string,
+  channelId: string,
+): Promise<string | null> {
+  return gatedSchedule({
+    content: {
+      title: `${n.emoji ?? '🦉'} ${n.title}`,
+      body: `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,
+      data: {
+        type: `nudge:${n.type}`,
+        nudgeId: n.id,
+        nudgeType: n.type,
+        verify: true,
+        followup: true,
+        day: todayISO(),
+        at: fireAt.getTime(),
+      },
+      sound,
+      categoryIdentifier: NUDGE_CATEGORY,
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: fireAt,
+      channelId,
+    },
+  });
+}
+
+async function scheduleAllNudgesOnce(): Promise<string[]> {
   // Antes de reagendar: fecha o que já venceu, para não re-armar corrente de
   // item que a coruja já desistiu de cobrar hoje.
   await finalizeExpiredNudgeChains();
@@ -444,37 +575,89 @@ export async function scheduleAllNudges(): Promise<string[]> {
       const reg = await getRegressionNote(n.type, today, n.title).catch(() => null);
       if (reg) anchorBody = reg;
     }
+    // JÁ RESPONDIDO hoje e o horário ainda não chegou (marcou "Já fiz" de manhã
+    // um hábito das 18h): a âncora de HOJE não pode tocar — pediria de novo o
+    // que já foi feito. Como um gatilho DIÁRIO não sabe pular um dia, os outros
+    // 6 dias da semana ficam com gatilho SEMANAL (recorrente — não se esgota se
+    // o app passar dias vivo em segundo plano, com o JS congelado e sem
+    // reagendar) e só o dia da semana de HOJE vira DATE nas próximas
+    // EARLY_ANSWER_WEEKS semanas. O primeiro reagendamento a partir de amanhã
+    // devolve o DIÁRIO; sem ele, perde-se só esse dia da semana, após N semanas.
+    const anchorToday = buildTodayAt(safeHour, safeMinute);
+    const answeredEarly =
+      isVerify &&
+      anchorToday.getTime() > Date.now() &&
+      (doneTypes.includes(n.type) || doneTypes.includes(`${n.type}:skip`));
     try {
-      const id = await gatedSchedule({
-        content: {
-          title,
-          body: anchorBody,
-          data: { ...baseData, verify: isVerify },
-          sound,
-          ...(isVerify ? { categoryIdentifier: NUDGE_CATEGORY } : {}),
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DAILY,
-          hour: safeHour,
-          minute: safeMinute,
-          channelId,
-        },
-      });
-      if (id) ids.push(id);
-      // A âncora é DIÁRIA: toca todo dia no horário, feito ou não. Registra a de
-      // hoje se ela ainda vai tocar, ou se já tocou — o que só é certo quando
+      const anchorContent = {
+        title,
+        body: anchorBody,
+        data: { ...baseData, verify: isVerify },
+        sound,
+        ...(isVerify ? { categoryIdentifier: NUDGE_CATEGORY } : {}),
+      };
+      let id: string | null = null;
+      if (answeredEarly) {
+        const todayDow = anchorToday.getDay();
+        for (let dow = 0; dow < 7; dow++) {
+          if (dow === todayDow) continue;
+          const weekId = await gatedSchedule({
+            content: anchorContent,
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+              weekday: dow + 1, // expo: 1=domingo … 7=sábado
+              hour: safeHour,
+              minute: safeMinute,
+              channelId,
+            },
+          });
+          if (weekId) {
+            ids.push(weekId);
+            id = id ?? weekId;
+          }
+        }
+        for (let w = 1; w <= EARLY_ANSWER_WEEKS; w++) {
+          const at = new Date(anchorToday);
+          at.setDate(at.getDate() + 7 * w);
+          const dateId = await gatedSchedule({
+            content: anchorContent,
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId },
+          });
+          if (dateId) {
+            ids.push(dateId);
+            id = id ?? dateId;
+          }
+        }
+      } else {
+        id = await gatedSchedule({
+          content: anchorContent,
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
+            hour: safeHour,
+            minute: safeMinute,
+            channelId,
+          },
+        });
+        if (id) ids.push(id);
+      }
+      // A âncora é DIÁRIA: toca todo dia no horário (menos no dia em que já foi
+      // respondida antes da hora). Registra a de hoje se ela ainda vai tocar,
+      // ou se já tocou — o que só é certo quando
       // o gatilho, com este horário, já estava armado antes de hoje (hábito
       // criado ou com horário mudado depois do horário só toca amanhã).
       if (isVerify) {
-        const anchorAt = buildTodayAt(safeHour, safeMinute);
+        const anchorAt = anchorToday;
         const armedKey = `anchor_armed:${n.type}`;
         const [armedHHMM, armedDate] = ((await getKV(armedKey).catch(() => null)) ?? '').split('|');
         const armedBefore = armedHHMM === n.scheduleTime && !!armedDate && armedDate < today;
-        if (anchorAt.getTime() > Date.now() || armedBefore) {
+        if (!answeredEarly && (anchorAt.getTime() > Date.now() || armedBefore)) {
           logDecision({ date: today, key: n.type, kind: 'anchor', k: 0, action: id ? 'send' : 'blocked', at: anchorAt });
         }
         if (id && armedHHMM !== n.scheduleTime) {
-          void setKV(armedKey, `${n.scheduleTime}|${today}`).catch(() => {});
+          // 3º campo: a hora em que foi armada — é o que diz se ainda tocou hoje.
+          const nowD = new Date();
+          const armedAt = `${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')}`;
+          void setKV(armedKey, `${n.scheduleTime}|${today}|${armedAt}`).catch(() => {});
         }
       }
     } catch (err) {
@@ -492,6 +675,18 @@ export async function scheduleAllNudges(): Promise<string[]> {
       !doneTypes.includes(`${n.type}:missed`)
     ) {
       const base = buildTodayAt(safeHour, safeMinute);
+      // "Me dê mais tempo" ainda valendo: recria o aviso do adiamento (o
+      // cancelAllNudges acima o apagou) e não cobra antes dele.
+      const snoozeUntil = Number(await getKV(snoozeUntilKey(n.type)).catch(() => null)) || 0;
+      const snoozed = snoozeUntil > Date.now();
+      if (snoozed) {
+        try {
+          const id = await scheduleSnoozeNotification(n, new Date(snoozeUntil), sound, channelId);
+          if (id) ids.push(id);
+        } catch (err) {
+          console.warn(`failed to re-schedule snooze ${n.type}:`, err);
+        }
+      }
       const offsets = jitteredOffsetsMin(intervalMin, maxInsistences, `${today}|${n.type}`);
       if (offsets.length === 0) continue;
       // A última batida não convence: só pede o registro (Fiz / Não fiz / Por quê).
@@ -518,6 +713,7 @@ export async function scheduleAllNudges(): Promise<string[]> {
         }
         const fireAt = new Date(base.getTime() + off * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
+        if (snoozed && fireAt.getTime() <= snoozeUntil) continue;
         const line = lines[k - 1] ?? lines[lines.length - 1];
         if (!line) continue;
         const isLast = k === lastK && lastK > 1;
@@ -530,7 +726,9 @@ export async function scheduleAllNudges(): Promise<string[]> {
               body: isLast
                 ? `Não precisa fazer agora. Só me diz: “${n.title}” — fez ou não fez?`
                 : withActionLine(line.text),
-              data: { ...baseData, verify: true, followup: true, technique, k },
+              // `day`/`at`: a que dia a cobrança pertence e quando toca — para a
+              // resposta depois da meia-noite e para o "Me dê mais tempo".
+              data: { ...baseData, verify: true, followup: true, technique, k, day: today, at: fireAt.getTime() },
               sound,
               categoryIdentifier: isLast ? NUDGE_CLOSE_CATEGORY : NUDGE_CATEGORY,
             },
@@ -565,26 +763,22 @@ export async function scheduleAllNudges(): Promise<string[]> {
 }
 
 /**
- * Marca um comportamento como feito hoje, encerra a corrente de insistências
- * de hoje e dispensa as notificações já visíveis daquele nudge. A âncora
- * diária permanece para o dia seguinte. `meta` diz por onde veio a resposta.
+ * Encerra o que estava agendado/visível de um nudge depois de uma resposta:
+ * cancela as insistências (follow-ups) do dia respondido e dispensa as
+ * notificações dele na bandeja. Se a resposta veio ANTES do horário de hoje,
+ * reagenda para a âncora de hoje não tocar (ver scheduleAllNudgesOnce).
  */
-export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
-  const today = todayISO();
-  try {
-    await markNudgeDone(nudgeType, today);
-  } catch (err) {
-    console.warn(`failed to mark nudge done ${nudgeType}:`, err);
-  }
-  void recordHabitEvent(nudgeType, 'done', meta, await scheduleTimeOf(nudgeType));
-  void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
-  void refreshReviewNotification();
+async function closeNudgeChain(nudgeType: string, day: string, scheduledHHMM: string | null): Promise<void> {
+  // Um reagendamento em curso leu o estado antes desta resposta: espera ele
+  // acabar, senão a corrente seria agendada depois do cancelamento abaixo.
+  await settleNudgeScheduling();
 
-  // Cancela as insistências futuras (follow-ups) deste nudge.
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
-    const data = s.content.data as { nudgeType?: string; followup?: boolean };
-    if (data?.nudgeType === nudgeType && data?.followup) {
+    const data = s.content.data as { nudgeType?: string; followup?: boolean; day?: string };
+    // Resposta ao lembrete de ONTEM (depois da meia-noite) não derruba a
+    // corrente de hoje, se ela já tiver sido armada.
+    if (data?.nudgeType === nudgeType && data?.followup && (!data.day || data.day === day)) {
       await Notifications.cancelScheduledNotificationAsync(s.identifier);
     }
   }
@@ -601,6 +795,32 @@ export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): P
   } catch {
     /* dismissal is best-effort */
   }
+
+  const mins = scheduledHHMM ? hhmmToMinutes(scheduledHHMM) : null;
+  if (day === todayISO() && mins !== null) {
+    const at = buildTodayAt(Math.floor(mins / 60), mins % 60);
+    if (at.getTime() > Date.now()) await scheduleAllNudges().catch(() => {});
+  }
+}
+
+/**
+ * Marca um comportamento como feito hoje, encerra a corrente de insistências
+ * de hoje e dispensa as notificações já visíveis daquele nudge. A âncora
+ * diária permanece para o dia seguinte. `meta` diz por onde veio a resposta
+ * (e, em `meta.day`, a que dia pertence o lembrete respondido).
+ */
+export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
+  const today = logicalDay(meta.day);
+  try {
+    await markNudgeDone(nudgeType, today);
+  } catch (err) {
+    console.warn(`failed to mark nudge done ${nudgeType}:`, err);
+  }
+  const scheduledHHMM = await scheduleTimeOf(nudgeType);
+  void recordHabitEvent(nudgeType, 'done', meta, scheduledHHMM);
+  void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
+  void refreshReviewNotification();
+  await closeNudgeChain(nudgeType, today, scheduledHHMM);
 }
 
 /**
@@ -608,33 +828,17 @@ export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): P
  * (chave `:skip`, separada para não inflar estatísticas). Volta a lembrar amanhã.
  */
 export async function skipNudgeToday(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
-  const today = todayISO();
+  const today = logicalDay(meta.day);
   try {
     await markNudgeDone(`${nudgeType}:skip`, today);
   } catch (err) {
     console.warn(`failed to mark nudge skipped ${nudgeType}:`, err);
   }
-  void recordHabitEvent(nudgeType, 'not_done', meta, await scheduleTimeOf(nudgeType));
+  const scheduledHHMM = await scheduleTimeOf(nudgeType);
+  void recordHabitEvent(nudgeType, 'not_done', meta, scheduledHHMM);
   void cancelFutureDecisionPoints(today, nudgeType, new Date().toISOString()).catch(() => {});
   void refreshReviewNotification();
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  for (const s of scheduled) {
-    const data = s.content.data as { nudgeType?: string; followup?: boolean };
-    if (data?.nudgeType === nudgeType && data?.followup) {
-      await Notifications.cancelScheduledNotificationAsync(s.identifier);
-    }
-  }
-  try {
-    const presented = await Notifications.getPresentedNotificationsAsync();
-    for (const p of presented) {
-      const data = p.request.content.data as { nudgeType?: string };
-      if (data?.nudgeType === nudgeType) {
-        await Notifications.dismissNotificationAsync(p.request.identifier);
-      }
-    }
-  } catch {
-    /* dismissal is best-effort */
-  }
+  await closeNudgeChain(nudgeType, today, scheduledHHMM);
 }
 
 /**
@@ -647,6 +851,9 @@ export async function unconfirmNudge(nudgeType: string): Promise<void> {
   const today = todayISO();
   try {
     await markNudgeUndone(nudgeType, today);
+    // Também o "Não feito" automático, e avisa o finalize para não re-marcar.
+    await markNudgeUndone(`${nudgeType}:missed`, today);
+    await setKV(reopenedKey(nudgeType), String(Date.now()));
   } catch (err) {
     console.warn(`failed to mark nudge undone ${nudgeType}:`, err);
   }
@@ -663,6 +870,11 @@ export async function resetNudgeToday(nudgeType: string): Promise<void> {
   try {
     await markNudgeUndone(nudgeType, today);
     await markNudgeUndone(`${nudgeType}:skip`, today);
+    // O "Não feito" automático (:missed) também sai — e fica anotado que o item
+    // foi REABERTO hoje, para o finalizeExpiredNudgeChains não re-marcá-lo na
+    // passada seguinte (era o que fazia o ✕ da Home não mudar nada).
+    await markNudgeUndone(`${nudgeType}:missed`, today);
+    await setKV(reopenedKey(nudgeType), String(Date.now()));
   } catch (err) {
     console.warn(`failed to reset nudge ${nudgeType}:`, err);
   }
@@ -673,9 +885,11 @@ export async function resetNudgeToday(nudgeType: string): Promise<void> {
 }
 
 /**
- * "Lembrar depois": agenda uma única insistência deste nudge daqui a
- * `minutes` minutos (não marca como feito). A âncora diária e a corrente
- * normal seguem intactas.
+ * "Me dê mais tempo": PAUSA a corrente por `minutes` minutos e agenda um único
+ * aviso para o fim do prazo (não marca como feito). As insistências que
+ * tocariam antes disso são canceladas — o botão promete sossego, não mais um
+ * aviso por cima dos outros — e a notificação visível sai da bandeja. As que
+ * vêm depois, e a âncora diária, seguem intactas.
  */
 export async function snoozeNudge(nudgeType: string, minutes = 20): Promise<void> {
   const channelId = await ensureChannel();
@@ -694,27 +908,34 @@ export async function snoozeNudge(nudgeType: string, minutes = 20): Promise<void
   if (!n) return;
 
   const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
+  // Guarda o prazo: qualquer reagendamento (abrir o app, salvar algo) cancela
+  // todos os nudges e precisa saber recriar este aviso e pular o que vem antes.
+  await setKV(snoozeUntilKey(nudgeType), String(fireAt.getTime())).catch(() => {});
+  // Reagendamento em curso: espera, para ele não apagar o aviso recém-criado.
+  await settleNudgeScheduling();
+
   try {
-    await gatedSchedule({
-      content: {
-        title: `${n.emoji ?? '🦉'} ${n.title}`,
-        body: `${n.body}\n\nAinda pendente — toque em "Já fiz ✅" quando terminar.`,
-        data: {
-          type: `nudge:${n.type}`,
-          nudgeId: n.id,
-          nudgeType: n.type,
-          verify: true,
-          followup: true,
-        },
-        sound,
-        categoryIdentifier: NUDGE_CATEGORY,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: fireAt,
-        channelId,
-      },
-    });
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const s of scheduled) {
+      const data = s.content.data as { nudgeType?: string; followup?: boolean; at?: number };
+      if (data?.nudgeType !== nudgeType || !data?.followup) continue;
+      // Sem `at` (agendada por versão anterior): na dúvida, silencia.
+      if (typeof data.at === 'number' && data.at > fireAt.getTime()) continue;
+      await Notifications.cancelScheduledNotificationAsync(s.identifier);
+    }
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const p of presented) {
+      const data = p.request.content.data as { nudgeType?: string };
+      if (data?.nudgeType === nudgeType) {
+        await Notifications.dismissNotificationAsync(p.request.identifier);
+      }
+    }
+  } catch {
+    /* best-effort: o aviso do adiamento ainda é agendado abaixo */
+  }
+
+  try {
+    await scheduleSnoozeNotification(n, fireAt, sound, channelId);
   } catch (err) {
     console.warn(`failed to snooze nudge ${nudgeType}:`, err);
   }

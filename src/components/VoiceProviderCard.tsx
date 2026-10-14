@@ -71,7 +71,7 @@ export function VoiceProviderCard({
 
       {provider === 'gemini' && !hasApiKey ? (
         <Text style={styles.warn}>
-          Voz Gemini precisa de chave da API configurada (mesma chave do chat).
+          A voz Gemini precisa de uma chave do Google Gemini (separada da chave do Claude).
         </Text>
       ) : null}
 

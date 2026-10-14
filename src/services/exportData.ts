@@ -119,6 +119,16 @@ function hhmmOf(isoDateTime: string | null): string | null {
   return Number.isNaN(d.getTime()) ? null : format(d, 'HH:mm');
 }
 
+/**
+ * created_at gravado por datetime('now') do SQLite está em UTC ('YYYY-MM-DD
+ * HH:MM:SS', sem fuso). Converte para a hora LOCAL ('yyyy-MM-dd HH:mm'): sem
+ * isso, no Brasil, tudo depois das 21h caía no dia seguinte e com +3h.
+ */
+function utcToLocal(sqliteUtc: string): string {
+  const d = new Date(`${sqliteUtc.replace(' ', 'T')}Z`);
+  return Number.isNaN(d.getTime()) ? sqliteUtc.slice(0, 16) : format(d, 'yyyy-MM-dd HH:mm');
+}
+
 function avg(xs: number[]): number | null {
   return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
 }
@@ -213,7 +223,7 @@ async function collect(opts: ExportOptions) {
   }
   const feedbackByDate = new Map<string, string[]>();
   for (const f of feedback) {
-    const d = f.createdAt.slice(0, 10);
+    const d = utcToLocal(f.createdAt).slice(0, 10);
     const text = [f.reason, f.customText].filter(Boolean).join(' — ');
     if (!text) continue;
     if (!feedbackByDate.has(d)) feedbackByDate.set(d, []);
@@ -333,7 +343,7 @@ function experimentComparison(e: Experiment, days: DayRecord[]): string {
   );
 }
 
-const ANALYSIS_PROMPT = `Você é um coach de saúde comportamental, rigoroso e direto, ajudando uma pessoa a melhorar sono, saúde física e mental a partir dos próprios dados. Abaixo estão os registros que o app dela (Askeo) coletou no período: noites de sono (horário-alvo, horário real, como acordou e o que escreveu), hábitos diários (feito / não fez / sem resposta, por onde respondeu, em qual cobrança, com que atraso e o motivo), dados do relógio quando disponíveis, experimentos em andamento e o que já se sabe sobre as causas.
+const ANALYSIS_PROMPT = `Você é um coach de saúde comportamental, rigoroso e direto, ajudando uma pessoa a melhorar sono, saúde física e mental a partir dos próprios dados. Abaixo estão os registros que o app dela (Áskesis) coletou no período: noites de sono (horário-alvo, horário real, como acordou e o que escreveu), hábitos diários (feito / não fez / sem resposta, por onde respondeu, em qual cobrança, com que atraso e o motivo), dados do relógio quando disponíveis, experimentos em andamento e o que já se sabe sobre as causas.
 
 Faça, nesta ordem:
 1. Padrões: o que se repete (dias da semana, sequências, gatilhos que aparecem nas falas dela).
@@ -347,7 +357,7 @@ Use as falas dela quando forem relevantes, citando literalmente. Não moralize. 
 function md(c: Collected): string {
   const { fromISO, toISO, config, days, summary: s, experiments, techniques, states, chat, interview, followups, decisions, automaticity } = c;
   const out: string[] = [];
-  out.push(`# Askeo — exportação de sinais (${days.length} dias: ${fromISO} → ${toISO})`);
+  out.push(`# Áskesis — exportação de sinais (${days.length} dias: ${fromISO} → ${toISO})`);
   out.push('');
   out.push('## Instruções para a IA (cole junto com os dados)');
   out.push('');
@@ -511,7 +521,7 @@ function md(c: Collected): string {
     out.push('');
     for (const m of chat) {
       const who = m.role === 'user' ? 'pessoa' : 'coruja';
-      out.push(`- ${m.createdAt.slice(0, 16)} · ${who}: ${m.content.replace(/\s+/g, ' ').trim()}`);
+      out.push(`- ${utcToLocal(m.createdAt)} · ${who}: ${m.content.replace(/\s+/g, ' ').trim()}`);
     }
     out.push('');
   }
@@ -598,9 +608,9 @@ export async function shareExport(formatKind: ExportFormat, opts: ExportOptions)
     const built = await buildExport(opts);
     const content = formatKind === 'md' ? built.markdown : formatKind === 'csv' ? built.csv : built.json;
     const mime = formatKind === 'md' ? 'text/markdown' : formatKind === 'csv' ? 'text/csv' : 'application/json';
-    const dest = `${FileSystem.cacheDirectory}askeo-sinais_${iso(new Date())}_${opts.days}d.${formatKind}`;
+    const dest = `${FileSystem.cacheDirectory}askesis-sinais_${iso(new Date())}_${opts.days}d.${formatKind}`;
     await FileSystem.writeAsStringAsync(dest, content, { encoding: FileSystem.EncodingType.UTF8 });
-    await Sharing.shareAsync(dest, { mimeType: mime, dialogTitle: 'Exportar sinais do Askeo' });
+    await Sharing.shareAsync(dest, { mimeType: mime, dialogTitle: 'Exportar sinais do Áskesis' });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };

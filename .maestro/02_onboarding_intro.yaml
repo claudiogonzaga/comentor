@@ -10,16 +10,16 @@ tags:
     text: "Allow|Permitir"
     optional: true
 - extendedWaitUntil:
-    visible: "Me conta mais"
+    visible: "Me conta mais.*"
     timeout: 15000
-- tapOn: "Me conta mais"
+- tapOn: "Me conta mais.*"
 - assertVisible: "Não sou um alarme."
-- assertVisible: "Gostei"
-- tapOn: "Gostei"
+- assertVisible: "Gostei.*"
+- tapOn: "Gostei.*"
 - assertVisible: "Uso ciência. E carinho."
-- assertVisible: "Vamos começar"
-- tapOn: "Vamos começar"
+- assertVisible: "Vamos começar.*"
+- tapOn: "Vamos começar.*"
 - extendedWaitUntil:
-    visible: "Como devo te chamar"
+    visible: "Como te chamo.*"
     timeout: 8000
 - takeScreenshot: "02_config_form"

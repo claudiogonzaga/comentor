@@ -88,7 +88,7 @@ export function MicButton({ state, onPressIn, onPressOut, hint }: Props) {
           ? 'Falando... solte para enviar'
           : state === 'processing'
             ? 'Processando...'
-            : hint ?? 'Segure para falar com o Askeo'}
+            : hint ?? 'Segure para falar com a Comentora'}
       </Text>
     </View>
   );

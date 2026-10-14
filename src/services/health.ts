@@ -470,10 +470,43 @@ export async function getHealthSnapshot(): Promise<HealthSnapshot | null> {
     const dayAgo = now.getTime() - 24 * 3600_000;
     let sleepMin = 0;
     let sleepCount = 0;
-    for (const r of sleep.records) {
-      if (new Date(r.endTime).getTime() < dayAgo) continue;
-      sleepMin += durationMinutes(r.startTime, r.endTime);
-      sleepCount++;
+    // Não dá para simplesmente SOMAR tudo que terminou nas últimas 24h: (a) se o
+    // app abre às 07:00 e ontem a pessoa acordou às 07:40, a noite de ontem
+    // também entra e o card dizia ~15h; (b) a mesma noite chega por Huawei
+    // Health e por Health Sync e somava em dobro. Então: deduplica (sobreposição
+    // > metade da menor = mesma noite, fica a mais longa), escolhe a noite
+    // PRINCIPAL (a mais longa entre as que terminaram hoje; se nenhuma terminou
+    // hoje, a mais longa das últimas 24h) e soma a ela só os pedaços da MESMA
+    // noite (terminaram até 3h antes de ela começar) ou cochilos depois dela.
+    const recent = sleep.records
+      .filter((r) => new Date(r.endTime).getTime() >= dayAgo)
+      .map((r) => ({
+        s0: new Date(r.startTime).getTime(),
+        s1: new Date(r.endTime).getTime(),
+        min: durationMinutes(r.startTime, r.endTime),
+      }))
+      .filter((x) => x.min > 0)
+      .sort((a, b) => b.min - a.min); // a mais longa vence a deduplicação
+    const keptSleep: typeof recent = [];
+    for (const x of recent) {
+      const dup = keptSleep.some((k) => {
+        const overlap = Math.min(x.s1, k.s1) - Math.max(x.s0, k.s0);
+        return overlap > 0.5 * Math.min(x.s1 - x.s0, k.s1 - k.s0);
+      });
+      if (!dup) keptSleep.push(x);
+    }
+    const sleepDayStart = new Date(now);
+    sleepDayStart.setHours(0, 0, 0, 0);
+    const main =
+      keptSleep.find((x) => x.s1 >= sleepDayStart.getTime()) ?? keptSleep[0];
+    if (main) {
+      for (const x of keptSleep) {
+        if (x !== main && x.s1 < main.s0 - 3 * 3600_000) continue;
+        // Sobreposição pequena (≤ metade) com a principal: soma só o que sobra.
+        const overlap = x === main ? 0 : Math.max(0, Math.min(x.s1, main.s1) - Math.max(x.s0, main.s0));
+        sleepMin += x.min - overlap / 60000;
+        sleepCount++;
+      }
     }
     // Fallback: se nada terminou nas últimas 24h (ex.: app aberto à noite, antes
     // de dormir), pega a sessão de sono MAIS LONGA das últimas 48h — evita
@@ -771,7 +804,7 @@ export async function getHealthDiagnostics(): Promise<string> {
   };
 
   // Passos de hoje: soma crua × deduplicada. Se a crua for bem maior, há duas
-  // fontes contando os mesmos passos (e o Askeo usa a deduplicada).
+  // fontes contando os mesmos passos (e a Comentora usa a deduplicada).
   const stepsLine = async (): Promise<string> => {
     const t0 = new Date(now);
     t0.setHours(0, 0, 0, 0);
@@ -947,7 +980,7 @@ export function formatSleepDuration(minutes: number): string {
 
 /**
  * Resume o retrato de saúde numa frase curta para alimentar o contexto da
- * Askeo (coach). Retorna string vazia se não houver nada útil.
+ * Comentora (coach). Retorna string vazia se não houver nada útil.
  */
 export function formatHealthForCoach(s: HealthSnapshot): string {
   const parts: string[] = [];

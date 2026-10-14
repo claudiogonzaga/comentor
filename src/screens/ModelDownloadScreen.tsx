@@ -108,7 +108,9 @@ export function ModelDownloadScreen() {
   };
 
   const handleRetry = () => {
-    setPhase('idle');
+    // Recomeça o download de verdade: o efeito de montagem (deps []) não roda
+    // de novo, e voltar só para 'idle' deixava a tela sem botões e sem download.
+    void startDownload();
   };
 
   const fraction = progress?.fraction ?? 0;
@@ -181,7 +183,7 @@ export function ModelDownloadScreen() {
           )}
           {phase === 'done' && (
             <Button
-              label={fromOnboarding ? 'Ativar Askeo' : 'Pronto'}
+              label={fromOnboarding ? 'Ativar Comentora' : 'Pronto'}
               onPress={handleFinish}
             />
           )}

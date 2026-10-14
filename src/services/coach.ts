@@ -26,6 +26,7 @@ import {
 } from './gemini';
 import { generateLocal, type LocalChatMessage } from './localModel';
 import {
+  SLEEP_DONE_KV,
   ensureChannel,
   ensureNotificationCategories,
   ensurePermissions,
@@ -90,11 +91,22 @@ function nowHHMM(): string {
   return format(new Date(), 'HH:mm');
 }
 
+/** Até quantos minutos depois do horário, já no dia seguinte, ainda conta como atraso. */
+const LATE_AFTER_MIDNIGHT_MAX_MIN = 6 * 60;
+
 function minutesPast(bedtime: string): number {
   const [h, m] = bedtime.split(':').map(Number);
   const target = new Date();
   target.setHours(h, m, 0, 0);
-  const diff = (Date.now() - target.getTime()) / 60_000;
+  let diff = (Date.now() - target.getTime()) / 60_000;
+  // Virada da meia-noite: com horário 23:00, à 00:30 o alvo "de hoje" está no
+  // futuro (−1350) e o atraso saía 0 — nível 1 justo quando a pessoa está mais
+  // atrasada. Conta o horário de ontem, mas só dentro de uma janela noturna:
+  // de manhã (ex.: 10:00 → 660) não é atraso para dormir.
+  if (diff < -720 && diff + 1440 <= LATE_AFTER_MIDNIGHT_MAX_MIN) diff += 1440;
+  // Horário depois da meia-noite (ex.: 01:00) visto na noite anterior (23:30):
+  // o alvo "de hoje" ficou para trás (+1350), mas o próximo ainda vem.
+  else if (diff > 720) diff -= 1440;
   return Math.max(0, Math.round(diff));
 }
 
@@ -130,10 +142,21 @@ interface CoachingContext {
  * Lê o retrato de saúde do Health Connect e o formata para o contexto da IA.
  * Best-effort: devolve string vazia se indisponível / sem permissão / erro.
  */
+// Cache curto: cada resposta do coach relia a semana inteira de FC (até 20
+// páginas de amostras) e atrasava a resposta. Dados de saúde mudam devagar —
+// 5 min de validade bastam.
+const HEALTH_CONTEXT_TTL_MS = 5 * 60_000;
+let healthContextCache: { at: number; value: string } | null = null;
+
 async function getHealthContext(): Promise<string> {
+  if (healthContextCache && Date.now() - healthContextCache.at < HEALTH_CONTEXT_TTL_MS) {
+    return healthContextCache.value;
+  }
   try {
     const snapshot = await getHealthSnapshot();
-    return snapshot ? formatHealthForCoach(snapshot) : '';
+    const value = snapshot ? formatHealthForCoach(snapshot) : '';
+    healthContextCache = { at: Date.now(), value };
+    return value;
   } catch {
     return '';
   }
@@ -187,8 +210,8 @@ async function microInterviewInstruction(): Promise<string | null> {
     if (Number.isFinite(lastMs) && Date.now() - lastMs < MICRO_INTERVIEW_EVERY_DAYS * 86_400_000) {
       return null;
     }
-    await setKV(MICRO_LAST_KEY, new Date().toISOString());
-    await setKV(MICRO_PENDING_KEY, '1');
+    // As marcas (última vez / pendente) só são gravadas depois que o abridor sai
+    // de fato da IA — ver markMicroInterviewAsked.
     return (
       'ACOMPANHAMENTO DA ENTREVISTA: já faz mais de duas semanas desde a última vez que você revisitou as causas. ' +
       'Em vez da pergunta aberta genérica, TERMINE com UMA pergunta de acompanhamento sobre algo ESPECÍFICO que a pessoa ' +
@@ -200,11 +223,28 @@ async function microInterviewInstruction(): Promise<string | null> {
   }
 }
 
-/** Se o abridor fez a pergunta de acompanhamento, a resposta seguinte da pessoa é guardada. */
+/**
+ * A pergunta de acompanhamento foi feita: conta a janela de 14 dias a partir de
+ * agora e deixa a resposta pendente — com a DATA de hoje, para que uma mensagem
+ * qualquer dias depois não vire "atualização da entrevista".
+ */
+async function markMicroInterviewAsked(): Promise<void> {
+  try {
+    await setKV(MICRO_LAST_KEY, new Date().toISOString());
+    await setKV(MICRO_PENDING_KEY, todayISO());
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Se o abridor de HOJE fez a pergunta de acompanhamento, a resposta seguinte da pessoa é guardada. */
 async function captureMicroInterviewAnswer(text: string): Promise<void> {
   try {
-    if ((await getKV(MICRO_PENDING_KEY)) !== '1') return;
+    const pending = await getKV(MICRO_PENDING_KEY);
+    if (!pending || pending === '0') return;
     await setKV(MICRO_PENDING_KEY, '0');
+    // Pendência de outro dia (ou a marca antiga '1', sem data) expirou: só zera.
+    if (pending !== todayISO()) return;
     const list = await readInterviewFollowups();
     list.push({ date: todayISO(), text: text.replace(/\s+/g, ' ').trim().slice(0, 300) });
     await setKV(FOLLOWUPS_KEY, JSON.stringify(list.slice(-10)));
@@ -478,9 +518,9 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   return { message: result.text, level, offline: result.offline, habitId: habit.id };
 }
 
-// Prompt do ABRIR-CHAT: o Askeo puxa conversa comentando o progresso e
+// Prompt do ABRIR-CHAT: a Comentora puxa conversa comentando o progresso e
 // apontando, com gentileza, onde dá pra melhorar — terminando com uma pergunta.
-const CHAT_OPENER_PROMPT = `Você é o Askeo, uma coruja-coach calorosa, humana e direta. A pessoa ACABOU de abrir o chat com você. NÃO espere ela falar — INICIE a conversa.
+const CHAT_OPENER_PROMPT = `Você é a Comentora, uma coruja-coach calorosa, humana e direta. A pessoa ACABOU de abrir o chat com você. NÃO espere ela falar — INICIE a conversa.
 
 Em 2 a 4 frases curtas: comente o PROGRESSO recente dela usando os dados abaixo (sono, exercício, passos, peso, hábitos), elogie sinceramente o que foi bem e aponte com gentileza UM ponto onde ela pode melhorar. Termine com UMA pergunta aberta e específica para engajar a conversa.
 
@@ -489,7 +529,7 @@ Histórico recente: {recentLogsSummary}
 Tom: {tone}. Seja breve, natural e acolhedora. NÃO cite números crus nem soe robótica. NUNCA use saudações genéricas tipo "Olá, como posso ajudar?".`;
 
 /**
- * Mensagem de ABERTURA do chat (quando o usuário toca "Chat com Askeo"):
+ * Mensagem de ABERTURA do chat (quando o usuário toca "Chat com Comentora"):
  * a coruja conduz, comentando o progresso e onde melhorar. Persiste a fala e a
  * devolve. Independente do fluxo de "convencer a dormir".
  */
@@ -522,6 +562,8 @@ export async function getChatOpenerForNow(): Promise<CoachInvocationResult> {
     },
     history,
   );
+  // Só conta como perguntada se a IA respondeu; a frase de reserva não pergunta nada.
+  if (micro && !result.offline) await markMicroInterviewAsked();
 
   await addChatMessage(habit.id, 'corujinha', result.text, level);
   return { message: result.text, level, offline: result.offline, habitId: habit.id };
@@ -591,7 +633,7 @@ function pickConvinceFocus(bedtime: string): ConvinceFocus {
 
 /**
  * Abre uma conversa de persuasão: escolhe o comportamento de sono mais
- * relevante para o momento e gera a primeira fala do Askeo convencendo
+ * relevante para o momento e gera a primeira fala da Comentora convencendo
  * a pessoa a adotá-lo agora. A instrução enviada à IA é efêmera — só a
  * resposta dela é salva no histórico.
  */
@@ -721,6 +763,9 @@ export async function markSleepDone(habitId: number) {
   const log = await getOrCreateLog(habitId, today, config.bedtime);
   const now = nowHHMM();
   await markLogCompleted(log.id, now);
+  // Instante do "Vou dormir": scheduleNightReminders usa para não re-armar a
+  // corrente desta noite quando algo reagenda logo depois (abrir o app etc.).
+  await setKV(SLEEP_DONE_KV, String(Date.now())).catch(() => {});
   const updated = await recordCompletion(habitId, today);
   // Manhã seguinte: pergunta como acordou — já sabendo o quanto passou do
   // horário, então a pergunta sai específica ("deitou 1h40 atrasado…").
@@ -730,7 +775,29 @@ export async function markSleepDone(habitId: number) {
 }
 
 /**
- * Re-registers every Askeo notification (night escalation chain + daily
+ * Re-arma só a corrente noturna do sono ("Vou dormir" / escalada). Os gatilhos
+ * são DATE e cobrem poucas noites, então isto precisa rodar em todo cold start
+ * e depois de cada "Vou dormir" — senão, passada a primeira noite, a coruja
+ * nunca mais lembrava de dormir. Não mexe em nudges, remédios nem inspiração.
+ */
+export async function rearmSleepReminders(): Promise<void> {
+  const config = await getUserConfig();
+  if (!config.onboardingDone) return; // antes do onboarding não há horário escolhido
+  if (!(await ensurePermissions())) return;
+  await ensureChannel(config.owlSpecies);
+  const habit = await ensureSleepHabit(config.bedtime);
+  const sleepFormed = await isSleepHabitFormed(habit.id);
+  await scheduleNightReminders({
+    bedtime: config.bedtime,
+    intervalMinutes: config.reminderIntervalMinutes,
+    // Mesma regra de rescheduleAllNotifications: sono consolidado cobra pouco.
+    maxReminders: sleepFormed.formed ? 2 : 12,
+    habitId: habit.id,
+  });
+}
+
+/**
+ * Re-registers every Comentora notification (night escalation chain + daily
  * nudges) onto the channel for the user's currently selected owl sound.
  * Call after the owl species changes so the new sound takes effect without
  * waiting for the next Settings save.

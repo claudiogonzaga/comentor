@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,7 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { GreekIcon } from '../components/GreekIcon';
 import { VoiceProviderCard } from '../components/VoiceProviderCard';
+import { AiProviderPanel } from '../components/AiProviderPanel';
 import { VoicePicker } from '../components/VoicePicker';
 import type { EnrichedVoice } from '../services/voice';
 import { colors, radius, spacing, typography } from '../theme';
@@ -44,7 +45,7 @@ const MODELS: { value: GeminiModel; label: string; sub: string }[] = [
 ];
 
 /**
- * "Cérebro e Voz do Askeo" — reúne o que define COMO o Askeo pensa e
+ * "Cérebro e Voz da Comentora" — reúne o que define COMO a Comentora pensa e
  * fala: a voz (provedor sistema/Gemini + voz do sistema), a inteligência
  * (API Gemini ou modelo local) e o prompt. Veio de Configurações.
  */
@@ -68,8 +69,13 @@ export function BrainVoiceScreen() {
   const [showPlaceholders, setShowPlaceholders] = useState(false);
   const [promptExpanded, setPromptExpanded] = useState(false);
 
+  // Hidrata o formulário UMA vez. Vários controles da tela (provedor/modelo do
+  // Claude, voz, download) salvam na hora e geram um novo `config`; re-hidratar
+  // a cada mudança apagava o prompt em edição e desfazia a troca API/No celular.
+  const hydrated = useRef(false);
   useEffect(() => {
-    if (config) {
+    if (config && !hydrated.current) {
+      hydrated.current = true;
       setModel(config.geminiModel);
       setSystemPrompt(config.systemPrompt);
       setAIBackend(config.aiBackend);
@@ -93,8 +99,10 @@ export function BrainVoiceScreen() {
   const trimmedKey = apiKeyInput.trim();
   const hasStoredKey = !!config?.hasApiKey;
   const localCurrentDownloaded = !!config?.localModelDownloaded && !!config?.localModelId;
+  const [hasClaudeKey, setHasClaudeKey] = useState(false);
+  const usingClaude = (config?.aiProvider ?? 'gemini') === 'claude';
   const canSave =
-    (aiBackend === 'remote' && (hasStoredKey || trimmedKey.length >= 20)) ||
+    (aiBackend === 'remote' && (hasStoredKey || trimmedKey.length >= 20 || (usingClaude && hasClaudeKey))) ||
     (aiBackend === 'local' && localCurrentDownloaded);
 
   const handleTestKey = async () => {
@@ -115,6 +123,9 @@ export function BrainVoiceScreen() {
   };
 
   const handleDownloadModel = async (id: LocalModelId) => {
+    // O formulário não se re-hidrata mais do config: seleciona aqui o modelo
+    // que vai ser baixado, como a re-hidratação fazia antes.
+    setLocalModelId(id);
     await setConfig({
       localModelId: id,
       localModelDownloaded: false,
@@ -235,11 +246,11 @@ export function BrainVoiceScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
-          A voz com que o Askeo fala, a inteligência que ele usa para pensar
-          e o prompt com a personalidade dele.
+          A voz com que a Comentora fala, a inteligência que ela usa para pensar
+          e o prompt com a personalidade dela.
         </Text>
 
-        {/* ——— Voz do Askeo ——— */}
+        {/* ——— Voz da Comentora ——— */}
         <VoiceProviderCard
           provider={config?.voiceProvider ?? 'system'}
           geminiVoiceName={config?.geminiVoiceName ?? 'Aoede'}
@@ -272,7 +283,7 @@ export function BrainVoiceScreen() {
         <Card style={styles.card}>
           <Text style={styles.section}>Inteligência</Text>
           <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
-            Escolha entre API do Gemini (mais rápida, precisa de chave) ou modelo rodando direto no celular (privado, sem cota).
+Escolha entre uma API — Gemini (Google) ou Claude (Anthropic), precisa de chave — ou um modelo rodando direto no celular (privado, sem cota).
           </Text>
 
           <View style={styles.backendRow}>
@@ -304,7 +315,18 @@ export function BrainVoiceScreen() {
 
           {aiBackend === 'remote' && (
             <View style={styles.subPanel}>
-              <Text style={styles.label}>Modelo Gemini</Text>
+              <AiProviderPanel
+                provider={config?.aiProvider ?? 'gemini'}
+                claudeModel={config?.claudeModel ?? ''}
+                claudeEffort={config?.claudeEffort ?? 'medium'}
+                onClaudeEffortChange={(id) => setConfig({ claudeEffort: id })}
+                onProviderChange={(p) => setConfig({ aiProvider: p })}
+                onClaudeModelChange={(id) => setConfig({ claudeModel: id })}
+                onKeyState={setHasClaudeKey}
+              />
+              <Text style={styles.label}>
+                {usingClaude ? 'Modelo Gemini (reserva do texto; a voz usa a chave abaixo)' : 'Modelo Gemini'}
+              </Text>
               {MODELS.map((m) => (
                 <Pressable
                   key={m.value}
@@ -475,7 +497,7 @@ export function BrainVoiceScreen() {
         {/* ——— Prompt ——— */}
         <Card style={styles.card}>
           <View style={styles.promptHeader}>
-            <Text style={styles.section}>Prompt do Askeo</Text>
+            <Text style={styles.section}>Prompt da Comentora</Text>
             <Pressable
               onPress={() => setPromptExpanded((v) => !v)}
               style={styles.promptToggleBtn}
@@ -487,8 +509,8 @@ export function BrainVoiceScreen() {
           </View>
           {!promptExpanded ? (
             <Text style={[typography.small, { color: colors.text.secondary }]}>
-              {systemPrompt.length} caracteres. As regras e a personalidade do
-              Askeo estão escondidas pra não tomar espaço. Toque em
+              {systemPrompt.length} caracteres. As regras e a personalidade da
+              Comentora estão escondidas pra não tomar espaço. Toque em
               &quot;Editar prompt&quot; pra ler ou alterar.
             </Text>
           ) : (
@@ -526,7 +548,7 @@ export function BrainVoiceScreen() {
                 multiline
                 textAlignVertical="top"
                 style={[styles.input, styles.promptInput]}
-                placeholder="Prompt do Askeo…"
+                placeholder="Prompt da Comentora…"
                 placeholderTextColor={colors.text.tertiary}
               />
               <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>

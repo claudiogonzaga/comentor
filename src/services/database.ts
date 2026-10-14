@@ -56,15 +56,39 @@ export async function closeDatabase(): Promise<void> {
   const pending = dbPromise;
   dbPromise = null;
   if (!pending) return;
+  let d: SQLite.SQLiteDatabase;
   try {
-    const d = await pending;
-    await d.closeAsync();
+    d = await pending;
   } catch {
-    /* já fechado ou falhou ao abrir — de qualquer forma o cache foi limpo */
+    return; /* falhou ao abrir — não há conexão a fechar; o cache já foi limpo */
   }
+  // Falha ao FECHAR não é engolida: a conexão antiga continuaria aberta (com o
+  // WAL dela) e quem troca o arquivo do banco precisa saber para desistir.
+  await d.closeAsync();
+}
+
+/**
+ * Trava de getDb() enquanto o arquivo do banco é trocado (restaurar backup).
+ * Sem ela, qualquer getDb() nessa janela — um listener de AppState ao voltar do
+ * seletor de arquivos, uma resposta de notificação — reabriria o banco antigo
+ * ou criaria um vazio por baixo da cópia, deixando um WAL de outro banco que o
+ * SQLite reaplicaria sobre o restaurado. Devolve a função que solta a trava.
+ */
+let dbHold: Promise<void> | null = null;
+export function holdDatabase(): () => void {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  dbHold = hold;
+  return () => {
+    if (dbHold === hold) dbHold = null;
+    release();
+  };
 }
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
+  while (dbHold) await dbHold;
   if (!dbPromise) {
     dbPromise = (async () => {
       const d = await SQLite.openDatabaseAsync(DB_NAME);
@@ -77,6 +101,64 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
     });
   }
   return dbPromise;
+}
+
+/**
+ * Lembretes diários padrão (pôr do sol e respiração). Fora de runMigrations
+ * para que "Apagar todos os dados" re-semeie exatamente os mesmos.
+ */
+async function seedDefaultNudges(database: SQLite.SQLiteDatabase): Promise<void> {
+  // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
+  // existing per-user customizations from being overwritten on later runs.
+  const existingConfig = await database.getFirstAsync<{
+    bedtime: string;
+    reminder_interval_minutes: number;
+    prep_reminders_enabled: number;
+  }>(
+    'SELECT bedtime, reminder_interval_minutes, prep_reminders_enabled FROM user_config WHERE id = 1',
+  );
+  const bedtimeStr = existingConfig?.bedtime ?? '23:00';
+  const intervalMin = existingConfig?.reminder_interval_minutes ?? 10;
+  const breathingEnabled = (existingConfig?.prep_reminders_enabled ?? 1) === 1 ? 1 : 0;
+
+  const [bh, bm] = bedtimeStr.split(':').map((n) => parseInt(n, 10));
+  const bedtimeMins = (bh || 23) * 60 + (bm || 0);
+  const breathingTime = (() => {
+    let mins = bedtimeMins - intervalMin;
+    if (mins < 0) mins += 24 * 60;
+    const h = Math.floor(mins / 60) % 24;
+    const m = mins % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  })();
+
+  await database.runAsync(
+    `INSERT OR IGNORE INTO nudges
+       (type, title, body, emoji, enabled, schedule_time, order_index)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      'bluelight',
+      'Pôr do sol',
+      'Sol indo embora. Hora dos óculos bloqueadores ou modo escuro nas telas — preserva a melatonina.',
+      '🕶️',
+      1,
+      '18:00',
+      1,
+    ],
+  );
+  await database.runAsync(
+    `INSERT OR IGNORE INTO nudges
+       (type, title, body, emoji, enabled, schedule_time, order_index)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      'breathing',
+      'Respiração 2-2-4',
+      'Bora desacelerar? 2 inspiradas curtas + 1 expirada longa. Toca aqui pra começar.',
+      '🌬️',
+      breathingEnabled,
+      breathingTime,
+      3,
+    ],
+  );
 }
 
 async function runMigrations(database: SQLite.SQLiteDatabase) {
@@ -411,7 +493,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
       `ALTER TABLE user_config ADD COLUMN sedentary_interval_min INTEGER NOT NULL DEFAULT 60`,
     );
   }
-  // v1.28: voz da leitura igual à do Askeo (provider + Gemini) + velocidade.
+  // v1.28: voz da leitura igual à da Comentora (provider + Gemini) + velocidade.
   if (!colNames.includes('read_aloud_provider')) {
     await database.execAsync(
       `ALTER TABLE user_config ADD COLUMN read_aloud_provider TEXT NOT NULL DEFAULT 'system'`,
@@ -770,6 +852,18 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_audio_clips_deck ON audio_clips(deck_id, ord);
   `);
+  // v1.114: provedor da inteligência por API (Gemini ou Claude) e o modelo do Claude.
+  // Uma guarda por coluna: sem transação, cada ALTER grava sozinho; se o processo
+  // morrer entre eles, a guarda única deixava claude_model/claude_effort sem criar.
+  if (!colNames.includes('ai_provider')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN ai_provider TEXT NOT NULL DEFAULT 'gemini'`);
+  }
+  if (!colNames.includes('claude_model')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN claude_model TEXT NOT NULL DEFAULT 'claude-sonnet-5-5'`);
+  }
+  if (!colNames.includes('claude_effort')) {
+    await database.execAsync(`ALTER TABLE user_config ADD COLUMN claude_effort TEXT NOT NULL DEFAULT 'medium'`);
+  }
   // v1.112: referência de cada trecho na obra (página/capítulo) — baralho de audiolivro.
   const clipCols = await database.getAllAsync<{ name: string }>("PRAGMA table_info('audio_clips')");
   if (!clipCols.some((c) => c.name === 'reference')) {
@@ -777,9 +871,9 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   }
   await seedInspirationBuiltins(database);
   await seedSleepSciencePack(database);
-  // v1.107: o app passou a se chamar Askeo — renomeia o baralho embutido que já existia.
+  // A coruja é a Comentora (o app é o Áskesis): desfaz o nome que a v1.107 deu ao baralho embutido.
   await database.runAsync(
-    `UPDATE inspiration_packs SET name = 'Frases do Askeo' WHERE builtin = 1 AND name = 'Frases da Comentora'`,
+    `UPDATE inspiration_packs SET name = 'Frases da Comentora' WHERE builtin = 1 AND name = 'Frases do Askeo'`,
   );
 
   // v1.34: cada texto salvo guarda o seu próprio áudio (não regera nem gasta
@@ -811,57 +905,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     await database.execAsync(`ALTER TABLE medications ADD COLUMN fasting_hours INTEGER`);
   }
 
-  // v1.5: seed default nudges if the table is empty. INSERT OR IGNORE keeps
-  // existing per-user customizations from being overwritten on later runs.
-  const existingConfig = await database.getFirstAsync<{
-    bedtime: string;
-    reminder_interval_minutes: number;
-    prep_reminders_enabled: number;
-  }>(
-    'SELECT bedtime, reminder_interval_minutes, prep_reminders_enabled FROM user_config WHERE id = 1',
-  );
-  const bedtimeStr = existingConfig?.bedtime ?? '23:00';
-  const intervalMin = existingConfig?.reminder_interval_minutes ?? 10;
-  const breathingEnabled = (existingConfig?.prep_reminders_enabled ?? 1) === 1 ? 1 : 0;
-
-  const [bh, bm] = bedtimeStr.split(':').map((n) => parseInt(n, 10));
-  const bedtimeMins = (bh || 23) * 60 + (bm || 0);
-  const breathingTime = (() => {
-    let mins = bedtimeMins - intervalMin;
-    if (mins < 0) mins += 24 * 60;
-    const h = Math.floor(mins / 60) % 24;
-    const m = mins % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  })();
-
-  await database.runAsync(
-    `INSERT OR IGNORE INTO nudges
-       (type, title, body, emoji, enabled, schedule_time, order_index)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      'bluelight',
-      'Pôr do sol',
-      'Sol indo embora. Hora dos óculos bloqueadores ou modo escuro nas telas — preserva a melatonina.',
-      '🕶️',
-      1,
-      '18:00',
-      1,
-    ],
-  );
-  await database.runAsync(
-    `INSERT OR IGNORE INTO nudges
-       (type, title, body, emoji, enabled, schedule_time, order_index)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      'breathing',
-      'Respiração 2-2-4',
-      'Bora desacelerar? 2 inspiradas curtas + 1 expirada longa. Toca aqui pra começar.',
-      '🌬️',
-      breathingEnabled,
-      breathingTime,
-      3,
-    ],
-  );
+  await seedDefaultNudges(database);
 
   // v1.21: o lembrete fixo de "Suplementos" foi substituído pela tela de
   // Medicamentos/Suplementos (lembretes ilimitados, definidos pelo usuário).
@@ -914,6 +958,9 @@ interface UserConfigRow {
   prep_reminders_enabled: number;
   voice_mode_enabled: number;
   ai_backend: string | null;
+  ai_provider: string | null;
+  claude_model: string | null;
+  claude_effort: string | null;
   local_model_id: string | null;
   local_model_downloaded: number;
   allow_mobile_data_download: number;
@@ -978,6 +1025,9 @@ const rowToUserConfig = (r: UserConfigRow): UserConfig => ({
   prepRemindersEnabled: r.prep_reminders_enabled === 1,
   voiceModeEnabled: r.voice_mode_enabled === 1,
   aiBackend: (r.ai_backend ?? 'remote') as AIBackend,
+  aiProvider: r.ai_provider === 'claude' ? 'claude' : 'gemini',
+  claudeModel: r.claude_model ?? 'claude-sonnet-5-5',
+  claudeEffort: r.claude_effort ?? 'medium',
   localModelId: (r.local_model_id ?? null) as LocalModelId | null,
   localModelDownloaded: r.local_model_downloaded === 1,
   allowMobileDataDownload: r.allow_mobile_data_download === 1,
@@ -1053,6 +1103,9 @@ export async function updateUserConfig(patch: Partial<UserConfig>): Promise<User
     prepRemindersEnabled: 'prep_reminders_enabled',
     voiceModeEnabled: 'voice_mode_enabled',
     aiBackend: 'ai_backend',
+    aiProvider: 'ai_provider',
+    claudeModel: 'claude_model',
+    claudeEffort: 'claude_effort',
     localModelId: 'local_model_id',
     localModelDownloaded: 'local_model_downloaded',
     allowMobileDataDownload: 'allow_mobile_data_download',
@@ -1993,7 +2046,8 @@ export async function getLogsBetween(habitId: number, fromISO: string, toISO: st
 export async function getChatSince(habitId: number, fromISO: string): Promise<ChatMessage[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<ChatRow>(
-    'SELECT * FROM chat_messages WHERE habit_id = ? AND created_at >= ? ORDER BY id ASC',
+    // created_at é UTC; o corte é meia-noite LOCAL do primeiro dia.
+    "SELECT * FROM chat_messages WHERE habit_id = ? AND datetime(created_at, 'localtime') >= ? ORDER BY id ASC",
     [habitId, `${fromISO} 00:00:00`],
   );
   return rows.map(rowToChat);
@@ -2003,7 +2057,8 @@ export async function getChatSince(habitId: number, fromISO: string): Promise<Ch
 export async function getSnoozeFeedbackSince(habitId: number, fromISO: string): Promise<SnoozeFeedback[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<SnoozeFeedbackRow>(
-    'SELECT * FROM snooze_feedback WHERE habit_id = ? AND created_at >= ? ORDER BY id ASC',
+    // created_at é UTC; o corte é meia-noite LOCAL do primeiro dia.
+    "SELECT * FROM snooze_feedback WHERE habit_id = ? AND datetime(created_at, 'localtime') >= ? ORDER BY id ASC",
     [habitId, `${fromISO} 00:00:00`],
   );
   return rows.map((r) => ({
@@ -2588,7 +2643,7 @@ export async function setKV(key: string, value: string): Promise<void> {
 
 /**
  * Semeia os DOIS packs embutidos uma única vez (marcado em app_kv). Idempotente:
- * se já semeou, sai. Cria "Frases do Askeo" (motivacionais) e "Citações e
+ * se já semeou, sai. Cria "Frases da Comentora" (motivacionais) e "Citações e
  * fatos inspiradores" (372 cards do anexo) com builtin=1, dentro de uma
  * transação para inserir centenas de linhas rápido.
  */
@@ -2707,17 +2762,32 @@ const rowToClip = (r: AudioClipRow): AudioClip => ({
 export async function listAudioDecks(): Promise<AudioDeck[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<
-    AudioDeckRow & { clip_count: number; active_count: number; likes: number; dislikes: number; plays: number }
+    AudioDeckRow & {
+      clip_count: number;
+      active_count: number;
+      likes: number;
+      dislikes: number;
+      plays: number;
+      next_ord: number | null;
+      first_ord: number | null;
+    }
   >(
+    // next_ord/first_ord: a mesma regra do agendador (só trechos sem 👎 e dentro da
+    // duração; depois do último, volta ao primeiro) — senão "Próximo" mostrava um
+    // trecho que seria pulado, ou "trecho N de N" quando a sequência já recomeçou.
     `SELECT k.*,
        (SELECT COUNT(*) FROM audio_clips c WHERE c.deck_id = k.id) AS clip_count,
        (SELECT COUNT(*) FROM audio_clips c WHERE c.deck_id = k.id AND c.rating >= 0
           AND (c.duration_ms IS NULL OR c.duration_ms <= ?)) AS active_count,
        (SELECT COALESCE(SUM(likes), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS likes,
        (SELECT COALESCE(SUM(dislikes), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS dislikes,
-       (SELECT COALESCE(SUM(plays), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS plays
+       (SELECT COALESCE(SUM(plays), 0) FROM audio_clips c WHERE c.deck_id = k.id) AS plays,
+       (SELECT MIN(c.ord) FROM audio_clips c WHERE c.deck_id = k.id AND c.rating >= 0
+          AND (c.duration_ms IS NULL OR c.duration_ms <= ?) AND c.ord > k.seq_end_ord) AS next_ord,
+       (SELECT MIN(c.ord) FROM audio_clips c WHERE c.deck_id = k.id AND c.rating >= 0
+          AND (c.duration_ms IS NULL OR c.duration_ms <= ?)) AS first_ord
      FROM audio_decks k ORDER BY k.id ASC`,
-    [AUDIO_CLIP_MAX_MS],
+    [AUDIO_CLIP_MAX_MS, AUDIO_CLIP_MAX_MS, AUDIO_CLIP_MAX_MS],
   );
   return rows.map((r) => ({
     id: r.id,
@@ -2725,7 +2795,9 @@ export async function listAudioDecks(): Promise<AudioDeck[]> {
     playMode: r.play_mode === 'sequence' ? 'sequence' : 'random',
     enabled: r.enabled === 1,
     nextPosition:
-      r.play_mode === 'sequence' && r.clip_count > 0 ? Math.min(r.seq_end_ord + 2, r.clip_count) : null,
+      r.play_mode === 'sequence' && r.clip_count > 0 && (r.next_ord ?? r.first_ord) != null
+        ? (r.next_ord ?? r.first_ord)! + 1
+        : null,
     clipCount: r.clip_count,
     activeCount: r.active_count,
     likes: r.likes,
@@ -2873,12 +2945,22 @@ export async function setAudioDeckSeqStart(id: number, date: string, startOrd: n
 /**
  * Põe a SEQUÊNCIA no trecho `ord` (0-based): ele é o próximo a tocar — hoje, ao
  * reagendar, e nos dias seguintes. Usado em "Começar daqui" e "Recomeçar".
+ * seq_date fica NULL para o agendador tratar como virada de dia: assim o trecho
+ * escolhido vai para o PRÓXIMO horário que ainda não passou, e não para um de
+ * manhã que já passou (que só tocaria amanhã).
  */
-export async function setAudioDeckSequencePosition(id: number, ord: number, date: string): Promise<void> {
+export async function setAudioDeckSequencePosition(id: number, ord: number): Promise<void> {
   const d = await getDb();
-  await d.runAsync('UPDATE audio_decks SET seq_date = ?, seq_start_ord = ?, seq_end_ord = ? WHERE id = ?', [
-    date, ord, ord - 1, id,
+  await d.runAsync('UPDATE audio_decks SET seq_date = NULL, seq_start_ord = ?, seq_end_ord = ? WHERE id = ?', [
+    ord, ord - 1, id,
   ]);
+}
+
+/** Último trecho da sequência que tocou (-1 = nenhum): vai no backup do baralho. */
+export async function getAudioDeckSeqEnd(id: number): Promise<number> {
+  const d = await getDb();
+  const r = await d.getFirstAsync<{ seq_end_ord: number }>('SELECT seq_end_ord FROM audio_decks WHERE id = ?', [id]);
+  return r?.seq_end_ord ?? -1;
 }
 
 /** Último trecho que de fato TOCOU: o dia seguinte continua depois dele. */
@@ -3034,7 +3116,18 @@ export async function deleteImportedInspirationPack(packId: number): Promise<voi
 
 export async function resetAllUserData(): Promise<void> {
   const d = await getDb();
+  // Os áudios dos textos do "Leia para mim" e os sons enviados (respiração,
+  // Ioga Nidra) são arquivos no aparelho: guarda os caminhos ANTES de apagar as
+  // linhas, para removê-los também.
+  const fileRows = await d.getAllAsync<{ uri: string }>(
+    `SELECT audio_uri AS uri FROM read_aloud_texts WHERE audio_uri IS NOT NULL
+     UNION SELECT uri FROM breathing_custom_sounds
+     UNION SELECT uri FROM yoga_nidra_sounds`,
+  );
   await d.execAsync(`
+    DELETE FROM read_aloud_texts;
+    DELETE FROM breathing_custom_sounds;
+    DELETE FROM yoga_nidra_sounds;
     DELETE FROM snooze_feedback;
     DELETE FROM interview_messages;
     DELETE FROM interviews;
@@ -3058,6 +3151,7 @@ export async function resetAllUserData(): Promise<void> {
     DELETE FROM mindful_sessions;
     DELETE FROM decision_points;
     DELETE FROM automaticity;
+    DELETE FROM nudges;
     DELETE FROM user_config WHERE id = 1;
   `);
   await d.runAsync(
@@ -3065,4 +3159,14 @@ export async function resetAllUserData(): Promise<void> {
      VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 0, 'remote', 0, 0)`,
     [DEFAULT_SYSTEM_PROMPT],
   );
+  // Os lembretes diários voltam aos padrões de instalação (os títulos, textos e
+  // horários personalizados saíram junto com a tabela).
+  await seedDefaultNudges(d);
+  for (const r of fileRows) {
+    try {
+      new File(r.uri).delete();
+    } catch {
+      /* best-effort: arquivo já sumiu */
+    }
+  }
 }

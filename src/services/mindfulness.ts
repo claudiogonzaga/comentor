@@ -1,6 +1,6 @@
 // PRÁTICAS FEITAS NO APP (respiração, Ioga Nidra) como EVIDÊNCIA.
 //
-// Até aqui o Askeo cobrava "fez a respiração?" mesmo depois de a pessoa
+// Até aqui a Comentora cobrava "fez a respiração?" mesmo depois de a pessoa
 // fazer os 16 minutos DENTRO do próprio app. Agora cada sessão é registrada em
 // mindful_sessions e, se foi de verdade (terminou, ou durou o bastante),
 // confirma sozinha o hábito correspondente — via 'sensor', com a evidência
@@ -10,6 +10,7 @@ import { Platform, ToastAndroid } from 'react-native';
 import { format } from 'date-fns';
 import { addMindfulSession, getDoneNudgeTypes, listNudges } from './database';
 import { confirmNudge } from './nudges';
+import { logicalDay } from './habitEvents';
 
 export type MindfulKind = 'breathing' | 'nidra';
 
@@ -42,7 +43,8 @@ function fmtMin(minutes: number): string {
 
 /**
  * Registra uma sessão e, se ela valeu, confirma os hábitos correspondentes que
- * ainda não estão feitos hoje. Nunca lança. Devolve os títulos confirmados.
+ * ainda não estão feitos no dia da sessão (hoje, ou ontem se ela atravessou a
+ * meia-noite). Nunca lança. Devolve os títulos confirmados.
  */
 export async function recordMindfulSession(opts: {
   kind: MindfulKind;
@@ -69,16 +71,28 @@ export async function recordMindfulSession(opts: {
     });
     if (!qualifies(minutes, opts.plannedMinutes, opts.completed)) return [];
 
-    // Só sessões que COMEÇARAM hoje confirmam: uma que atravessou a meia-noite
-    // pertence a ontem (registrada, mas não fecha o hábito de hoje).
+    // A sessão pertence ao dia em que COMEÇOU: uma que atravessou a meia-noite
+    // (respiração às 23:50, Nidra às 23:30 — práticas de hora de dormir) fecha
+    // o hábito de ONTEM, não o de hoje. Antes ela simplesmente não confirmava
+    // nada e o dia de ontem ficava como não cumprido. `logicalDay` só aceita
+    // ontem ou hoje; sessão mais antiga que isso não confirma.
     const today = format(new Date(), 'yyyy-MM-dd');
-    if (date !== today) return [];
-    const done = new Set(await getDoneNudgeTypes(today));
+    const day = logicalDay(date);
+    if (day !== date) return [];
+    const crossedMidnight = date !== today;
+    const done = new Set(await getDoneNudgeTypes(day));
     const evidence = `${KIND_LABEL[opts.kind]} no app · ${fmtMin(minutes)}${opts.completed ? ' (completa)' : ''}`;
     const confirmed: string[] = [];
     for (const n of await listNudges()) {
       if (!n.enabled || done.has(n.type) || !matches(opts.kind, n)) continue;
-      await confirmNudge(n.type, { via: 'sensor', evidence, occurredAt: opts.endedAt });
+      await confirmNudge(n.type, {
+        via: 'sensor',
+        evidence,
+        // Atravessou a meia-noite: o atraso conta do INÍCIO (ainda no dia do
+        // hábito), senão o horário de referência cairia no dia novo.
+        occurredAt: crossedMidnight ? opts.startedAt : opts.endedAt,
+        day,
+      });
       confirmed.push(n.title);
     }
     if (confirmed.length && Platform.OS === 'android') {

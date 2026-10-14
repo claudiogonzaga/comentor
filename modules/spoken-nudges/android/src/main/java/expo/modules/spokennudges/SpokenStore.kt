@@ -12,6 +12,11 @@ data class SpokenAlarm(
   val repeatDaily: Boolean,
   val title: String,
   val body: String,
+  // Hora/minuto de PAREDE do disparo diário (-1 = desconhecido, alarme antigo).
+  // O epoch é absoluto: depois de mudar o fuso/horário, é daqui que se recalcula
+  // o próximo disparo para a fala continuar na mesma hora do relógio.
+  val hour: Int = -1,
+  val minute: Int = -1,
 )
 
 /**
@@ -30,6 +35,10 @@ object SpokenStore {
   private const val KEY_NUDGE_VOLUME = "nudge_volume" // 0–1
   private const val KEY_OWL_PAUSE_SEC = "owl_pause_sec" // segundos entre o canto e a fala
   private const val KEY_SILENCED_AT = "silenced_at" // epoch ms do último "Calar agora"
+  // Lista COMPLETA dos períodos sem som (JSON [{start,end,days}], minutos do dia).
+  // Substitui a janela única acima quando presente: o app tem vários períodos
+  // (trabalho, sono derivado do horário de dormir…) e o serviço precisa de todos.
+  private const val KEY_QUIET_PERIODS = "quiet_periods"
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -61,6 +70,12 @@ object SpokenStore {
   fun getQuietEnd(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_END, 18 * 60)
   fun getQuietDays(ctx: Context): Int = prefs(ctx).getInt(KEY_QUIET_DAYS, 127)
 
+  /** Lista completa dos períodos sem som (JSON). null = nunca espelhada (usa a janela única). */
+  fun setQuietPeriods(ctx: Context, json: String) {
+    prefs(ctx).edit().putString(KEY_QUIET_PERIODS, json).apply()
+  }
+  fun getQuietPeriods(ctx: Context): String? = prefs(ctx).getString(KEY_QUIET_PERIODS, null)
+
   /** Volume da voz dos nudges (0–1), barra da Home. Lido no disparo do WAV. */
   /**
    * Pausa entre o CANTO da coruja e a FALA, em ms. É o tempo para a pessoa baixar
@@ -83,6 +98,12 @@ object SpokenStore {
     prefs(ctx).edit().putFloat(KEY_NUDGE_VOLUME, value.coerceIn(0f, 1f)).apply()
   }
 
+  // Ler-filtrar-regravar a lista: as AsyncFunction do módulo (schedule/cancel)
+  // rodam fora da main thread e o SpokenAlarmReceiver roda na main. Sem lock, um
+  // interleaving perdia uma das gravações (alarme armado sem registro, ou o +1 dia
+  // do diário). @Synchronized trava no próprio objeto: quem precisa de várias
+  // operações atômicas usa synchronized(SpokenStore) { ... } (reentrante).
+  @Synchronized
   fun all(ctx: Context): List<SpokenAlarm> {
     val raw = prefs(ctx).getString(KEY, "[]") ?: "[]"
     return try {
@@ -96,6 +117,8 @@ object SpokenStore {
           o.getBoolean("repeatDaily"),
           o.optString("title", ""),
           o.optString("body", ""),
+          o.optInt("hour", -1),
+          o.optInt("minute", -1),
         )
       }
     } catch (e: Exception) {
@@ -103,22 +126,27 @@ object SpokenStore {
     }
   }
 
+  @Synchronized
   fun get(ctx: Context, id: String): SpokenAlarm? = all(ctx).firstOrNull { it.id == id }
 
+  @Synchronized
   fun put(ctx: Context, alarm: SpokenAlarm) {
     val list = all(ctx).filter { it.id != alarm.id }.toMutableList()
     list.add(alarm)
     save(ctx, list)
   }
 
+  @Synchronized
   fun remove(ctx: Context, id: String) {
     save(ctx, all(ctx).filter { it.id != id })
   }
 
+  @Synchronized
   fun clear(ctx: Context) {
     prefs(ctx).edit().remove(KEY).apply()
   }
 
+  @Synchronized
   private fun save(ctx: Context, list: List<SpokenAlarm>) {
     val arr = JSONArray()
     for (a in list) {
@@ -129,6 +157,8 @@ object SpokenStore {
       o.put("repeatDaily", a.repeatDaily)
       o.put("title", a.title)
       o.put("body", a.body)
+      o.put("hour", a.hour)
+      o.put("minute", a.minute)
       arr.put(o)
     }
     prefs(ctx).edit().putString(KEY, arr.toString()).apply()

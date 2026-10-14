@@ -9,6 +9,8 @@ export type GeminiModel =
   | 'gemini-2.0-flash';
 
 export type AIBackend = 'remote' | 'local';
+/** Quem responde quando a inteligência é "API": Gemini (Google) ou Claude (Anthropic). */
+export type AIProvider = 'gemini' | 'claude';
 
 export type LocalModelId =
   | 'gemma-4-e4b'
@@ -67,6 +69,11 @@ export interface UserConfig {
   prepRemindersEnabled: boolean;
   voiceModeEnabled: boolean;
   aiBackend: AIBackend;
+  aiProvider: AIProvider;
+  /** Modelo do Claude (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5). */
+  claudeModel: string;
+  /** Profundidade do raciocínio do Claude: low | medium | high | xhigh | max. */
+  claudeEffort: string;
   localModelId: LocalModelId | null;
   localModelDownloaded: boolean;
   allowMobileDataDownload: boolean;
@@ -81,7 +88,7 @@ export interface UserConfig {
   geminiTtsModel: string;
   owlSpecies: OwlSpeciesId;
   sleepAwarenessEnabled: boolean;
-  /** Quantos lembretes do Askeo por dia (a densidade dobra após o pôr do sol). */
+  /** Quantos lembretes da Comentora por dia (a densidade dobra após o pôr do sol). */
   notificationsPerDay: number;
   /**
    * Quando true, a coruja usa um canal que atravessa o "Não Perturbe": ela
@@ -91,7 +98,7 @@ export interface UserConfig {
   dndBypassEnabled: boolean;
   /**
    * Quando true e o app está em primeiro plano (sem áudio tocando/gravando),
-   * o Askeo também FALA o nudge por voz (TTS), além de mostrar o texto.
+   * a Comentora também FALA o nudge por voz (TTS), além de mostrar o texto.
    */
   voiceNudgesEnabled: boolean;
   /**
@@ -118,7 +125,7 @@ export interface UserConfig {
   spokenQuietEnd: string; // HH:MM
   spokenQuietDays: number; // bitmask 0–6
   /**
-   * Modo "inspiração": quando true, o Askeo envia alertas de hora em hora
+   * Modo "inspiração": quando true, a Comentora envia alertas de hora em hora
    * (janela diurna) com mensagens de otimismo, persistência e inspiração.
    */
   inspirationModeEnabled: boolean;
@@ -172,7 +179,7 @@ export interface UserConfig {
    * informado (a métrica de FC alta fica oculta).
    */
   birthYear: number | null;
-  /** Sexo (contexto p/ o Askeo e futuras faixas de saúde). */
+  /** Sexo (contexto p/ a Comentora e futuras faixas de saúde). */
   sex: 'feminino' | 'masculino' | null;
   /**
    * Modo silencioso (botão da Home): notificações e nudges continuam, mas SEM

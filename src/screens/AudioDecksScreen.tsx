@@ -22,7 +22,6 @@ import {
   listAudioDecks,
   setAudioDeckEnabled,
   setAudioDeckMode,
-  setAudioDeckSequencePosition,
   setKV,
 } from '../services/database';
 import {
@@ -37,7 +36,7 @@ import {
   subscribeClipPlayback,
   toggleClip,
 } from '../services/audioDecks';
-import { rateAudioClip, scheduleInspirationNotifications } from '../services/inspiration';
+import { rateAudioClip, scheduleInspirationNotifications, setSequencePosition } from '../services/inspiration';
 import { useAppStore } from '../store/useAppStore';
 import type { AudioClip, AudioDeck } from '../types';
 
@@ -175,16 +174,25 @@ export function AudioDecksScreen() {
     );
   };
 
-  /** Põe a sequência num trecho (0-based): ele é o próximo a tocar, hoje e nos dias seguintes. */
+  /**
+   * Põe a sequência num trecho (0-based): ele vai para o PRÓXIMO alerta do baralho
+   * que ainda não passou (os de hoje que já passaram só tocam amanhã).
+   */
   const startFrom = async (deck: AudioDeck, ord: number) => {
-    const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    await setAudioDeckSequencePosition(deck.id, ord, today);
-    reschedule();
-    await reload();
+    // Espera o reagendamento: a posição é gravada lá dentro, depois de contar o que já tocou.
+    await setSequencePosition(deck.id, ord).catch(() => {});
+    try {
+      const fresh = await listAudioDecks();
+      setDecks(fresh);
+      // a vista de trechos guarda uma cópia do baralho: atualiza o "É o próximo"
+      const mine = fresh.find((x) => x.id === deck.id);
+      if (mine) setOpen((o) => (o && o.id === mine.id ? mine : o));
+    } catch {
+      await reload();
+    }
     Alert.alert(
       'Sequência ajustada',
-      `O próximo trecho a tocar é o ${ord + 1} de ${deck.clipCount}. Os alertas já foram reagendados.`,
+      `A sequência continua do trecho ${ord + 1} de ${deck.clipCount} no próximo alerta deste baralho. Os alertas já foram reagendados.`,
     );
   };
 

@@ -1,9 +1,9 @@
-// Resposta por VOZ ao lembrete: depois que o Askeo fala a cobrança, ele
+// Resposta por VOZ ao lembrete: depois que a Comentora fala a cobrança, ela
 // lista as opções e ABRE O MICROFONE para o usuário responder falando:
 //   "a" / "já fiz" / "já tomei"      → marca como feito
 //   "b" / "mais tempo" / "depois"    → adia (snoozeMinutes)
 //   "c" / "não vou hoje" / "pular"   → pula hoje (sem contar como feito)
-// O Askeo confirma em voz o que entendeu. Se não entender, orienta a usar
+// A Comentora confirma em voz o que entendeu. Se não entender, orienta a usar
 // os botões da notificação (nada é marcado por engano).
 //
 // Limite honesto: o microfone só abre com o APP EM PRIMEIRO PLANO — o Android
@@ -38,10 +38,27 @@ export function parseVoiceAnswer(raw: string): VoiceAnswer | null {
     .replace(/[.,!?;:]/g, '')
     .replace(/\s+/g, ' ');
   if (!s) return null;
+  const SNOOZE = /mais tempo|depois|adiar|daqui a pouco|ainda n[ãa]o|me d[êe] (um )?tempo|mais tarde/;
+  const SKIP = /n[ãa]o vou|hoje n[ãa]o|pular|deixa pra amanh[ãa]|amanh[ãa] eu/;
+  const words = s.split(' ').length;
+  // Transcrição longa não é resposta a "a, b ou c": é o microfone captando
+  // outra fala (ex.: uma leitura saindo pelo alto-falante). Nada é marcado —
+  // remédio dado como tomado sem a pessoa responder é dado errado.
+  if (words > 8) return null;
+  // NEGAÇÃO vem antes do "feito": "não concluí", "ainda não está feito" e
+  // "não foi feito" casavam com done e marcavam o remédio como tomado. Com
+  // negação, só vale pular/adiar; o resto é "não entendi".
+  if (/\bn[ãa]o\b/.test(s)) {
+    if (SKIP.test(s)) return 'skip';
+    if (SNOOZE.test(s)) return 'snooze';
+    return null;
+  }
   // frases (prioridade sobre letras)
-  if (/(já|ja) (fiz|tomei|feito)|acabei de|tomei sim|fiz sim|\bfeito\b|conclu[íi]/.test(s)) return 'done';
-  if (/mais tempo|depois|adiar|daqui a pouco|ainda n[ãa]o|me d[êe] (um )?tempo|mais tarde/.test(s)) return 'snooze';
-  if (/n[ãa]o vou|hoje n[ãa]o|pular|deixa pra amanh[ãa]|amanh[ãa] eu/.test(s)) return 'skip';
+  if (/(já|ja) (fiz|tomei|feito)|tomei sim|fiz sim/.test(s)) return 'done';
+  // Palavras soltas ("feito", "concluí", "acabei de") só em resposta curta.
+  if (words <= 5 && /acabei de|\bfeito\b|conclu[íi]/.test(s)) return 'done';
+  if (SNOOZE.test(s)) return 'snooze';
+  if (SKIP.test(s)) return 'skip';
   // letras/opções isoladas
   if (s === 'a' || s === 'á' || s === 'opção a' || s === 'opcao a' || s === 'letra a') return 'done';
   if (s === 'b' || s === 'bê' || s === 'be' || s === 'opção b' || s === 'opcao b' || s === 'letra b') return 'snooze';

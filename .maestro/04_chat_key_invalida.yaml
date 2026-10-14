@@ -7,48 +7,50 @@ tags:
 - clearState
 - launchApp
 - extendedWaitUntil:
-    visible: "Me conta mais"
+    visible: "Me conta mais.*"
     timeout: 15000
-- tapOn: "Me conta mais"
-- tapOn: "Gostei"
-- tapOn: "Vamos começar"
+- tapOn: "Me conta mais.*"
+- tapOn: "Gostei.*"
+- tapOn: "Vamos começar.*"
 - extendedWaitUntil:
-    visible: "Como devo te chamar"
+    visible: "Como te chamo.*"
     timeout: 8000
 - tapOn:
-    text: "Como devo te chamar"
+    text: "Seu nome ou apelido"
     optional: true
 - inputText: "TestUser"
 - hideKeyboard
 - tapOn: "Brutalmente honesta"
 - scrollUntilVisible:
     element:
-      text: "Continuar"
+      text: "Continuar.*"
     direction: DOWN
-- tapOn: "Continuar"
+- tapOn: "Continuar.*"
 - extendedWaitUntil:
-    visible: "IA"
+    visible: "Como você quer usar.*"
     timeout: 10000
 - scrollUntilVisible:
     element:
-      text: "Gemini"
+      text: "Usar API.*"
     direction: DOWN
     optional: true
+# O caminho de API agora oferece Claude (padrão) ou Gemini: troca para o Gemini.
 - runFlow:
     when:
-      visible: "Gemini"
+      visible: "Usar API.*"
     commands:
-      - tapOn: "Gemini"
+      - tapOn: "Usar API.*"
+      - tapOn: "Gemini \\(Google\\)"
       - extendedWaitUntil:
-          visible: "chave"
+          visible: "cole aqui sua chave"
           timeout: 5000
       - tapOn:
-          text: "chave"
+          text: "cole aqui sua chave"
           optional: true
       - inputText: "AIzaSyDUMMY_INVALID_KEY_FOR_TEST_ONLY"
       - hideKeyboard
       - tapOn:
-          text: "Testar"
+          text: "Testar chave"
           optional: true
       - takeScreenshot: "05_invalid_key_error"
 - takeScreenshot: "05_final_state"

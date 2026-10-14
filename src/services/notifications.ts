@@ -3,7 +3,7 @@ import { Linking, Platform } from 'react-native';
 import type { IntensityLevel, OwlSpeciesId } from '../types';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { DEFAULT_OWL_SPECIES, getOwlSpecies } from '../constants/owlSpecies';
-import { getUserConfig } from './database';
+import { getKV, getUserConfig } from './database';
 import { getQuietPeriodsCached, anyQuietAt, anyQuietAtMinute } from './quietHours';
 
 // Android notification channels are immutable once created — changing a
@@ -260,7 +260,7 @@ export async function ensureChannel(
   // (importância alta = texto visível), mas sem piado. "Só texto".
   if (silent) {
     await Notifications.setNotificationChannelAsync(id, {
-      name: 'Askeo — silencioso',
+      name: 'Áskesis — silencioso',
       description: 'Notificações sem som nem vibração (modo silencioso).',
       importance: Notifications.AndroidImportance.HIGH,
       sound: null,
@@ -275,8 +275,8 @@ export async function ensureChannel(
   const spec = getOwlSpecies(sp);
   await Notifications.setNotificationChannelAsync(id, {
     name: dnd
-      ? `Askeo — ${spec.name} (Não Perturbe)`
-      : `Askeo — ${spec.name}`,
+      ? `Áskesis — ${spec.name} (Não Perturbe)`
+      : `Áskesis — ${spec.name}`,
     description: dnd
       ? 'Atravessa o Não Perturbe e ainda toca o canto da coruja.'
       : 'Lembretes de sono e nudges, com som de coruja',
@@ -355,7 +355,7 @@ export async function ensureSilentChannel(): Promise<string> {
   const id = `comentor-silent-v${CHANNEL_VERSION}`;
   if (Platform.OS !== 'android') return id;
   await Notifications.setNotificationChannelAsync(id, {
-    name: 'Askeo — sem som (não perturbe)',
+    name: 'Áskesis — sem som (não perturbe)',
     description: 'Notificações sem som nem vibração durante os períodos de não-perturbe.',
     importance: Notifications.AndroidImportance.HIGH,
     sound: null,
@@ -431,19 +431,71 @@ interface ScheduleParams {
   prepRemindersEnabled?: boolean;
 }
 
-function buildBedtimeDate(bedtime: string, daysAhead = 0): Date {
-  const [h, m] = bedtime.split(':').map(Number);
-  const d = new Date();
-  d.setSeconds(0, 0);
-  d.setHours(h, m);
-  if (d.getTime() <= Date.now()) {
-    d.setDate(d.getDate() + 1);
+/**
+ * Chave em app_kv com o instante (epoch ms) do último "Vou dormir". Quem grava
+ * é `markSleepDone` (coach.ts); aqui serve para não re-armar a corrente da
+ * noite em que a pessoa já avisou que foi dormir.
+ */
+export const SLEEP_DONE_KV = 'sleep_done_at';
+
+/**
+ * Quantas noites a corrente fica armada à frente. Os gatilhos são DATE (um por
+ * batida), então sem isso a corrente valia para UMA noite e dependia de alguém
+ * reagendar no dia seguinte. Com o app vivo em segundo plano por dias (o JS
+ * congela, não há cold start), três noites dão folga até a próxima re-armada —
+ * que acontece ao abrir o app e a cada "Vou dormir".
+ */
+const SLEEP_NIGHTS_AHEAD = 3;
+
+/** Um "Vou dormir" dado até 8 h antes do horário já vale para aquela noite. */
+const SLEEP_DONE_LEAD_MS = 8 * 60 * 60_000;
+
+// EXCLUSÃO (mesma de scheduleAllMedications): listar/cancelar e reagendar a
+// corrente com vários awaits não pode rodar em paralelo consigo mesma — no cold
+// start o App e o "Vou dormir" chamam ao mesmo tempo, e as passadas intercaladas
+// deixavam batidas em dobro (ou as desta noite depois do "Vou dormir"). Uma roda
+// por vez; quem chega no meio guarda os parâmetros e recebe a mesma promise,
+// que faz mais uma passada com os parâmetros mais recentes.
+let nightRun: Promise<string[]> | null = null;
+let nightPending: ScheduleParams | null = null;
+
+export function scheduleNightReminders(params: ScheduleParams): Promise<string[]> {
+  if (nightRun) {
+    nightPending = params;
+    return nightRun;
   }
-  if (daysAhead > 0) d.setDate(d.getDate() + daysAhead);
-  return d;
+  const run = (async () => {
+    let ids: string[] = [];
+    let next: ScheduleParams | null = params;
+    while (next) {
+      nightPending = null;
+      ids = await scheduleNightRemindersOnce(next);
+      next = nightPending as ScheduleParams | null;
+    }
+    return ids;
+  })().finally(() => {
+    nightRun = null;
+    // Pedido que chegou entre o fim do laço e este finally: não pode se perder.
+    const late = nightPending as ScheduleParams | null;
+    if (late) {
+      nightPending = null;
+      void scheduleNightReminders(late).catch(() => {});
+    }
+  });
+  nightRun = run;
+  return run;
 }
 
-export async function scheduleNightReminders({
+/**
+ * Espera o reagendamento da corrente em curso terminar, antes de cancelá-la:
+ * a passada que leu o "Vou dormir" antes de ele ser gravado agendaria as
+ * batidas desta noite depois do cancelamento.
+ */
+export async function settleSleepScheduling(): Promise<void> {
+  while (nightRun) await nightRun.catch(() => {});
+}
+
+async function scheduleNightRemindersOnce({
   bedtime,
   intervalMinutes,
   maxReminders,
@@ -453,30 +505,74 @@ export async function scheduleNightReminders({
   const channelId = await ensureChannel();
   const sound = await soundFor();
   await ensureNotificationCategories();
-  await cancelSleepEscalationReminders();
 
-  const bed = buildBedtimeDate(bedtime);
+  // Cancela a corrente anterior, MENOS um adiamento ("Adiar") ainda por tocar:
+  // a pessoa pediu sossego até lá, e reagendar (abrir o app, por exemplo) não
+  // pode devolver as batidas desta noite por cima do adiamento.
+  const now = Date.now();
+  let snoozeAt = 0;
+  for (const s of await Notifications.getAllScheduledNotificationsAsync()) {
+    const data = s.content.data as { type?: string; snooze?: boolean; fireAt?: string };
+    if (data?.type !== 'sleep-reminder' && data?.type !== 'prep-reminder') continue;
+    const at = data.fireAt ? Date.parse(data.fireAt) : NaN;
+    if (data.snooze === true && Number.isFinite(at) && at > now) {
+      snoozeAt = Math.max(snoozeAt, at);
+      continue;
+    }
+    await Notifications.cancelScheduledNotificationAsync(s.identifier);
+  }
+
+  let sleptAt = 0;
+  try {
+    sleptAt = Number(await getKV(SLEEP_DONE_KV)) || 0;
+  } catch {
+    /* sem registro: trata como ainda acordado */
+  }
+
+  const [h, m] = bedtime.split(':').map(Number);
+  // Começa pela noite de ONTEM: com horário de dormir às 23:00, à 00:30 a
+  // corrente em curso é a que começou ontem — antes, reagendar nessa hora
+  // empurrava tudo para a noite seguinte e apagava o resto da de hoje.
+  const first = new Date();
+  first.setHours(h, m, 0, 0);
+  first.setDate(first.getDate() - 1);
+
   const ids: string[] = [];
+  let nights = 0;
+  for (let d = 0; nights < SLEEP_NIGHTS_AHEAD && d < SLEEP_NIGHTS_AHEAD + 3; d++) {
+    const bed = new Date(first);
+    bed.setDate(first.getDate() + d);
+    const bedMs = bed.getTime();
+    // Noite cuja última batida já passou: nada a agendar.
+    if (bedMs + (maxReminders - 1) * intervalMinutes * 60_000 <= now) continue;
+    // Noite em que a pessoa já disse "Vou dormir": não volta a cobrar.
+    if (sleptAt <= now && sleptAt > bedMs - SLEEP_DONE_LEAD_MS) continue;
+    // Noite em curso com adiamento pendente: só o adiamento toca.
+    if (snoozeAt > 0 && bedMs <= snoozeAt) continue;
+    nights++;
 
-  for (let i = 0; i < maxReminders; i++) {
-    const fireAt = new Date(bed.getTime() + i * intervalMinutes * 60_000);
-    const level = (Math.min(5, i + 1) as IntensityLevel);
-    const cfg = INTENSITY_LEVELS[level];
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: cfg.notificationTitle,
-        body: cfg.notificationBody,
-        data: { type: 'sleep-reminder', level, habitId, logId, fireAt: fireAt.toISOString() },
-        sound,
-        categoryIdentifier: SLEEP_CATEGORY,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: fireAt,
-        channelId,
-      },
-    });
-    ids.push(id);
+    for (let i = 0; i < maxReminders; i++) {
+      const fireAt = new Date(bedMs + i * intervalMinutes * 60_000);
+      // Corrente já em curso: agenda só as batidas que ainda vão tocar.
+      if (fireAt.getTime() <= now) continue;
+      const level = (Math.min(5, i + 1) as IntensityLevel);
+      const cfg = INTENSITY_LEVELS[level];
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: cfg.notificationTitle,
+          body: cfg.notificationBody,
+          data: { type: 'sleep-reminder', level, habitId, logId, fireAt: fireAt.toISOString() },
+          sound,
+          categoryIdentifier: SLEEP_CATEGORY,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: fireAt,
+          channelId,
+        },
+      });
+      ids.push(id);
+    }
   }
   return ids;
 }
@@ -491,11 +587,20 @@ export async function cancelAllReminders() {
  * reminders intact. Used by callers that re-schedule the night chain without
  * disturbing the unrelated daily nudges.
  */
-export async function cancelSleepEscalationReminders() {
+export async function cancelSleepEscalationReminders(withinMs?: number) {
+  // `withinMs`: cancela só o que toca dentro desse prazo (a corrente DESTA
+  // noite), preservando as noites seguintes já armadas. Sem ele, cancela tudo.
+  // Um reagendamento em curso pode agendar depois deste cancelamento: espera.
+  await settleSleepScheduling();
+  const limit = withinMs != null ? Date.now() + withinMs : null;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
-    const data = s.content.data as { type?: string };
+    const data = s.content.data as { type?: string; fireAt?: string };
     if (data?.type === 'sleep-reminder' || data?.type === 'prep-reminder') {
+      if (limit != null && data.fireAt) {
+        const at = Date.parse(data.fireAt);
+        if (Number.isFinite(at) && at > limit) continue;
+      }
       await Notifications.cancelScheduledNotificationAsync(s.identifier);
     }
   }
@@ -504,7 +609,8 @@ export async function cancelSleepEscalationReminders() {
 export async function snoozeFor(minutes: number, level: IntensityLevel, habitId: number) {
   // Stop the current escalation chain so only the snoozed reminder remains —
   // otherwise the older escalation notifications keep firing on top of it.
-  await cancelSleepEscalationReminders();
+  // Só a corrente desta noite: as noites seguintes continuam armadas.
+  await cancelSleepEscalationReminders(12 * 60 * 60_000);
   const channelId = await ensureChannel();
   const sound = await soundFor();
   await ensureNotificationCategories();
@@ -515,7 +621,8 @@ export async function snoozeFor(minutes: number, level: IntensityLevel, habitId:
     content: {
       title: cfg.notificationTitle,
       body: cfg.notificationBody,
-      data: { type: 'sleep-reminder', level: cfg.level, habitId, fireAt: fireAt.toISOString() },
+      // `snooze`: scheduleNightReminders preserva este aviso ao reagendar.
+      data: { type: 'sleep-reminder', level: cfg.level, habitId, snooze: true, fireAt: fireAt.toISOString() },
       sound,
       categoryIdentifier: SLEEP_CATEGORY,
     },
@@ -535,8 +642,8 @@ export async function listScheduled() {
 const ANDROID_PACKAGE = 'com.claudiogonzaga.comentor';
 
 /**
- * Abre a tela do sistema "Acesso ao Não Perturbe", onde o usuário libera o
- * Askeo a atravessar o modo Não Perturbe. Sem essa permissão o canal de
+ * Abre a tela do sistema "Acesso ao Não Perturbe", onde o usuário libera a
+ * Comentora a atravessar o modo Não Perturbe. Sem essa permissão o canal de
  * bypass é criado mas o Android ignora o bypass.
  */
 export async function openDndAccessSettings(): Promise<void> {
@@ -607,7 +714,7 @@ export async function sendTestNotification(): Promise<{
   await Notifications.scheduleNotificationAsync({
     content: {
       title: 'Teste de notificação',
-      body: 'Funcionou! Se você está vendo isto, os lembretes do Askeo conseguem chegar no seu celular.',
+      body: 'Funcionou! Se você está vendo isto, os lembretes da Comentora conseguem chegar no seu celular.',
       sound,
       data: { type: 'test' },
     },

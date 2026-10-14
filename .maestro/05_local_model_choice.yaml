@@ -12,34 +12,34 @@ tags:
     commands:
       - tapOn: "Wait"
 - extendedWaitUntil:
-    visible: "Me conta mais"
+    visible: "Me conta mais.*"
     timeout: 20000
-- tapOn: "Me conta mais"
-- tapOn: "Gostei"
-- tapOn: "Vamos começar"
+- tapOn: "Me conta mais.*"
+- tapOn: "Gostei.*"
+- tapOn: "Vamos começar.*"
 - extendedWaitUntil:
-    visible: "Como devo te chamar"
+    visible: "Como te chamo.*"
     timeout: 8000
 - tapOn:
-    text: "Como devo te chamar"
+    text: "Seu nome ou apelido"
     optional: true
 - inputText: "TestUser"
 - hideKeyboard
 - tapOn: "Brutalmente honesta"
 - scrollUntilVisible:
     element:
-      text: "Continuar"
+      text: "Continuar.*"
     direction: DOWN
-- tapOn: "Continuar"
+- tapOn: "Continuar.*"
 - extendedWaitUntil:
     visible: "Como você quer usar?"
     timeout: 10000
-- assertVisible: "Usar API do Gemini"
+- assertVisible: "Usar API.*"
 - assertVisible: "Usar modelo no celular"
 - tapOn: "Usar modelo no celular"
 - scrollUntilVisible:
     element:
-      text: "Baixar modelo e continuar"
+      text: "Baixar modelo e continuar.*"
     direction: DOWN
 - takeScreenshot: "06_local_model_selected"
 # Não tapamos em "Baixar modelo e continuar" — não queremos baixar GGUF de

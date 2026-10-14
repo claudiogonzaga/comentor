@@ -25,6 +25,7 @@ import {
   getConvinceMessageForNow,
   getSleepHabitId,
   markSleepDone,
+  rearmSleepReminders,
   sendUserMessage,
   type ConvinceFocus,
 } from '../services/coach';
@@ -115,7 +116,7 @@ export function ChatScreen() {
               setOffline(r.offline);
             }
           } else {
-            // O Askeo conduz: abre comentando o progresso e onde melhorar.
+            // A Comentora conduz: abre comentando o progresso e onde melhorar.
             const r = await getChatOpenerForNow();
             if (mounted) {
               setLevel(r.level);
@@ -140,7 +141,7 @@ export function ChatScreen() {
     };
   }, []);
 
-  // Read the most recent Askeo message aloud — only when the user has
+  // Read the most recent Comentora message aloud — only when the user has
   // explicitly turned the speaker on.
   useEffect(() => {
     if (!speechEnabled || messages.length === 0) return;
@@ -248,6 +249,8 @@ export function ChatScreen() {
     // Só encerra a corrente do sono desta noite — preserva inspiração,
     // conscientização e nudges diários.
     await cancelSleepEscalationReminders();
+    // …e arma as noites seguintes (a desta noite fica de fora: já foi dormir).
+    await rearmSleepReminders().catch(() => {});
     navigation.navigate('Home');
   };
 
@@ -256,7 +259,7 @@ export function ChatScreen() {
     navigation.navigate('SnoozeFeedback', { habitId, level });
   };
 
-  // Reload messages when returning from SnoozeFeedback so the new Askeo
+  // Reload messages when returning from SnoozeFeedback so the new Comentora
   // counter-argument shows up.
   useFocusEffect(
     useCallback(() => {
@@ -293,7 +296,7 @@ export function ChatScreen() {
             <Owl mood={owlMood} size={48} animated={false} />
             <View>
               <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
-                Askeo
+                Comentora
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 {INTENSITY_LEVELS[level].title} · nível {level}/5
@@ -341,7 +344,7 @@ export function ChatScreen() {
             <View style={styles.loading}>
               <ActivityIndicator color={colors.accent.gold} />
               <Text style={[typography.small, { color: colors.text.secondary, marginTop: spacing.sm }]}>
-                O Askeo está pensando…
+                A Comentora está pensando…
               </Text>
             </View>
           ) : (

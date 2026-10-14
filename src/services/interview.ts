@@ -16,11 +16,10 @@ import type {
   LocalModelId,
   UserConfig,
 } from '../types';
-import { continueConversation as continueConversationRemote } from './gemini';
+import { continueConversation as continueConversationRemote, hasActiveLlm } from './gemini';
 import { generateLocal, type LocalChatMessage } from './localModel';
-import { getApiKey } from './secureStore';
 
-const INTERVIEW_SYSTEM_PROMPT = `Você é o Askeo conduzindo uma entrevista breve, calorosa e investigativa para entender por que esta pessoa específica tem dificuldade em deitar no horário que ela mesma escolheu.
+const INTERVIEW_SYSTEM_PROMPT = `Você é a Comentora conduzindo uma entrevista breve, calorosa e investigativa para entender por que esta pessoa específica tem dificuldade em deitar no horário que ela mesma escolheu.
 
 Regras:
 - Faça UMA pergunta por mensagem. Curta. Conversacional.
@@ -69,9 +68,18 @@ function shouldUseLocal(opts: BackendOptions): boolean {
 }
 
 export async function backendIsAvailable(opts: BackendOptions): Promise<boolean> {
-  if (shouldUseLocal(opts)) return true;
-  const key = await getApiKey();
-  return !!key;
+  // Quem escolheu "No celular" não vê a entrevista ir para a nuvem só porque o
+  // modelo ainda não está baixado — como o coach e as cobranças, que também recusam.
+  if (opts.aiBackend === 'local') return shouldUseLocal(opts);
+  // Provedor ativo, não só a chave do Gemini: quem usa só o Claude também entrevista.
+  return hasActiveLlm();
+}
+
+/** Mesmo critério de backendIsAvailable, para a chamada não cair na nuvem por engano. */
+function assertNotLocalWithoutModel(opts: BackendOptions): void {
+  if (opts.aiBackend === 'local' && !shouldUseLocal(opts)) {
+    throw new Error('O modelo local ainda não foi baixado.');
+  }
 }
 
 interface InterviewExchange {
@@ -99,6 +107,7 @@ export async function generateInterviewQuestion(
     }
     return generateLocal(opts.localModelId as LocalModelId, messages, { maxTokens: 250 });
   }
+  assertNotLocalWithoutModel(opts);
 
   // Remote (Gemini): usa continueConversationRemote com prompt customizado
   const fakeContext = {
@@ -126,6 +135,9 @@ export async function generateInterviewQuestion(
     chatHistory,
     userText ?? '[início da entrevista — faça a pergunta-âncora]',
   );
+  // continueConversation não lança: em falha devolve a frase de reserva do coach
+  // de sono ("você ainda está acordado…"), que não pode virar pergunta da entrevista.
+  if (result.offline) throw new Error('A IA não respondeu agora. Tente de novo.');
   return result.text;
 }
 
@@ -154,7 +166,7 @@ export async function summarizeInterview(
   history: InterviewExchange[],
 ): Promise<InterviewSummary> {
   const transcript = history
-    .map((m) => `${m.role === 'corujinha' ? 'Askeo' : 'Pessoa'}: ${m.content}`)
+    .map((m) => `${m.role === 'corujinha' ? 'Comentora' : 'Pessoa'}: ${m.content}`)
     .join('\n');
 
   const userPrompt = `${SUMMARY_PROMPT}\n\nCONVERSA:\n${transcript}`;
@@ -170,6 +182,7 @@ export async function summarizeInterview(
       temperature: 0.2,
     });
   } else {
+    assertNotLocalWithoutModel(opts);
     const fakeContext = {
       userName: null,
       bedtime: '00:00',
@@ -183,19 +196,17 @@ export async function summarizeInterview(
         'Você é um analista que extrai dados estruturados de conversas. Responda apenas com JSON válido.',
     };
     const result = await continueConversationRemote(fakeContext, opts.geminiModel, [], userPrompt);
+    if (result.offline) throw new Error('A IA não respondeu agora. Tente de novo.');
     raw = result.text;
   }
 
   const parsed = tryParseSummary(raw);
   if (parsed) return parsed;
 
-  // Fallback: sumário vazio mas com motivos genéricos pra UI funcionar
-  return {
-    causes: [],
-    triggers: [],
-    notes: 'Não consegui sumarizar a entrevista, mas ela ficou salva no histórico.',
-    derivedReasons: ['estou no celular', 'não estou com sono', 'ansiedade', 'trabalho atrasado'],
-  };
+  // Sem resumo válido, lança em vez de gravar um resumo de reserva: ele marcava
+  // a entrevista como concluída e injetava "Não consegui sumarizar…" em todos os
+  // prompts. O InterviewScreen mostra o erro e deixa tentar de novo.
+  throw new Error('Não consegui sumarizar a entrevista. Tente de novo.');
 }
 
 export function summaryToCoachContext(summary: InterviewSummary | null): string {

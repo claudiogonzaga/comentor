@@ -13,6 +13,7 @@ import {
   synthesizeChunkGemini,
   getCachedReadAloudUri,
   saveFullReadAloud,
+  type TtsSignal,
 } from './geminiTTS';
 import type { VoiceProvider } from '../types';
 
@@ -58,6 +59,10 @@ let activeProvider: VoiceProvider = 'system';
 let activeGeminiVoiceName: string = DEFAULT_GEMINI_VOICE;
 // Player do expo-audio em uso quando provider === 'gemini'.
 let activeGeminiPlayer: AudioPlayer | null = null;
+// Sinal da síntese Gemini de uma fala CURTA em andamento (speak). Uma fala nova
+// ou um stop o marcam como abortado: a síntese superada para de re-tentar e de
+// ocupar a fila de RPM em vez de seguir gastando cota por uma fala descartada.
+let activeSpeakSignal: TtsSignal | null = null;
 // Resolve a reprodução de um trecho em andamento (para `stopPlayback` destravar
 // o `await playAndWait` da leitura progressiva).
 let activePlaybackFinish: (() => void) | null = null;
@@ -256,6 +261,19 @@ interface SpeakExtraOptions {
   provider?: VoiceProvider;
   /** Voz Gemini explícita (preview). Padrão: a ativa. */
   geminiVoiceName?: string;
+  /** Prévia de voz Gemini: se a síntese falhar, LANÇA o erro em vez de cair na
+   *  voz do sistema — senão a pessoa ouviria a voz do Android achando que é a
+   *  voz Gemini que está escolhendo. */
+  noFallback?: boolean;
+}
+
+/** Prazo da síntese Gemini de uma fala curta antes de cair na voz do sistema.
+ *  Lembrete falado com 1,5 min de atraso (re-tentativas sem rede) é aviso velho
+ *  e ainda bloqueia os seguintes (isSpeaking). Proporcional ao tamanho, no mesmo
+ *  ritmo dos trechos da leitura (90 ms/caractere), para a resposta longa do
+ *  chat não cair sempre na voz do sistema; frases curtas ficam nos 10 s. */
+function geminiSpeakDeadlineMs(text: string): number {
+  return Math.max(10000, text.length * 90);
 }
 
 export async function speak(
@@ -308,10 +326,39 @@ async function speakWithGemini(
 ): Promise<void> {
   const voice = opts.geminiVoiceName ?? activeGeminiVoiceName;
   currentlySpeaking = true;
+  // Síntese com PRAZO e no máximo 1 re-tentativa: sem rede, as 6 re-tentativas
+  // do fetchPcm seguravam a fala por 90 s ou mais (e isSpeaking() descartava os
+  // lembretes seguintes). Estourado o prazo, aborta e cai na voz do sistema.
+  // O prazo só começa a contar quando a requisição consegue o slot de RPM
+  // (onSlot): a fila é global e uma geração da leitura ("Leia para mim",
+  // Salvar) a enche por minutos — contando a espera, a fala sempre estourava os
+  // 10 s, o chat/lembrete saía na voz do sistema e a prévia de voz falhava.
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let rejectDeadline: ((e: unknown) => void) | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    rejectDeadline = reject;
+  });
+  const signal: TtsSignal = {
+    aborted: false,
+    onSlot: () => {
+      if (deadlineTimer !== undefined) return; // retry: o prazo já está correndo
+      deadlineTimer = setTimeout(() => {
+        signal.aborted = true;
+        rejectDeadline?.(new GeminiTTSError('Gemini TTS: demorou demais para gerar a fala'));
+      }, geminiSpeakDeadlineMs(text));
+    },
+  };
+  activeSpeakSignal = signal;
   try {
-    const { uri } = await synthesizeSpeechGemini(text, voice);
+    const { uri } = await Promise.race([
+      synthesizeSpeechGemini(text, voice, { signal, maxRetries: 1 }),
+      deadline,
+    ]);
     if (myToken !== speakToken) return; // superada durante a síntese — não toca
     const player = createAudioPlayer({ uri });
+    // Volume dos avisos (barra da Home) também na voz Gemini — antes só o ramo
+    // da voz do sistema o aplicava, e o lembrete saía a 100%.
+    if (opts.volume != null) player.volume = Math.max(0, Math.min(1, opts.volume));
     activeGeminiPlayer = player;
     const sub = player.addListener('playbackStatusUpdate', (status) => {
       if (status.didJustFinish) {
@@ -327,6 +374,8 @@ async function speakWithGemini(
   } catch (err) {
     if (myToken !== speakToken) return; // superada (não cair no fallback à toa)
     currentlySpeaking = false;
+    // Prévia: o erro sobe para o picker mostrar, em vez de tocar outra voz.
+    if (opts.noFallback) throw err;
     if (err instanceof GeminiTTSError) {
       console.warn('Gemini TTS falhou, caindo no sistema:', err.message);
       // Fallback transparente: usa expo-speech se a síntese remota falhar.
@@ -334,6 +383,9 @@ async function speakWithGemini(
       return;
     }
     opts.onError?.(err);
+  } finally {
+    clearTimeout(deadlineTimer);
+    if (activeSpeakSignal === signal) activeSpeakSignal = null;
   }
 }
 
@@ -347,7 +399,7 @@ function releaseGeminiPlayer(player: AudioPlayer) {
 }
 
 const PREVIEW_TEXT =
-  'Oi, eu sou o Askeo, sua coruja de sabedoria. Vou te ajudar a dormir melhor.';
+  'Oi, eu sou a Comentora, sua coruja de sabedoria. Vou te ajudar a dormir melhor.';
 
 export async function previewVoice(voice: EnrichedVoice): Promise<void> {
   await speak(PREVIEW_TEXT, {
@@ -362,7 +414,9 @@ export async function previewVoice(voice: EnrichedVoice): Promise<void> {
  * Usado pelo picker em Configurações.
  */
 export async function previewGeminiVoice(voiceName: string): Promise<void> {
-  await speak(PREVIEW_TEXT, { provider: 'gemini', geminiVoiceName: voiceName });
+  // noFallback: se a síntese falhar, o picker mostra o erro — nunca a voz do
+  // sistema fingindo ser a voz escolhida.
+  await speak(PREVIEW_TEXT, { provider: 'gemini', geminiVoiceName: voiceName, noFallback: true });
 }
 
 /**
@@ -784,6 +838,11 @@ export async function playSavedAudio(
 
 /** Para a reprodução atual (sistema + player Gemini) SEM invalidar o token. */
 async function stopPlayback() {
+  // Síntese curta em voo vira descartável: para de re-tentar (ver activeSpeakSignal).
+  if (activeSpeakSignal) {
+    activeSpeakSignal.aborted = true;
+    activeSpeakSignal = null;
+  }
   try {
     await Speech.stop();
   } catch {

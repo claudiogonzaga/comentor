@@ -55,8 +55,11 @@ import { getSpokenSilencedAt, isHeadphonesConnected } from '../services/spokenNu
 import { getDoneNudgeTypes } from '../services/database';
 import { format } from 'date-fns';
 import { isQuietNow } from '../services/quietHours';
-import { markSleepDone } from '../services/coach';
+import { markSleepDone, rearmSleepReminders } from '../services/coach';
 import { isSpeaking, speak } from '../services/voice';
+import { useReadAloud } from '../store/useReadAloud';
+import { useMediaQueue } from '../store/useMediaQueue';
+import { isClipPlaying } from '../services/audioDecks';
 import { playOwlCall } from '../services/owlSound';
 import { colors } from '../theme';
 
@@ -99,6 +102,21 @@ const navTheme = {
   },
 };
 
+/**
+ * Algum player do app com áudio saindo (ou prestes a sair)? isSpeaking() só
+ * enxerga voice.ts; o "Leia para mim" na voz Gemini, a Sequência e os baralhos
+ * tocam em players próprios. Falar por cima deles e depois abrir o microfone
+ * deixava o reconhecedor transcrever a leitura do alto-falante como resposta.
+ * 'generating' conta porque, ao terminar a geração, a leitura começa sozinha.
+ */
+function appAudioBusy(): boolean {
+  if (isSpeaking()) return true;
+  const ra = useReadAloud.getState().status;
+  if (ra === 'playing' || ra === 'generating') return true;
+  if (useMediaQueue.getState().status === 'playing') return true;
+  return isClipPlaying();
+}
+
 export function RootNavigator({ navigationRef }: { navigationRef: any }) {
   const { config } = useAppStore();
   const onboarded = config?.onboardingDone ?? false;
@@ -131,9 +149,24 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         k?: number;
         logDate?: string;
         lateMinutes?: number;
+        /** Dia (yyyy-MM-dd) a que a cobrança pertence — só nas insistências. */
+        day?: string;
       };
       const type = data.type ?? '';
       const action = response.actionIdentifier;
+      // DIA DO LEMBRETE respondido: a cobrança traz o dia em `data.day`; a
+      // âncora recorrente não, então vale o dia em que a notificação foi
+      // entregue. Hábito das 23:30 respondido à 00:10 pertence a ontem — antes
+      // a marca ia para o dia novo, que já amanhecia "feito".
+      const deliveredMs =
+        response.notification.date < 1e11
+          ? response.notification.date * 1000
+          : response.notification.date;
+      const reminderDay =
+        data.day ??
+        (Number.isFinite(deliveredMs) && deliveredMs > 0
+          ? format(new Date(deliveredMs), 'yyyy-MM-dd')
+          : undefined);
       const nav = navigationRef.current;
       if (!nav) return;
 
@@ -149,6 +182,8 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           }
           // Encerra só a corrente do sono — mantém inspiração/nudges vivos.
           await cancelSleepEscalationReminders();
+          // …e arma as noites seguintes (a desta noite fica de fora: já foi dormir).
+          await rearmSleepReminders().catch(() => {});
           nav.navigate('Home');
           return;
         }
@@ -186,7 +221,13 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         await handleMorningResponse(data, action, response.userText ?? undefined);
         if (action === Notifications.DEFAULT_ACTION_IDENTIFIER) nav.navigate('Home');
         return;
-      } else if (type === 'prep-reminder' || type === 'nudge:breathing') {
+      } else if (
+        type === 'prep-reminder' ||
+        // Só o toque no CORPO abre o exercício. Os botões ("Já fiz", "Não fiz",
+        // "Me dê mais tempo", amostra) seguem para o ramo genérico dos nudges —
+        // antes caíam aqui e eram ignorados: nada era marcado.
+        (type === 'nudge:breathing' && action === Notifications.DEFAULT_ACTION_IDENTIFIER)
+      ) {
         nav.navigate('Breathing');
       } else if (type.startsWith('nudge:') || type === 'awareness') {
         // Botões "Já fiz" / "Me dê mais tempo": MARCAM sem abrir o app (a ação
@@ -202,7 +243,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           }
           return;
         }
-        const meta = { via: 'notification' as const, k: data.k, technique: data.technique };
+        const meta = { via: 'notification' as const, k: data.k, technique: data.technique, day: reminderDay };
         if (action === NUDGE_DONE_ACTION && data.nudgeType) {
           // A técnica que precedeu o "Já fiz" pontua: é assim que a coruja
           // aprende o que convence ESTA pessoa.
@@ -241,7 +282,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         const snoozeMin = useAppStore.getState().config?.snoozeMinutes ?? 20;
         if (action === MED_DONE_ACTION && typeof data.medId === 'number') {
           try {
-            await confirmMedication(data.medId, { via: 'notification' });
+            await confirmMedication(data.medId, { via: 'notification', day: reminderDay });
           } catch {
             /* best-effort */
           }
@@ -255,7 +296,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           return;
         } else if (action === MED_SKIP_ACTION && typeof data.medId === 'number') {
           try {
-            await skipMedicationToday(data.medId, { via: 'notification' });
+            await skipMedicationToday(data.medId, { via: 'notification', day: reminderDay });
           } catch {
             /* best-effort */
           }
@@ -328,8 +369,9 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
         // plano, EXCETO com fone conectado: aí a voz sai pelo fone, sem
         // constranger ninguém (o silencioso existe pra não tocar no falante).
         if ((await isQuietNow()) && !isHeadphonesConnected()) return;
-        // Don't talk over the owl's own voice (chat reading / preview).
-        if (isSpeaking()) return;
+        // Don't talk over the owl's own voice (chat reading / preview) nem
+        // sobre uma leitura, a Sequência ou um baralho tocando.
+        if (appAudioBusy()) return;
         const d = (notification.request.content.data ?? {}) as { type?: string };
         const t = d.type ?? '';
         const speakable =
@@ -361,7 +403,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           await new Promise((r) => setTimeout(r, due - Date.now()));
           // Saiu do app ou apagou a tela durante a pausa: os timers do JS
           // CONGELAM em segundo plano e este só dispara na volta, atrasado — aí
-          // o Askeo falaria um aviso velho, na hora errada. Atraso > 2 s =
+          // a Comentora falaria um aviso velho, na hora errada. Atraso > 2 s =
           // ficou fora; esta fala morre. (Uma ida e volta rápida, como tocar na
           // própria notificação, não atrasa o timer e não conta.)
           if (Date.now() - due > 2000) return;
@@ -374,7 +416,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           if (now?.silentMode || (now?.nudgeVolume ?? 1) <= 0) return;
           if (now?.spokenHeadphonesOnly && !isHeadphonesConnected()) return;
           if ((await isQuietNow()) && !isHeadphonesConnected()) return;
-          if (isSpeaking()) return;
+          if (appAudioBusy()) return;
           // Lembrete que pede resposta e JÁ foi respondido durante a pausa (pelos
           // botões da notificação): não fala. Só vale para os que pedem ação —
           // o anúncio de hábito formado e os avisos do jejum falam sempre.
@@ -404,7 +446,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           void speak(text, { volume, onDone: resolve, onError: () => resolve() });
         });
         // RESPOSTA POR VOZ: para lembretes acionáveis (hábito/remédio), a
-        // Askeo lista as opções (a/b/c) e abre o MICROFONE. A resposta
+        // Comentora lista as opções (a/b/c) e abre o MICROFONE. A resposta
         // falada marca feito / adia / pula — sem tocar na tela.
         const dd = (notification.request.content.data ?? {}) as {
           medId?: number;
@@ -417,7 +459,9 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
             : dd.nudgeType && dd.verify
               ? ({ kind: 'nudge', nudgeType: dd.nudgeType } as const)
               : null;
-        if (ref) {
+        // Um player que começou durante a fala (ex.: a geração da leitura
+        // terminou) também barra o microfone — não abre com o alto-falante tocando.
+        if (ref && !appAudioBusy()) {
           await askAndHandleVoiceAnswer(ref, { snoozeMinutes, volume });
         }
       } catch {

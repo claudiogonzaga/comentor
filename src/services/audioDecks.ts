@@ -16,7 +16,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import { Platform, ToastAndroid } from 'react-native';
-import { Unzip, UnzipInflate, UnzipPassThrough, Zip, ZipPassThrough, strFromU8, strToU8 } from 'fflate';
+import { Unzip, UnzipInflate, UnzipPassThrough, strFromU8, strToU8 } from 'fflate';
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import {
   AUDIO_CLIP_MAX_MS,
@@ -24,6 +24,7 @@ import {
   addAudioClips,
   createAudioDeck,
   deleteAudioDeckRows,
+  getAudioDeckSeqEnd,
   listAudioClips,
   listAudioDecks,
   setAudioClipDuration,
@@ -233,6 +234,58 @@ function parseManifest(csv: string): Map<string, ManifestRow> {
 
 // ——— Importação ———
 
+/**
+ * Tamanho de cada entrada segundo o diretório central (no fim do zip). Um zip gerado
+ * em fluxo (com data descriptor, ex.: o do Finder) não traz o tamanho no cabeçalho
+ * local, e o Unzip em fluxo acha o fim da entrada varrendo o conteúdo atrás de
+ * "PK…": se o áudio tiver esses bytes por acaso, a entrada sai cortada. Conferindo
+ * com o diretório central, o trecho cortado vai para os ignorados em vez de ser
+ * gravado pela metade em silêncio. null se não deu para ler (aí não confere).
+ */
+function centralSizes(zipFile: File, total: number): Map<string, number> | null {
+  try {
+    const h = zipFile.open();
+    try {
+      const tailLen = Math.min(total, 22 + 65535); // EOCD + comentário máximo
+      h.offset = total - tailLen;
+      const tail = h.readBytes(tailLen);
+      let e = -1;
+      for (let i = tail.length - 22; i >= 0; i--) {
+        if (tail[i] === 0x50 && tail[i + 1] === 0x4b && tail[i + 2] === 0x05 && tail[i + 3] === 0x06) {
+          e = i;
+          break;
+        }
+      }
+      if (e < 0) return null;
+      const tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+      const cdSize = tv.getUint32(e + 12, true);
+      const cdOff = tv.getUint32(e + 16, true);
+      if (cdOff === 0xffffffff || cdOff + cdSize > total) return null; // zip64: não confere
+      h.offset = cdOff;
+      const cd = h.readBytes(cdSize);
+      const v = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+      const out = new Map<string, number>();
+      let p = 0;
+      while (p + 46 <= cd.length && v.getUint32(p, true) === 0x02014b50) {
+        const flag = v.getUint16(p + 8, true);
+        const usize = v.getUint32(p + 24, true);
+        const fnl = v.getUint16(p + 28, true);
+        const exl = v.getUint16(p + 30, true);
+        const cml = v.getUint16(p + 32, true);
+        // mesmo decodificador do Unzip do fflate, para o nome bater com f.name
+        const name = strFromU8(cd.subarray(p + 46, p + 46 + fnl), !(flag & 0x800));
+        if (usize !== 0xffffffff) out.set(name, usize);
+        p += 46 + fnl + exl + cml;
+      }
+      return out;
+    } finally {
+      h.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
 export interface ImportAudioDeckResult {
   deckId: number | null;
   name: string;
@@ -271,6 +324,7 @@ export async function importAudioDeckFromZip(
     return fail(`O zip tem ${Math.round(total / 1048576)} MB; o limite é ${AUDIO_DECK_SPEC.maxZipBytes / 1048576} MB. Divida em dois baralhos.`);
   }
 
+  const cdSizes = centralSizes(zipFile, total);
   const deckName = (asset.name ?? 'Baralho de áudio').replace(/\.zip$/i, '').trim() || 'Baralho de áudio';
   onProgress?.('Criando o baralho…');
   let deckId: number;
@@ -290,7 +344,7 @@ export async function importAudioDeckFromZip(
   const skipped: { name: string; reason: string }[] = [];
   const saved: { path: string; savedName: string }[] = [];
   let manifestCsv = '';
-  let deckJson: { name?: string; playMode?: string } | null = null;
+  let deckJson: { name?: string; playMode?: string; seqEndOrd?: unknown } | null = null;
   let aborted: string | null = null;
 
   const unzip = new Unzip();
@@ -339,6 +393,13 @@ export async function importAudioDeckFromZip(
         }
       }
       if (!final || tooBig) return;
+      // Entrada que saiu menor (ou maior) que o diretório central diz: cortada.
+      const expected = cdSizes?.get(path);
+      if (expected != null && expected !== size) {
+        skipped.push({ name: baseName(path), reason: 'arquivo truncado no zip' });
+        parts.length = 0;
+        return;
+      }
       const all = new Uint8Array(size);
       let o = 0;
       for (const p of parts) {
@@ -451,10 +512,17 @@ export async function importAudioDeckFromZip(
     await addAudioClips(deckId, clips);
 
     // Nome/modo vindos de um backup (deck.json).
-    const dj = deckJson as { name?: string; playMode?: string } | null;
-    const { renameAudioDeck, setAudioDeckMode } = await import('./database');
+    const dj = deckJson as { name?: string; playMode?: string; seqEndOrd?: unknown } | null;
+    const { renameAudioDeck, setAudioDeckMode, setAudioDeckSeqEnd } = await import('./database');
     if (dj?.name && typeof dj.name === 'string') await renameAudioDeck(deckId, dj.name.slice(0, 80));
-    if (dj?.playMode === 'sequence') await setAudioDeckMode(deckId, 'sequence');
+    if (dj?.playMode === 'sequence') {
+      await setAudioDeckMode(deckId, 'sequence');
+      // O marcador de leitura do audiolivro: o baralho continua de onde estava.
+      const end = dj.seqEndOrd;
+      if (typeof end === 'number' && Number.isInteger(end) && end >= -1 && end < clips.length) {
+        await setAudioDeckSeqEnd(deckId, end);
+      }
+    }
 
     // Mede a duração (4 por vez): trecho acima do limite não toca nos alertas.
     onProgress?.('Medindo a duração dos trechos…');
@@ -493,6 +561,125 @@ function csvField(v: string | number | null | undefined): string {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+let CRC_TABLE: Uint32Array | null = null;
+
+/** CRC-32 (o do formato zip) dos bytes. */
+function crc32(data: Uint8Array): number {
+  if (!CRC_TABLE) {
+    CRC_TABLE = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      CRC_TABLE[n] = c >>> 0;
+    }
+  }
+  const t = CRC_TABLE;
+  let c = 0xffffffff;
+  for (let i = 0; i < data.length; i++) c = t[(c ^ data[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * ZIP sem compressão ("stored") escrito em fluxo, com CRC e TAMANHO no cabeçalho
+ * local. O Zip do fflate em fluxo grava o cabeçalho sem tamanho (data descriptor), e
+ * o Unzip em fluxo da importação então acha o fim da entrada varrendo os bytes do
+ * áudio atrás de "PK…": um áudio que tivesse esses bytes por acaso voltava cortado,
+ * em silêncio — justamente o backup. Cada arquivo já está inteiro na memória, então
+ * dá para calcular CRC e tamanho antes, e o Unzip lê exatamente N bytes.
+ */
+class StoredZipWriter {
+  private offset = 0;
+  private count = 0;
+  private central: Uint8Array[] = [];
+  private readonly write: (chunk: Uint8Array) => void;
+
+  constructor(write: (chunk: Uint8Array) => void) {
+    this.write = write;
+  }
+
+  add(name: string, data: Uint8Array): void {
+    const fn = strToU8(name);
+    const flag = fn.length !== name.length ? 0x0800 : 0; // nome com acento: UTF-8
+    const crc = crc32(data);
+    const now = new Date();
+    const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+
+    const local = new Uint8Array(30 + fn.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true); // versão necessária
+    lv.setUint16(6, flag, true);
+    lv.setUint16(8, 0, true); // stored
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, date, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true); // comprimido
+    lv.setUint32(22, data.length, true); // original
+    lv.setUint16(26, fn.length, true);
+    lv.setUint16(28, 0, true); // sem extra
+    local.set(fn, 30);
+
+    const cd = new Uint8Array(46 + fn.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true); // feito por
+    cv.setUint16(6, 20, true); // versão necessária
+    cv.setUint16(8, flag, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, time, true);
+    cv.setUint16(14, date, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, fn.length, true);
+    // 30 extra, 32 comentário, 34 disco, 36/38 atributos: zero
+    cv.setUint32(42, this.offset, true); // onde está o cabeçalho local
+    cd.set(fn, 46);
+
+    this.write(local);
+    this.write(data);
+    this.central.push(cd);
+    this.offset += local.length + data.length;
+    this.count++;
+  }
+
+  /** Diretório central + fim de diretório. */
+  end(): void {
+    let size = 0;
+    for (const c of this.central) {
+      this.write(c);
+      size += c.length;
+    }
+    const eocd = new Uint8Array(22);
+    const v = new DataView(eocd.buffer);
+    v.setUint32(0, 0x06054b50, true);
+    v.setUint16(8, this.count, true);
+    v.setUint16(10, this.count, true);
+    v.setUint32(12, size, true);
+    v.setUint32(16, this.offset, true);
+    this.write(eocd);
+  }
+}
+
+/**
+ * Pasta (no cache) do arquivo entregue à folha de compartilhamento. shareAsync volta
+ * quando o seletor fecha, não quando o destino terminou de ler (o Drive envia em
+ * segundo plano; um rascunho de e-mail lê o anexo ao enviar): apagar logo depois
+ * deixava o destino sem o arquivo. Ele fica até o PRÓXIMO compartilhamento do mesmo
+ * tipo, que limpa a pasta antes.
+ */
+function freshShareDir(kind: 'baralho' | 'trecho'): Directory {
+  const dir = new Directory(Paths.cache, 'compartilhar', kind);
+  try {
+    if (dir.exists) dir.delete();
+  } catch {
+    /* sobra do anterior: sem prejuízo */
+  }
+  dir.create({ intermediates: true, idempotent: true });
+  return dir;
+}
+
 function safeName(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'trecho';
 }
@@ -513,27 +700,15 @@ export async function exportAudioDeck(deckId: number): Promise<{ ok: boolean; er
     if (!clips.length) return { ok: false, error: 'Os arquivos de áudio deste baralho não estão no aparelho.' };
 
     const stamp = new Date().toISOString().slice(0, 10);
-    const out = new File(Paths.cache, `askeo-baralho-${safeName(deck.name)}_${stamp}.zip`);
+    const out = new File(freshShareDir('baralho'), `askesis-baralho-${safeName(deck.name)}_${stamp}.zip`);
     out.create({ overwrite: true });
     let handle: ReturnType<File['open']> | null = out.open();
-    let zipError: Error | null = null;
     try {
-      const zip = new Zip((err, chunk) => {
-        if (err) {
-          zipError = err;
-          return;
-        }
-        try {
-          handle?.writeBytes(chunk);
-        } catch (e) {
-          zipError = e instanceof Error ? e : new Error('falha ao gravar o zip');
-        }
-      });
-      const add = (name: string, data: Uint8Array) => {
-        const f = new ZipPassThrough(name); // áudio já é comprimido; texto é pequeno
-        zip.add(f);
-        f.push(data, true);
-      };
+      const h = handle;
+      // Sem compressão (áudio já é comprimido; texto é pequeno) e com tamanho no
+      // cabeçalho: ver StoredZipWriter. Falha de gravação lança e cai no catch.
+      const zip = new StoredZipWriter((chunk) => h.writeBytes(chunk));
+      const add = (name: string, data: Uint8Array) => zip.add(name, data);
 
       const names: string[] = [];
       const lines = ['Ordem,Arquivo,Título,Texto,Autor,Referência,Nota,Curtidas,Descurtidas,Execuções,Última execução'];
@@ -548,17 +723,22 @@ export async function exportAudioDeck(deckId: number): Promise<{ ok: boolean; er
         );
       }
       add('deck.csv', strToU8('﻿' + lines.join('\r\n')));
-      add('deck.json', strToU8(JSON.stringify({ name: deck.name, playMode: deck.playMode, exportedAt: new Date().toISOString() })));
+      // seqEndOrd: o marcador de leitura (último trecho que tocou), na numeração do
+      // zip — só os trechos com arquivo entram, então conta quantos vêm até ele.
+      const seqEnd = await getAudioDeckSeqEnd(deckId).catch(() => -1);
+      const seqEndOrd = clips.filter((c) => c.ord <= seqEnd).length - 1;
+      add(
+        'deck.json',
+        strToU8(JSON.stringify({ name: deck.name, playMode: deck.playMode, seqEndOrd, exportedAt: new Date().toISOString() })),
+      );
       for (let i = 0; i < clips.length; i++) {
         const bytes = await new File(Paths.document, 'audiodecks', String(deckId), clips[i].fileName).bytes();
         add(names[i], bytes);
-        if (zipError) break;
         if (i % 10 === 9) await sleep(0);
       }
       zip.end();
       handle.close();
       handle = null;
-      if (zipError) throw zipError;
     } catch (e) {
       try {
         handle?.close();
@@ -572,15 +752,8 @@ export async function exportAudioDeck(deckId: number): Promise<{ ok: boolean; er
       }
       return { ok: false, error: e instanceof Error ? e.message : 'erro ao gerar o zip' };
     }
-    try {
-      await Sharing.shareAsync(out.uri, { mimeType: 'application/zip', dialogTitle: 'Exportar baralho de áudio' });
-    } finally {
-      try {
-        out.delete(); // o zip no cache já foi entregue
-      } catch {
-        /* ignore */
-      }
-    }
+    // Não apaga depois: ver freshShareDir (o próximo export limpa).
+    await Sharing.shareAsync(out.uri, { mimeType: 'application/zip', dialogTitle: 'Exportar baralho de áudio' });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };
@@ -593,6 +766,14 @@ export function deleteAllAudioDeckFiles(): void {
   try {
     const root = new Directory(Paths.document, 'audiodecks');
     if (root.exists) root.delete();
+  } catch {
+    /* ignore */
+  }
+  // O último compartilhado (zip do baralho com deck.csv de notas e execuções,
+  // trecho) fica no cache até o próximo (ver freshShareDir): o reset leva junto.
+  try {
+    const share = new Directory(Paths.cache, 'compartilhar');
+    if (share.exists) share.delete();
   } catch {
     /* ignore */
   }
@@ -646,6 +827,12 @@ export function stopClip(): void {
 
 registerPlayer('audiodeck', stopClip);
 
+/** Há um trecho tocando agora? (O lembrete falado não fala por cima nem abre o
+ *  microfone com o alto-falante tocando um trecho.) */
+export function isClipPlaying(): boolean {
+  return playingId !== null;
+}
+
 /** Aviso curto ("Copiado") — Toast no Android; no resto, silencioso. */
 export function notifyShort(msg: string): void {
   if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -683,24 +870,12 @@ export async function shareClipAudio(c: AudioClip): Promise<{ ok: boolean; error
     const src = new File(Paths.document, 'audiodecks', String(c.deckId), c.fileName);
     if (!src.exists) return { ok: false, error: 'O arquivo de áudio deste trecho não está no aparelho.' };
     const ext = extOf(c.fileName) || 'mp3';
-    const out = new File(Paths.cache, `${String(c.ord + 1).padStart(3, '0')}-${safeName(c.title)}.${ext}`);
-    try {
-      if (out.exists) out.delete();
-    } catch {
-      /* ignore */
-    }
+    const out = new File(freshShareDir('trecho'), `${String(c.ord + 1).padStart(3, '0')}-${safeName(c.title)}.${ext}`);
     src.copy(out);
     const mime =
       ext === 'm4a' || ext === 'aac' ? 'audio/mp4' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' || ext === 'opus' ? 'audio/ogg' : ext === 'flac' ? 'audio/flac' : 'audio/mpeg';
-    try {
-      await Sharing.shareAsync(out.uri, { mimeType: mime, dialogTitle: 'Compartilhar trecho de áudio' });
-    } finally {
-      try {
-        out.delete();
-      } catch {
-        /* ignore */
-      }
-    }
+    // Não apaga depois: ver freshShareDir (o próximo compartilhamento limpa).
+    await Sharing.shareAsync(out.uri, { mimeType: mime, dialogTitle: 'Compartilhar trecho de áudio' });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };

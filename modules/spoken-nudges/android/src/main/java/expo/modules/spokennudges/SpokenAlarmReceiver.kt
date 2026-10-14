@@ -13,7 +13,30 @@ import android.util.Log
 class SpokenAlarmReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     val id = intent.getStringExtra(SpokenScheduler.EXTRA_ID) ?: return
-    val alarm = SpokenStore.get(context, id) ?: run {
+    // Ler + re-agendar/remover como UMA operação: o módulo pode estar agendando
+    // (sync do JS, em outra thread) neste mesmo instante — sem o lock, um dos dois
+    // perdia a gravação do outro. Re-agenda o próximo dia já aqui (alarme exato é
+    // one-shot); a ordem em relação ao start do serviço não importa.
+    val alarm = synchronized(SpokenStore) {
+      val a = SpokenStore.get(context, id)
+      if (a != null) {
+        if (a.repeatDaily) {
+          // Próximo dia pela hora de PAREDE (não +24 h absolutas): fuso/horário
+          // de verão não deslocam a fala.
+          // Se o horário guardado já está no futuro, alguém (rearmAll no TIME_SET/
+          // fuso, ou o sync do JS) já o avançou antes desta entrega: mantém e só
+          // re-arma — pular de novo perderia a fala de amanhã.
+          val now = System.currentTimeMillis()
+          val next = if (a.atEpochMs > now + 60_000L) a.atEpochMs
+            else SpokenScheduler.nextDailyFire(a, now, skipCurrent = true)
+          SpokenStore.put(context, a.copy(atEpochMs = next))
+          SpokenScheduler.arm(context, a.id, next)
+        } else {
+          SpokenStore.remove(context, a.id)
+        }
+      }
+      a
+    } ?: run {
       Log.w(SpokenScheduler.TAG, "fire for unknown id=$id")
       return
     }
@@ -33,15 +56,6 @@ class SpokenAlarmReceiver : BroadcastReceiver() {
       }
     } catch (e: Exception) {
       Log.e(SpokenScheduler.TAG, "failed to start service: ${e.message}")
-    }
-
-    // Re-agenda próximo dia (alarme exato é one-shot).
-    if (alarm.repeatDaily) {
-      val next = alarm.atEpochMs + 24L * 60 * 60 * 1000
-      SpokenStore.put(context, alarm.copy(atEpochMs = next))
-      SpokenScheduler.arm(context, alarm.id, next)
-    } else {
-      SpokenStore.remove(context, alarm.id)
     }
   }
 }

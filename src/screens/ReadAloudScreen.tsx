@@ -59,6 +59,9 @@ function errMsg(e: unknown): string {
   if (low.includes('429') || low.includes('quota') || low.includes('rate')) {
     return 'limite POR MINUTO da API atingido — aguarde um pouquinho e tente de novo.';
   }
+  // Falta a chave do GEMINI (o chat pode estar no Claude, com outra chave):
+  // diz qual chave falta em vez do genérico "problema com a chave".
+  if (raw.startsWith('Sem chave do Gemini')) return raw;
   if (low.includes('api key') || low.includes('chave') || low.includes('api_key')) {
     return 'problema com a chave da API.';
   }
@@ -79,6 +82,23 @@ function looksBinary(s: string): boolean {
 
 /** Sequência para tags de tela acesa do "Salvar e gerar áudio" (uma por chamada). */
 let saveSeq = 0;
+/**
+ * Sinais das gerações do "Salvar e gerar áudio" em andamento. Em nível de
+ * MÓDULO (como saveSeq): o Salvar segue se a pessoa sai e volta da tela, e a
+ * tela nova precisa saber que ele existe. Serve para (1) não disparar uma
+ * SEGUNDA geração do mesmo texto pelo ▶ (cota em dobro, os dois gravando o
+ * mesmo arquivo) e (2) poder PARAR o Salvar, que fica fora do store.
+ */
+// Cada sinal guarda a chave `voz|texto` da geração: o ▶ só deve esperar um
+// Salvar do MESMO texto na MESMA voz — bloquear qualquer texto travava o ▶ de
+// todos os outros até o Salvar terminar (minutos, e pausa fora do app).
+const saveSignals = new Map<{ aborted: boolean }, string>();
+const saveKey = (voice: string, t: string) => `${voice}|${t.trim()}`;
+// Telas abertas que mostram o "Parar geração do áudio": um Salvar iniciado
+// antes de sair e voltar continua no módulo, e a tela nova precisa re-renderizar
+// quando ele começa/termina (o estado savingAudio é da instância antiga).
+const saveListeners = new Set<() => void>();
+const notifySaveChange = () => saveListeners.forEach((l) => l());
 
 const PREPARING_MSG =
   'Vou preparar o áudio — pode levar alguns minutos na 1ª vez. A tela fica acesa ' +
@@ -125,7 +145,7 @@ function PlayerBar() {
 
 /**
  * Tela "Leia para mim": cola/sobe um texto grande (visualização, auto-hipnose,
- * oração) e o Askeo lê em voz alta. Na voz do Gemini, gera o áudio COMPLETO
+ * oração) e a Comentora lê em voz alta. Na voz do Gemini, gera o áudio COMPLETO
  * (em background — pode sair da tela) e toca num player com ▶/⏸/⏹ + barra
  * ARRASTÁVEL. Na voz do sistema, lê direto (sem barra). A leitura roda num store
  * GLOBAL, então continua tocando em qualquer tela.
@@ -149,6 +169,15 @@ export function ReadAloudScreen() {
   const autostartedRef = useRef(false);
   const breathingRef = useRef(thenBreathing);
   breathingRef.current = thenBreathing;
+  // Re-render quando um Salvar (desta ou de outra instância da tela) começa/acaba.
+  const [, setSaveTick] = useState(0);
+  useEffect(() => {
+    const l = () => setSaveTick((n) => n + 1);
+    saveListeners.add(l);
+    return () => {
+      saveListeners.delete(l);
+    };
+  }, []);
 
   // Estado da leitura GLOBAL (continua entre telas).
   const status = useReadAloud((s) => s.status);
@@ -326,10 +355,14 @@ export function ReadAloudScreen() {
     const keepTag = `readaloud-save-${++saveSeq}`;
     keepScreenOnFor(keepTag, true);
     void startReadAloudKeepAlive();
+    const saveSignal = { aborted: false };
+    saveSignals.set(saveSignal, saveKey(voice, t));
+    notifySaveChange();
     try {
       const uri = await prepareReadAloudAudio(t, {
         geminiVoiceName: voice,
         paused,
+        signal: saveSignal,
         onProgress: (done, total) => setSaveGen({ done, total }),
       });
       if (uri) await updateReadAloudTextAudio(targetId, uri, voice);
@@ -339,11 +372,18 @@ export function ReadAloudScreen() {
         'Texto e áudio guardados. Ao abrir de novo, toca na hora — sem gerar de novo nem gastar tokens.',
       );
     } catch (e) {
+      if ((e as { aborted?: boolean })?.aborted) {
+        // Parada pela pessoa — não é falha. Os trechos prontos ficam em disco.
+        Alert.alert('Texto salvo', 'Parei a geração do áudio. O áudio é gerado na 1ª leitura.');
+        return;
+      }
       Alert.alert(
         'Texto salvo (áudio falhou)',
         `Salvei o texto, mas não consegui gerar o áudio Gemini: ${errMsg(e)}\n\nO áudio é gerado na 1ª leitura.`,
       );
     } finally {
+      saveSignals.delete(saveSignal);
+      notifySaveChange();
       stopReadAloudKeepAlive();
       keepScreenOnFor(keepTag, false);
       setSaveGen(null);
@@ -456,7 +496,11 @@ export function ReadAloudScreen() {
           : undefined);
       if (chosen?.audioUri) {
         Keyboard.dismiss();
-        setText(chosen.content);
+        // Só carrega na caixa o áudio do PRÓPRIO texto (ou com a caixa vazia).
+        // O fallback do salvo mais recente (autostart da respiração) toca sem
+        // sobrescrever: trocar a caixa apagava o rascunho não salvo, que o
+        // cleanup da tela ainda gravava por cima em read_aloud_draft.
+        if (chosen === match || !t) setText(chosen.content);
         void useReadAloud
           .getState()
           .playSavedUri(chosen.audioUri, chosen.title || titleFor(chosen.content), rate);
@@ -464,7 +508,28 @@ export function ReadAloudScreen() {
       }
     }
     if (!t) return;
+    // Sem áudio salvo: geraria — mas não em paralelo a um Salvar em andamento.
+    if (saveInProgress(t)) return;
     startRead(t, titleFor(t));
+  };
+
+  // Um "Salvar e gerar áudio" DESTE texto (nesta voz) ainda gerando (talvez
+  // iniciado antes de sair e voltar da tela)? Gerar pelo ▶ ao mesmo tempo
+  // rodaria o mesmo texto em paralelo: cota em dobro e os dois gravando o mesmo
+  // arquivo. Outros textos seguem livres.
+  const saveInProgress = (t: string) => {
+    if (provider !== 'gemini') return false;
+    const key = saveKey(geminiVoiceName, t);
+    if (![...saveSignals.values()].includes(key)) return false;
+    Alert.alert(
+      'Aguarde o Salvar',
+      'O áudio do “Salvar e gerar áudio” ainda está sendo preparado. Quando terminar, toca na hora.',
+    );
+    return true;
+  };
+
+  const stopSave = () => {
+    for (const s of saveSignals.keys()) s.aborted = true;
   };
 
   const handlePlay = () => {
@@ -474,6 +539,7 @@ export function ReadAloudScreen() {
 
   // Texto SALVO: se já tem áudio guardado, toca direto (instantâneo); senão gera.
   const handlePlaySaved = (item: ReadAloudText) => {
+    if (!item.audioUri && saveInProgress(item.content)) return;
     setText(item.content);
     if (item.audioUri) {
       Keyboard.dismiss();
@@ -510,8 +576,8 @@ export function ReadAloudScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
-          Cole ou importe um texto — visualização, oração, auto-hipnose — e o
-          Askeo lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
+          Cole ou importe um texto — visualização, oração, auto-hipnose — e a
+          Comentora lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
           para voltar/avançar. Enquanto o áudio é preparado, a tela fica acesa —
           não saia do app até terminar.
         </Text>
@@ -548,8 +614,18 @@ export function ReadAloudScreen() {
           variant="secondary"
           onPress={handleSave}
           loading={savingAudio}
-          disabled={!text.trim() || savingAudio}
+          // Com o "Leia para mim" gerando, o Salvar rodaria a mesma geração em
+          // paralelo (cota em dobro). O ▶ toca e o áudio fica em cache.
+          disabled={!text.trim() || savingAudio || status === 'generating' || gen != null}
         />
+        {/* Também aparece com um Salvar iniciado antes de sair e voltar da tela
+            (savingAudio é desta instância; o sinal fica no módulo) — senão não
+            havia como pará-lo. */}
+        {((savingAudio && saveGen) || saveSignals.size > 0) && (
+          <Pressable onPress={stopSave} hitSlop={8}>
+            <Text style={styles.clear}>Parar geração do áudio</Text>
+          </Pressable>
+        )}
         <Text style={styles.uploadHint}>
           No seletor do Android você pode escolher um arquivo do aparelho ou do
           Google Drive (toque no menu ☰ → Drive). Por enquanto, arquivos de
@@ -623,8 +699,8 @@ export function ReadAloudScreen() {
 
         <View style={{ height: spacing.lg }} />
 
-        {/* Voz: usa a voz GLOBAL do app; atalho para trocar em "Sons e Vozes". */}
-        <Pressable style={styles.voiceShortcut} onPress={() => navigation.navigate('SonsVozes')}>
+        {/* Voz: usa a voz GLOBAL do app; atalho para trocar em "Cérebro e Voz" (a voz saiu de "Sons e Notificações"). */}
+        <Pressable style={styles.voiceShortcut} onPress={() => navigation.navigate('BrainVoice')}>
           <View style={{ flex: 1 }}>
             <Text style={styles.voiceShortcutLabel}>VOZ DA LEITURA</Text>
             <Text style={styles.voiceShortcutValue}>
@@ -633,7 +709,7 @@ export function ReadAloudScreen() {
                 : 'Voz do sistema (Android)'}
             </Text>
             <Text style={styles.voiceShortcutHint}>
-              É a voz geral do app. Toque para trocar em “Sons e Vozes”.
+              É a voz geral do app. Toque para trocar em “Cérebro e Voz da Comentora”.
             </Text>
           </View>
           <Text style={styles.voiceShortcutArrow}>›</Text>

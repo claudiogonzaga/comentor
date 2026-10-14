@@ -41,7 +41,7 @@ fi
 
 # Cria release com APK
 gh release create "$TAG" \
-  --title "Askeo $TAG" \
+  --title "Áskesis $TAG" \
   --notes "$NOTES" \
   "$APK_PATH#comentor-${VERSION#v}.apk"
 

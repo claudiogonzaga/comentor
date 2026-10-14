@@ -13,7 +13,7 @@ import { scheduleInspirationNotifications } from '../services/inspiration';
 import { backfillHealthDailyOnce } from '../services/health';
 import {
   setSpokenHeadphonesOnly,
-  setSpokenQuietHours,
+  mirrorSpokenQuietPeriods,
   setSpokenVolume,
   setSpokenOwlPause,
 } from '../services/spokenNudges';
@@ -40,7 +40,10 @@ function syncVoiceFromConfig(config: UserConfig) {
  */
 function mirrorSpokenConfig(config: UserConfig): void {
   setSpokenHeadphonesOnly(config.spokenHeadphonesOnly);
-  setSpokenQuietHours(config);
+  // Os períodos sem som (lista em KV + sono derivado), NÃO o horário silencioso
+  // legado do config: espelhar o legado aqui apagava, a cada abertura, o que o
+  // card de períodos tinha mandado ao nativo.
+  void mirrorSpokenQuietPeriods();
   setSpokenVolume(config.nudgeVolume ?? 1);
   setSpokenOwlPause(config.owlPauseSeconds ?? 15);
 }

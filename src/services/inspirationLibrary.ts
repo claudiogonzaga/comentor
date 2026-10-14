@@ -254,7 +254,7 @@ export async function shareDeckTemplate(): Promise<{ ok: boolean; error?: string
 }
 
 /** Texto pronto para colar numa IA (ChatGPT, Claude, Gemini…) e receber o CSV do baralho. */
-export const DECK_PROMPT = `Crie um baralho de frases de inspiração como arquivo CSV (UTF-8), pronto para importar no app Askeo.
+export const DECK_PROMPT = `Crie um baralho de frases de inspiração como arquivo CSV (UTF-8), pronto para importar no app Áskesis.
 
 Tema do baralho: [DESCREVA AQUI — ex.: estoicismo, perseverança, ciência, humor leve]
 Quantidade: [ex.: 100] frases, em português.

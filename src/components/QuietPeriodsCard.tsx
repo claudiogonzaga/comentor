@@ -14,7 +14,7 @@ import {
   type QuietPeriod,
   type SleepQuiet,
 } from '../services/quietHours';
-import { setSpokenQuietHours } from '../services/spokenNudges';
+import { mirrorSpokenQuietPeriods } from '../services/spokenNudges';
 import { rescheduleAllNotifications } from '../services/coach';
 
 const SLEEP_HOURS = [6, 7, 8, 9, 10];
@@ -53,6 +53,8 @@ export function QuietPeriodsCard() {
     try {
       await saveSleepQuiet(next);
       invalidateQuietCache();
+      // A janela de sono também vale para a fala com o app fechado.
+      await mirrorSpokenQuietPeriods();
       rescheduleAllNotifications().catch(() => {});
     } catch {
       /* best-effort */
@@ -64,19 +66,9 @@ export function QuietPeriodsCard() {
     try {
       await saveQuietPeriods(next);
       invalidateQuietCache();
-      // Espelha a 1ª janela no nativo (legado, voz em background single-window);
-      // os demais períodos são cobertos pelo filtro de agendamento + canal mudo.
-      const first = next[0];
-      setSpokenQuietHours(
-        first
-          ? {
-              spokenQuietEnabled: true,
-              spokenQuietStart: first.start,
-              spokenQuietEnd: first.end,
-              spokenQuietDays: first.days,
-            }
-          : { spokenQuietEnabled: false },
-      );
+      // Espelha no nativo a lista efetiva inteira (manuais + sono): o serviço de
+      // fala confere todas no disparo, com o app fechado.
+      await mirrorSpokenQuietPeriods();
       // Reaplica os agendamentos para o roteamento ao canal silencioso valer já.
       rescheduleAllNotifications().catch(() => {});
     } catch {

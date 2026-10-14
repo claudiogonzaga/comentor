@@ -18,10 +18,12 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
-import type { AIBackend, LocalModelId } from '../types';
+import type { AIBackend, AIProvider, LocalModelId } from '../types';
 import { LOCAL_MODEL_LIST, formatModelSize } from '../constants/models';
 import { useAppStore } from '../store/useAppStore';
 import { testApiKey } from '../services/gemini';
+import { AiProviderPanel } from '../components/AiProviderPanel';
+import { DEFAULT_CLAUDE_EFFORT, DEFAULT_CLAUDE_MODEL } from '../services/claude';
 
 export function AIChoiceScreen() {
   const navigation = useNavigation<any>();
@@ -36,8 +38,16 @@ export function AIChoiceScreen() {
     LOCAL_MODEL_LIST[0].id,
   );
   const [allowMobileData, setAllowMobileData] = useState(false);
+  // Caminho de API: Claude (Sonnet 5.5, raciocínio médio) já vem escolhido, mas
+  // a pessoa troca para o Gemini ou para outro modelo/raciocínio da lista. Sem
+  // isso, quem só tem chave da Anthropic não conseguia passar do primeiro uso.
+  const [provider, setProvider] = useState<AIProvider>('claude');
+  const [claudeModel, setClaudeModel] = useState(DEFAULT_CLAUDE_MODEL);
+  const [claudeEffortId, setClaudeEffortId] = useState<string>(DEFAULT_CLAUDE_EFFORT);
+  const [hasClaudeKey, setHasClaudeKey] = useState(false);
 
   const trimmedKey = apiKey.trim();
+  const usingClaude = provider === 'claude';
 
   const handleTestKey = async () => {
     if (!trimmedKey) return;
@@ -54,13 +64,19 @@ export function AIChoiceScreen() {
   };
 
   const submitRemote = async () => {
-    if (!trimmedKey) {
+    if (usingClaude && !hasClaudeKey) {
+      Alert.alert('Chave do Claude obrigatória', 'Cole a chave da Anthropic e toque em "Testar e salvar" para continuar.');
+      return;
+    }
+    if (!usingClaude && !trimmedKey) {
       Alert.alert('Chave de API obrigatória', 'Cole a chave do Google AI Studio para continuar.');
       return;
     }
     setSubmitting(true);
     try {
-      if (keyStatus !== 'ok') {
+      // Com o Claude, a chave do Gemini é opcional (só para a voz neural): só
+      // é testada e guardada se a pessoa colou uma.
+      if (trimmedKey && keyStatus !== 'ok') {
         const result = await testApiKey(trimmedKey);
         if (!result.ok) {
           setKeyStatus('error');
@@ -74,8 +90,15 @@ export function AIChoiceScreen() {
         }
         setKeyStatus('ok');
       }
-      await setConfig({ aiBackend: 'remote', localModelId: null, localModelDownloaded: false });
-      await setApiKey(trimmedKey);
+      await setConfig({
+        aiBackend: 'remote',
+        aiProvider: provider,
+        claudeModel,
+        claudeEffort: claudeEffortId,
+        localModelId: null,
+        localModelDownloaded: false,
+      });
+      if (trimmedKey) await setApiKey(trimmedKey);
       navigation.navigate('Interview', { mode: 'onboarding' });
     } finally {
       setSubmitting(false);
@@ -114,7 +137,7 @@ export function AIChoiceScreen() {
             <Owl mood="serious" size={120} />
             <Text style={[typography.title, styles.title]}>Como você quer usar?</Text>
             <Text style={[typography.body, styles.subtitle]}>
-              Escolha como o Askeo vai pensar.
+              Escolha como a Comentora vai pensar.
             </Text>
           </View>
 
@@ -127,9 +150,10 @@ export function AIChoiceScreen() {
                 <GreekIcon name="cloud" size={28} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.optionTitle}>Usar API do Gemini</Text>
+                <Text style={styles.optionTitle}>Usar API (Claude ou Gemini)</Text>
                 <Text style={styles.optionDesc}>
-                  Mais rápida e inteligente. Precisa de uma chave gratuita do Google AI Studio.
+                  Mais rápida e inteligente. Precisa de uma chave da Anthropic (Claude) ou do Google AI
+                  Studio (Gemini, gratuita).
                 </Text>
               </View>
               <View style={[styles.radio, backend === 'remote' && styles.radioActive]} />
@@ -141,7 +165,18 @@ export function AIChoiceScreen() {
 
           {backend === 'remote' && (
             <View style={styles.subPanel}>
-              <Text style={styles.label}>Cole sua chave</Text>
+              <AiProviderPanel
+                provider={provider}
+                claudeModel={claudeModel}
+                claudeEffort={claudeEffortId}
+                onProviderChange={setProvider}
+                onClaudeModelChange={setClaudeModel}
+                onClaudeEffortChange={setClaudeEffortId}
+                onKeyState={setHasClaudeKey}
+              />
+              <Text style={styles.label}>
+                {usingClaude ? 'Chave do Gemini (opcional, só para a voz)' : 'Cole sua chave do Gemini'}
+              </Text>
               <TextInput
                 value={apiKey}
                 onChangeText={(v) => {
@@ -264,10 +299,10 @@ export function AIChoiceScreen() {
           <View style={{ height: spacing.lg }} />
           {backend === 'remote' && (
             <Button
-              label="Ativar com Gemini"
+              label={usingClaude ? 'Ativar com Claude' : 'Ativar com Gemini'}
               onPress={submitRemote}
               loading={submitting}
-              disabled={!trimmedKey || submitting}
+              disabled={(usingClaude ? !hasClaudeKey : !trimmedKey) || submitting}
             />
           )}
           {backend === 'local' && (

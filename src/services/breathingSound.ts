@@ -15,6 +15,11 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 // Aviso ao DONO da trilha ativa de que ela foi substituída por outra (outra
 // tela de respiração, prévia): a sessão dele terminou ali.
 let activeOnReplaced: (() => void) | null = null;
+// Geração da trilha: sobe a cada parada/troca. playBreathingSound só cria o
+// player DEPOIS de um await (modo de áudio); se alguém parar ou trocar nesse
+// meio-tempo, a geração muda e o play em voo desiste — senão nasceria uma
+// trilha órfã, tocando em loop sem ninguém com referência para pará-la.
+let gen = 0;
 
 /**
  * Entra no modo de áudio do exercício de respiração.
@@ -79,6 +84,7 @@ function release(player: AudioPlayer): void {
  * poderia aterrissar depois e desfazê-lo).
  */
 function stopActiveSound(restoreMode: boolean): void {
+  gen++; // cancela qualquer play ainda no await do modo de áudio
   activeOnReplaced = null;
   if (previewTimer) {
     clearTimeout(previewTimer);
@@ -125,7 +131,7 @@ function resolveSource(
 /**
  * Toca o som de respiração escolhido (por padrão em loop). Substitui qualquer
  * som ativo. Retorna false se não havia nada para tocar (ex.: 'custom' sem
- * arquivo).
+ * arquivo) ou se foi parado/substituído antes de o player nascer.
  */
 export async function playBreathingSound(opts: {
   id: string;
@@ -153,10 +159,14 @@ export async function playBreathingSound(opts: {
     } catch {
       /* callback do dono anterior não derruba a troca */
     }
+    const my = gen;
     activeOnReplaced = opts.onReplaced ?? null;
     // Depois do stop, para o restore não correr por cima: trilha por cima do
     // que o usuário já estiver ouvindo, e seguindo com a tela apagada.
     await enterMixingAudioMode();
+    // Parado (Voltar/Pausar/saída da tela) ou substituído (outra prévia)
+    // durante o await: não cria o player.
+    if (my !== gen) return false;
     const player = createAudioPlayer(source);
     active = player;
     player.loop = opts.loop !== false;

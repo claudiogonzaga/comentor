@@ -1,10 +1,12 @@
 import * as Notifications from 'expo-notifications';
 import {
   getDoneNudgeTypes,
+  getKV,
   getUserConfig,
   listMedications,
   markNudgeDone,
   markNudgeUndone,
+  setKV,
 } from './database';
 import {
   MED_CATEGORY,
@@ -15,7 +17,7 @@ import {
 } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
 import { syncSpokenMedications } from './spokenNudges';
-import { recordHabitEvent, type ConfirmMeta } from './habitEvents';
+import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
 import { refreshReviewNotification } from './review';
 import { persuasiveBody, escalationBody } from './persuasion';
 import type { Medication } from '../types';
@@ -156,7 +158,83 @@ export async function cancelAllMedications(): Promise<void> {
  * "Já tomei 💊" / "Lembrar depois". Idempotente — seguro chamar a cada save /
  * ao abrir o app (re-arma a corrente do dia).
  */
-export async function scheduleAllMedications(): Promise<string[]> {
+// EXCLUSÃO (mesma de scheduleAllNudges): cancelar tudo e reagendar item a item
+// não pode rodar em paralelo consigo mesma — as execuções se intercalam e
+// sobram âncoras e cobranças em dobro. Uma roda por vez; quem chega no meio
+// marca `medRunDirty` e recebe a mesma promise, que faz mais uma passada.
+let medRun: Promise<string[]> | null = null;
+let medRunDirty = false;
+
+export function scheduleAllMedications(): Promise<string[]> {
+  if (medRun) {
+    medRunDirty = true;
+    return medRun;
+  }
+  const run = (async () => {
+    let ids: string[] = [];
+    do {
+      medRunDirty = false;
+      ids = await scheduleAllMedicationsOnce();
+    } while (medRunDirty);
+    return ids;
+  })().finally(() => {
+    medRun = null;
+    // Pedido que chegou entre o fim do laço e este finally: não pode se perder.
+    if (medRunDirty) {
+      medRunDirty = false;
+      void scheduleAllMedications().catch(() => {});
+    }
+  });
+  medRun = run;
+  return run;
+}
+
+/**
+ * Espera o reagendamento em curso terminar, antes de cancelar/acrescentar
+ * notificações de um lembrete: a passada que leu o estado antes da resposta
+ * agendaria a corrente depois do cancelamento.
+ */
+async function settleMedScheduling(): Promise<void> {
+  while (medRun) await medRun.catch(() => {});
+}
+
+/** Chave em app_kv: até quando (epoch ms) vale o "Me dê mais tempo" do lembrete. */
+function snoozeUntilKey(medId: number): string {
+  return `snooze_until:med:${medId}`;
+}
+
+/** Notificação única do "Me dê mais tempo" (também recriada ao reagendar). */
+async function scheduleMedSnoozeNotification(
+  med: Medication,
+  fireAt: Date,
+  sound: string,
+  channelId: string,
+): Promise<string | null> {
+  const { title, pendingBody, category } = reminderCopy(med);
+  return gatedSchedule({
+    content: {
+      title,
+      body: pendingBody,
+      data: { type: `med:${med.id}`, medId: med.id, followup: true, day: todayISO() },
+      sound,
+      categoryIdentifier: category,
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: fireAt,
+      channelId,
+    },
+  });
+}
+
+/**
+ * Resposta antecipada: por quantas semanas o dia da semana de HOJE fica com
+ * gatilhos DATE (os demais dias seguem com SEMANAL). Margem para o app passar
+ * semanas sem reagendar (vivo em segundo plano, sem cold start).
+ */
+const EARLY_ANSWER_WEEKS = 8;
+
+async function scheduleAllMedicationsOnce(): Promise<string[]> {
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
   await cancelAllMedications();
@@ -194,7 +272,7 @@ export async function scheduleAllMedications(): Promise<string[]> {
     const safeMinute = Math.min(59, Math.max(0, m));
 
     const key = completionKey(med.id);
-    const { title, baseBody, actionLine, pendingBody, category } = reminderCopy(med);
+    const { title, baseBody, actionLine, category } = reminderCopy(med);
 
     // Dias da semana em que o lembrete vale (0=domingo … 6=sábado, igual a
     // Date.getDay()). Os 7 dias = diário; um subconjunto = semanal em dias
@@ -284,10 +362,64 @@ export async function scheduleAllMedications(): Promise<string[]> {
       categoryIdentifier: category,
     };
 
+    // JÁ RESPONDIDO hoje e o horário ainda não chegou (marcou "Já tomei" às
+    // 07:40 o remédio das 08:00): a âncora de HOJE não pode tocar — "Hora de
+    // tomar" depois de já tomado é convite a dose dupla. Gatilho DIÁRIO/SEMANAL
+    // não sabe pular um dia: os OUTROS dias ativos ficam com gatilho SEMANAL
+    // (recorrente — não se esgota se o app passar dias sem reabrir, pois o JS
+    // congela em segundo plano e nada reagenda) e só o dia da semana de HOJE
+    // vira DATE nas próximas EARLY_ANSWER_WEEKS semanas. O primeiro
+    // reagendamento a partir de amanhã devolve o DIÁRIO; sem ele, perde-se só
+    // esse dia da semana, e só depois de N semanas.
+    const todayDow = new Date().getDay();
+    const anchorToday = buildTodayAt(safeHour, safeMinute);
+    const answeredEarly =
+      activeDays.includes(todayDow) &&
+      anchorToday.getTime() > Date.now() &&
+      (doneKeys.includes(key) || doneKeys.includes(skipKey(med.id)));
+
     // Âncora recorrente. Diário → um gatilho DAILY; semanal → um gatilho
     // WEEKLY por dia selecionado (no expo, weekday 1=domingo … 7=sábado, então
     // somamos 1 ao índice 0–6).
-    if (isDaily) {
+    if (answeredEarly) {
+      for (const dow of activeDays) {
+        if (dow !== todayDow) {
+          try {
+            const id = await gatedSchedule({
+              content: anchorContent,
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+                weekday: dow + 1,
+                hour: safeHour,
+                minute: safeMinute,
+                channelId,
+              },
+            });
+            if (id) ids.push(id);
+          } catch (err) {
+            console.warn(
+              `failed to schedule weekly medication anchor ${med.id} (dow ${dow}):`,
+              err,
+            );
+          }
+          continue;
+        }
+        // Dia da semana de hoje: pula hoje, DATE nas próximas semanas.
+        for (let w = 1; w <= EARLY_ANSWER_WEEKS; w++) {
+          const at = new Date(anchorToday);
+          at.setDate(at.getDate() + 7 * w);
+          try {
+            const id = await gatedSchedule({
+              content: anchorContent,
+              trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId },
+            });
+            if (id) ids.push(id);
+          } catch (err) {
+            console.warn(`failed to schedule dated medication anchor ${med.id}:`, err);
+          }
+        }
+      }
+    } else if (isDaily) {
       try {
         const id = await gatedSchedule({
           content: anchorContent,
@@ -327,14 +459,26 @@ export async function scheduleAllMedications(): Promise<string[]> {
 
     // Corrente de insistências de hoje — só se HOJE for um dia ativo e o
     // lembrete ainda não tiver sido marcado como feito.
-    const todayDow = new Date().getDay();
     if (activeDays.includes(todayDow) && !doneKeys.includes(key) && !doneKeys.includes(skipKey(med.id))) {
       const base = buildTodayAt(safeHour, safeMinute);
       // Âncora da corrente: o horário do lembrete OU agora (o que for MAIOR).
       // Assim, se o app reabre depois do horário e a tarefa segue pendente, a
       // coruja volta a insistir A PARTIR DE AGORA — em vez de pular tudo que já
       // passou e ficar muda (era por isso que "não insistia").
-      const anchor = base.getTime() > Date.now() ? base.getTime() : Date.now();
+      let anchor = base.getTime() > Date.now() ? base.getTime() : Date.now();
+      // "Me dê mais tempo" ainda valendo: recria o aviso do adiamento (o
+      // cancelAllMedications acima o apagou) e a corrente só recomeça DEPOIS
+      // dele — antes, reagendar ignorava os minutos pedidos.
+      const snoozeUntil = Number(await getKV(snoozeUntilKey(med.id)).catch(() => null)) || 0;
+      if (snoozeUntil > Date.now()) {
+        try {
+          const id = await scheduleMedSnoozeNotification(med, new Date(snoozeUntil), sound, channelId);
+          if (id) ids.push(id);
+        } catch (err) {
+          console.warn(`failed to re-schedule medication snooze ${med.id}:`, err);
+        }
+        if (snoozeUntil > anchor) anchor = snoozeUntil;
+      }
       for (let k = 1; k <= MED_MAX_REPEATS; k++) {
         const fireAt = new Date(anchor + k * intervalMin * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
@@ -345,7 +489,8 @@ export async function scheduleAllMedications(): Promise<string[]> {
               // Tom crescente a cada insistência (≥3 vezes).
               // Só a mensagem escalada (sem repetir o "Hora de tomar…").
               body: escalatedBody(med, userName, actionLine, k),
-              data: { type: `med:${med.id}`, medId: med.id, followup: true },
+              // `day`: a que dia a cobrança pertence (resposta depois da meia-noite).
+              data: { type: `med:${med.id}`, medId: med.id, followup: true, day: today },
               sound,
               categoryIdentifier: category,
             },
@@ -379,12 +524,23 @@ export async function scheduleAllMedications(): Promise<string[]> {
         : `Hora do seu lembrete: ${med.name}.`;
       const days =
         med.daysOfWeek && med.daysOfWeek.length > 0 ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
+      const hour = Math.min(23, Math.max(0, hh));
+      const minute = Math.min(59, Math.max(0, mm));
       return {
         id: med.id,
         text,
-        hour: Math.min(23, Math.max(0, hh)),
-        minute: Math.min(59, Math.max(0, mm)),
+        hour,
+        minute,
         daysOfWeek: days,
+        // Já respondido hoje antes do horário: o alarme FALADO de hoje também
+        // não toca (mesma regra da âncora, acima). Vai a DATA decidida, não um
+        // booleano: a sincronização falada pode rodar depois do horário, e aí
+        // "pular hoje" no relógio dela derrubaria o de amanhã.
+        skipDate:
+          buildTodayAt(hour, minute).getTime() > Date.now() &&
+          (doneKeys.includes(completionKey(med.id)) || doneKeys.includes(skipKey(med.id)))
+            ? todayISO()
+            : undefined,
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -402,11 +558,16 @@ export async function scheduleAllMedications(): Promise<string[]> {
  * Cancela as insistências futuras (follow-ups) deste lembrete e dispensa as
  * notificações dele já visíveis na bandeja. Usado ao confirmar, adiar ou pular.
  */
-async function clearMedNotifications(medId: number): Promise<void> {
+async function clearMedNotifications(medId: number, day?: string): Promise<void> {
+  // Um reagendamento em curso leu o estado antes desta resposta: espera ele
+  // acabar, senão a corrente seria agendada depois do cancelamento abaixo.
+  await settleMedScheduling();
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const s of scheduled) {
-    const data = s.content.data as { medId?: number; followup?: boolean };
-    if (data?.medId === medId && data?.followup) {
+    const data = s.content.data as { medId?: number; followup?: boolean; day?: string };
+    // Com `day`: resposta ao lembrete de ONTEM (depois da meia-noite) não
+    // derruba a corrente de hoje, se ela já tiver sido armada.
+    if (data?.medId === medId && data?.followup && (!day || !data.day || data.day === day)) {
       await Notifications.cancelScheduledNotificationAsync(s.identifier);
     }
   }
@@ -432,16 +593,31 @@ async function medTimeOf(medId: number): Promise<string | null> {
   }
 }
 
+/**
+ * Resposta dada ANTES do horário de hoje: reagenda, para a âncora (e o alarme
+ * falado) de hoje não tocarem — ver `answeredEarly` em scheduleAllMedicationsOnce.
+ */
+async function rescheduleIfAnsweredEarly(day: string, scheduledHHMM: string | null): Promise<void> {
+  if (day !== todayISO() || !scheduledHHMM) return;
+  const [h, m] = scheduledHHMM.split(':').map((x) => parseInt(x, 10));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return;
+  if (buildTodayAt(h, m).getTime() > Date.now()) await scheduleAllMedications().catch(() => {});
+}
+
 export async function confirmMedication(medId: number, meta: ConfirmMeta = {}): Promise<void> {
-  const today = todayISO();
+  // `meta.day`: dia do lembrete respondido (notificação de ontem respondida
+  // depois da meia-noite pertence a ontem).
+  const today = logicalDay(meta.day);
   try {
     await markNudgeDone(completionKey(medId), today);
   } catch (err) {
     console.warn(`failed to mark medication done ${medId}:`, err);
   }
-  void recordHabitEvent(completionKey(medId), 'done', meta, await medTimeOf(medId));
+  const scheduledHHMM = await medTimeOf(medId);
+  void recordHabitEvent(completionKey(medId), 'done', meta, scheduledHHMM);
   void refreshReviewNotification();
-  await clearMedNotifications(medId);
+  await clearMedNotifications(medId, today);
+  await rescheduleIfAnsweredEarly(today, scheduledHHMM);
 }
 
 /**
@@ -450,15 +626,17 @@ export async function confirmMedication(medId: number, meta: ConfirmMeta = {}): 
  * follow-ups e dispensa a notificação atual. Volta a lembrar normalmente amanhã.
  */
 export async function skipMedicationToday(medId: number, meta: ConfirmMeta = {}): Promise<void> {
-  const today = todayISO();
+  const today = logicalDay(meta.day);
   try {
     await markNudgeDone(skipKey(medId), today);
   } catch (err) {
     console.warn(`failed to mark medication skipped ${medId}:`, err);
   }
-  void recordHabitEvent(completionKey(medId), 'not_done', meta, await medTimeOf(medId));
+  const scheduledHHMM = await medTimeOf(medId);
+  void recordHabitEvent(completionKey(medId), 'not_done', meta, scheduledHHMM);
   void refreshReviewNotification();
-  await clearMedNotifications(medId);
+  await clearMedNotifications(medId, today);
+  await rescheduleIfAnsweredEarly(today, scheduledHHMM);
 }
 
 /**
@@ -514,28 +692,17 @@ export async function snoozeMedication(medId: number, minutes = 20): Promise<voi
   const med = meds.find((x) => x.id === medId);
   if (!med) return;
 
-  const { title, pendingBody, category } = reminderCopy(med);
+  const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
+  // Guarda o prazo: qualquer reagendamento (abrir o app, salvar algo) cancela
+  // todos os lembretes e precisa saber recriar este aviso e respeitar a pausa.
+  await setKV(snoozeUntilKey(medId), String(fireAt.getTime())).catch(() => {});
 
   // Pausa a corrente atual (cancela os follow-ups pendentes e dispensa o aviso
   // visível) — assim "me dê mais tempo" silencia agora e só volta daqui a 30min.
   await clearMedNotifications(medId);
 
-  const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
   try {
-    await gatedSchedule({
-      content: {
-        title,
-        body: pendingBody,
-        data: { type: `med:${med.id}`, medId: med.id, followup: true },
-        sound,
-        categoryIdentifier: category,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: fireAt,
-        channelId,
-      },
-    });
+    await scheduleMedSnoozeNotification(med, fireAt, sound, channelId);
   } catch (err) {
     console.warn(`failed to snooze medication ${medId}:`, err);
   }

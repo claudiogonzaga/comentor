@@ -1,7 +1,7 @@
 // TREINO NO RELÓGIO confirma o hábito de exercício.
 //
 // Se a pessoa gravou um treino no relógio (chega ao Health Connect pelo Huawei
-// Health / Health Sync), o Askeo não precisa perguntar "fez o exercício?".
+// Health / Health Sync), a Comentora não precisa perguntar "fez o exercício?".
 // Regras conservadoras, porque uma confirmação falsa é pior que uma pergunta:
 //  - só origens CONFIÁVEIS (as que trazem o relógio), nunca passos do celular;
 //  - o tipo de treino precisa bater com o hábito, quando o título diz qual é
@@ -117,8 +117,32 @@ export async function checkExerciseEvidence(force = false): Promise<string[]> {
     // e cada um consome só o MÍNIMO de treinos que atinge os seus minutos.
     // Treinos já usados por confirmações anteriores de hoje também saem.
     const usedKey = `exercise_used:${today}`;
-    const used = new Set<string>(JSON.parse((await getKV(usedKey)) ?? '[]') as string[]);
-    let pool = sessions.filter((s) => !used.has(s.start)); // já em ordem de início
+    // Guarda o INTERVALO {start,end} de cada treino usado, não só o texto do
+    // início: o mesmo treino pode chegar depois por outra origem com início
+    // alguns segundos diferente, virar a cópia vencedora da deduplicação e
+    // voltar ao pool. Sobreposição > metade da menor duração (a regra de
+    // dedupeSessions) = mesmo treino. Formato antigo (array de strings de
+    // início) ainda é lido: vira intervalo de duração zero, casado pelo início.
+    const used: { start: string; end: string }[] = [];
+    for (const u of JSON.parse((await getKV(usedKey)) ?? '[]') as unknown[]) {
+      if (typeof u === 'string') used.push({ start: u, end: u });
+      else if (u && typeof u === 'object' && typeof (u as { start?: unknown }).start === 'string') {
+        const o = u as { start: string; end?: unknown };
+        used.push({ start: o.start, end: typeof o.end === 'string' ? o.end : o.start });
+      }
+    }
+    const isUsed = (s: { start: string; end: string }) => {
+      const s0 = new Date(s.start).getTime();
+      const s1 = new Date(s.end).getTime();
+      return used.some((u) => {
+        if (u.start === s.start) return true;
+        const u0 = new Date(u.start).getTime();
+        const u1 = new Date(u.end).getTime();
+        const overlap = Math.min(s1, u1) - Math.max(s0, u0);
+        return overlap > 0 && overlap > 0.5 * Math.min(s1 - s0, u1 - u0);
+      });
+    };
+    let pool = sessions.filter((s) => !isUsed(s)); // já em ordem de início
     const accepts = (types: number[] | null | undefined, s: (typeof sessions)[number]) =>
       types == null ? !NOT_GENERIC_WORKOUT.includes(s.exerciseType) : types.includes(s.exerciseType);
     /** Treinos (em ordem) até somar `need` minutos; null se não chega. */
@@ -156,8 +180,8 @@ export async function checkExerciseEvidence(force = false): Promise<string[]> {
       // O hábito aconteceu quando o treino que completou os minutos terminou.
       const occurredAt = new Date(got.list[got.list.length - 1].end).getTime();
       await setKV(ackKey, evidence);
-      for (const s of got.list) used.add(s.start);
-      await setKV(usedKey, JSON.stringify([...used]));
+      for (const s of got.list) used.push({ start: s.start, end: s.end });
+      await setKV(usedKey, JSON.stringify(used));
       pool = pool.filter((s) => !got.list.includes(s));
       await confirmNudge(n.type, { via: 'sensor', evidence, occurredAt });
       confirmed.push(n.title);

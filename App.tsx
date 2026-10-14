@@ -22,6 +22,7 @@ import {
   ensurePermissions,
 } from './src/services/notifications';
 import { scheduleAllNudges } from './src/services/nudges';
+import { rearmSleepReminders } from './src/services/coach';
 import { scheduleSleepAwarenessNotifications } from './src/services/sleepAwareness';
 import { scheduleInspirationNotifications } from './src/services/inspiration';
 import { rearmSpoken } from './src/services/spokenNudges';
@@ -55,6 +56,9 @@ export default function App() {
         // Re-agenda após a permissão: numa instalação nova, init() pode rodar
         // antes de o usuário conceder a permissão, e aí nada seria entregue.
         await scheduleAllNudges().catch(() => {});
+        // A corrente do sono é de gatilhos DATE (poucas noites): sem re-armar
+        // a cada abertura, depois da primeira noite ela nunca mais tocava.
+        await rearmSleepReminders().catch(() => {});
         await scheduleSleepAwarenessNotifications().catch(() => {});
         await scheduleInspirationNotifications().catch(() => {});
         // Re-arma os alarmes falados persistidos (sobrevive a reboot via boot

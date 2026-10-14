@@ -32,12 +32,23 @@ export function YogaNidraScreen() {
 
   const status = useMediaQueue((s) => s.status);
   const queueItems = useMediaQueue((s) => s.items);
+  const queueIndex = useMediaQueue((s) => s.index);
   const toggle = useMediaQueue((s) => s.toggle);
   const stop = useMediaQueue((s) => s.stop);
   const start = useMediaQueue((s) => s.start);
 
   const selectedId = config?.yogaNidraSoundId ?? null;
-  const playingNidra = status !== 'idle' && queueItems[0]?.label?.startsWith('Ioga Nidra');
+  // O que toca AGORA é o item do índice atual, não o primeiro: numa Sequência
+  // [Respiração, Ioga Nidra] o Nidra é o 2º item, e em [Ioga Nidra, Leia para
+  // mim] já tocando a leitura o Nidra não está mais em cena.
+  const current = status !== 'idle' ? queueItems[queueIndex] : undefined;
+  const playingNidra = !!current?.label?.startsWith('Ioga Nidra');
+  /** Este áudio é o que está tocando (compara pelo arquivo, não só pelo nome). */
+  const isCurrent = (s: YogaNidraSound) =>
+    playingNidra &&
+    !!current &&
+    typeof current.source === 'object' &&
+    current.source.uri === s.uri;
 
   const reload = useCallback(async () => {
     try {
@@ -119,7 +130,9 @@ export function YogaNidraScreen() {
         text: 'Excluir',
         style: 'destructive',
         onPress: async () => {
-          if (playingNidra) stop();
+          // Só para se o excluído é o que está tocando — excluir outro áudio
+          // não interrompe (nem registra como incompleta) a prática em curso.
+          if (isCurrent(s)) stop();
           await deleteYogaNidraSound(s.id);
           await reload();
         },
@@ -132,7 +145,9 @@ export function YogaNidraScreen() {
       <View style={styles.header}>
         <Pressable
           onPress={() => {
-            if (playingNidra) stop();
+            // Para só o Ioga Nidra avulso desta tela; uma Sequência segue
+            // tocando (Voltar não derruba os itens seguintes).
+            if (playingNidra && queueItems.length === 1) stop();
             navigation.goBack();
           }}
         >
@@ -163,7 +178,7 @@ export function YogaNidraScreen() {
         ) : (
           sounds.map((s) => {
             const isSel = s.id === selectedId;
-            const isPlaying = playingNidra && queueItems[0]?.label === `Ioga Nidra: ${s.name}`;
+            const isPlaying = isCurrent(s);
             return (
               <Card key={s.id} style={StyleSheet.flatten([styles.row, isSel && styles.rowSel])}>
                 <Pressable style={styles.play} onPress={() => (isPlaying ? toggle() : playSelected(s.id))}>

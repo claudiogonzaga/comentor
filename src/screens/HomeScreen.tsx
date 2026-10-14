@@ -17,7 +17,12 @@ import { HealthCard } from '../components/HealthCard';
 import { GreekIcon } from '../components/GreekIcon';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { colors, radius, spacing, typography } from '../theme';
-import { getDashboardData, markSleepDone, rescheduleAllNotifications } from '../services/coach';
+import {
+  getDashboardData,
+  markSleepDone,
+  rearmSleepReminders,
+  rescheduleAllNotifications,
+} from '../services/coach';
 import { useAppStore } from '../store/useAppStore';
 import {
   setSpokenVolume,
@@ -183,7 +188,7 @@ export function HomeScreen() {
       if (next && !isHeadphonesConnected()) {
         Alert.alert(
           'Sem fone agora',
-          'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, o Askeo volta a falar — pelo fone.',
+          'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
         );
       }
     } catch (err) {
@@ -249,6 +254,8 @@ export function HomeScreen() {
       // Só encerra a corrente de lembretes do sono desta noite — preserva
       // os nudges de inspiração, de conscientização e os diários.
       await cancelSleepEscalationReminders();
+      // …e arma as noites seguintes (a desta noite fica de fora: já foi dormir).
+      await rearmSleepReminders().catch(() => {});
       await reload();
     } finally {
       setMarking(false);
@@ -489,14 +496,16 @@ export function HomeScreen() {
             <GreekIcon name="chevronRight" size={18} color={colors.text.tertiary} />
           </Pressable>
           {/* Fechar o dia: aparece à noite enquanto houver item sem resposta. */}
-          {todos.some((t) => !t.done) && new Date().getHours() >= 18 && (
+          {/* "Não feito" automático (missed) também é SEM RESPOSTA: a coruja desistiu,
+              a pessoa não respondeu — e a tela de revisão conta esses itens. */}
+          {todos.some((t) => !t.done || t.missed) && new Date().getHours() >= 18 && (
             <Pressable style={styles.closeDayBtn} onPress={() => navigation.navigate('Review')}>
               <Text style={styles.closeDayText}>
-                Fechar o dia · {todos.filter((t) => !t.done).length} sem resposta
+                Fechar o dia · {todos.filter((t) => !t.done || t.missed).length} sem resposta
               </Text>
             </Pressable>
           )}
-          {hasAutoQ && !todos.some((t) => !t.done) && new Date().getHours() >= 18 && (
+          {hasAutoQ && !todos.some((t) => !t.done || t.missed) && new Date().getHours() >= 18 && (
             <Pressable style={styles.closeDayBtn} onPress={() => navigation.navigate('Review')}>
               <Text style={styles.closeDayText}>Pergunta da semana · 1 toque</Text>
             </Pressable>
@@ -588,9 +597,9 @@ export function HomeScreen() {
         <HealthCard />
 
         <View style={styles.actions}>
-          {/* O Askeo conduz: abre o chat já comentando saúde/hábitos do dia. */}
+          {/* A Comentora conduz: abre o chat já comentando saúde/hábitos do dia. */}
           <Button
-            label="Chat com Askeo"
+            label="Chat com Comentora"
             onPress={() => navigation.navigate('Chat')}
           />
           {!data?.todayLog?.completed && (

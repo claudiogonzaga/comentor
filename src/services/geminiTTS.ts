@@ -277,6 +277,11 @@ export class GeminiTTSError extends Error {
 /** Sinal de cancelamento (AbortSignal serve; só lemos `.aborted`). */
 export interface TtsSignal {
   aborted: boolean;
+  /** Chamado ao conseguir um slot de RPM (a cada requisição, inclusive retry).
+   *  A fala ao vivo (voice.speak) começa a contar o prazo só aqui: a espera na
+   *  fila global — cheia durante uma geração da leitura — não é lentidão da
+   *  API e não deve fazer a fala desistir. */
+  onSlot?: () => void;
 }
 
 function throwIfAborted(signal?: TtsSignal): void {
@@ -336,6 +341,7 @@ async function acquireRpmSlot(signal?: TtsSignal): Promise<void> {
     }
     if (rpmWindow.length < RPM_LIMIT) {
       rpmWindow.push(now);
+      signal?.onSlot?.();
       return;
     }
     // Espera limitada à janela (teto de ~60s) por segurança.
@@ -500,6 +506,9 @@ async function fetchPcm(
   signal?: TtsSignal,
   /** Limite desta chamada. Trechos longos da leitura precisam de mais que 90 s. */
   timeoutMs: number = TTS_TIMEOUT_MS,
+  /** Teto de re-tentativas. Falas curtas (lembrete em primeiro plano) usam 1:
+   *  esperar 90 s de backoff por um aviso de uma frase só o deixa velho. */
+  maxRetries: number = MAX_RETRIES,
 ): Promise<Uint8Array> {
   throwIfAborted(signal);
   // Bloqueio diário (RPD) ativo? Nem chama a API — cai direto para o fallback.
@@ -559,10 +568,10 @@ async function fetchPcm(
       err instanceof Error ? err.message : 'erro de rede');
     // Timeout (abort) ou rede instável — transiente. Tenta de novo com backoff
     // antes de desistir (em vez de cair na voz do sistema na primeira falha).
-    if (attempt < MAX_RETRIES) {
+    if (attempt < maxRetries) {
       await sleep(retryDelayMs(attempt));
       throwIfAborted(signal);
-      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
+      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs, maxRetries);
     }
     const msg = err instanceof Error ? err.message : 'erro de rede';
     throw new GeminiTTSError(`Gemini TTS: ${msg}`);
@@ -572,10 +581,10 @@ async function fetchPcm(
   if (!res.ok) logAttempt(text, attempt, queueMs, fetchMs, timeoutMs, `HTTP ${res.status}`);
 
   // 5xx ("An internal error has occurred. Please retry") é transitório → re-tenta.
-  if (res.status >= 500 && res.status < 600 && attempt < MAX_RETRIES) {
+  if (res.status >= 500 && res.status < 600 && attempt < maxRetries) {
     await sleep(retryDelayMs(attempt));
     throwIfAborted(signal);
-    return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
+    return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs, maxRetries);
   }
 
   if (!res.ok) {
@@ -591,13 +600,13 @@ async function fetchPcm(
     if (interactions && [400, 404, 405].includes(res.status) && !keyProblem) {
       console.warn(`[GeminiTTS] ${model}: Interactions API recusou (HTTP ${res.status}) — usando generateContent`);
       generateOnly.add(model);
-      return fetchPcm(text, voiceName, apiKey, attempt, signal, timeoutMs);
+      return fetchPcm(text, voiceName, apiKey, attempt, signal, timeoutMs, maxRetries);
     }
     // O modelo nem existe para esta chave: volta ao 2.5, uma vez.
     if (!interactions && res.status === 404 && model !== LEGACY_TTS_MODEL) {
       console.warn(`[GeminiTTS] ${model} indisponível (404) — usando ${LEGACY_TTS_MODEL}`);
       unavailableModels.add(activeTtsModel);
-      return fetchPcm(text, voiceName, apiKey, attempt, signal, timeoutMs);
+      return fetchPcm(text, voiceName, apiKey, attempt, signal, timeoutMs, maxRetries);
     }
     // 429: distinguir DIÁRIO (RPD — não re-tentar hoje; bloqueia e cai para o
     // sistema) de POR-MINUTO (RPM/TPM — transitório, re-tenta com o delay certo).
@@ -610,7 +619,7 @@ async function fetchPcm(
           { httpStatus: 429, quotaExceeded: true, dailyQuota: true },
         );
       }
-      if (attempt < MAX_RETRIES) {
+      if (attempt < maxRetries) {
         const ra = parseFloat(res.headers.get('retry-after') ?? '');
         const delay =
           retryMs > 0
@@ -620,7 +629,7 @@ async function fetchPcm(
               : Math.min(60000, 12000 * Math.pow(2, attempt));
         await sleep(delay);
         throwIfAborted(signal);
-        return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
+        return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs, maxRetries);
       }
     }
     const msg = j.error?.message ?? `HTTP ${res.status}`;
@@ -645,10 +654,10 @@ async function fetchPcm(
       : `ok SEM ÁUDIO — ${describeEmpty(json)}`);
   if (!audioBase64) {
     // 200 mas sem áudio — também é uma falha transitória; re-tenta antes de desistir.
-    if (attempt < MAX_RETRIES) {
+    if (attempt < maxRetries) {
       await sleep(retryDelayMs(attempt));
       throwIfAborted(signal);
-      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs);
+      return fetchPcm(text, voiceName, apiKey, attempt + 1, signal, timeoutMs, maxRetries);
     }
     throw new GeminiTTSError('Gemini TTS: resposta sem áudio');
   }
@@ -663,6 +672,9 @@ async function fetchPcm(
 export async function synthesizeSpeechGemini(
   text: string,
   voiceName: string = DEFAULT_GEMINI_VOICE,
+  /** Fala ao vivo (voice.speak): sinal de cancelamento e teto de re-tentativas
+   *  menor, para não segurar um aviso por minutos. Sem isso, o padrão (6). */
+  opts: { signal?: TtsSignal; maxRetries?: number } = {},
 ): Promise<GeminiTTSResult> {
   const trimmed = text.trim();
   if (!trimmed) throw new GeminiTTSError('texto vazio');
@@ -677,7 +689,9 @@ export async function synthesizeSpeechGemini(
     return { uri: file.uri, cached: true };
   }
 
-  const pcm = normalizePcm(await fetchPcm(trimmed, voiceName, apiKey));
+  const pcm = normalizePcm(
+    await fetchPcm(trimmed, voiceName, apiKey, 0, opts.signal, TTS_TIMEOUT_MS, opts.maxRetries),
+  );
   const wav = pcmToWav(pcm);
   file.create({ overwrite: true });
   file.write(wav);

@@ -1,4 +1,4 @@
-// ANTIGOS "lembretes do Askeo" sobre o sono — agora INSPIRAÇÃO.
+// ANTIGOS "lembretes da Comentora" sobre o sono — agora INSPIRAÇÃO.
 //
 // Eram citações e fatos da ciência do sono, mas chegavam como "lembretes" (type
 // 'awareness'), separados do modo inspiração. Lembrete é algo para FAZER (hábito,

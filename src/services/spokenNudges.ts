@@ -15,7 +15,13 @@ import { requireNativeModule } from 'expo-modules-core';
 import { getUserConfig } from './database';
 import { getApiKey } from './secureStore';
 import { prepareNudgeAudio, cleanupNudgeAudio, DEFAULT_GEMINI_VOICE } from './geminiTTS';
-import { getQuietPeriodsCached, getEffectiveQuietPeriods, anyQuietAt } from './quietHours';
+import {
+  getQuietPeriodsCached,
+  getEffectiveQuietPeriods,
+  anyQuietAt,
+  hhmmToMin as quietHhmmToMin,
+  type QuietPeriod,
+} from './quietHours';
 
 interface SpokenNudgesNative {
   isExactAlarmAllowed(): boolean;
@@ -43,6 +49,8 @@ interface SpokenNudgesNative {
   openAppDetails(): void;
   isHeadphonesConnected(): boolean;
   setQuietHours(enabled: boolean, startMin: number, endMin: number, daysMask: number): void;
+  /** Ausente em builds nativos anteriores (o JS pode chegar antes via OTA). */
+  setQuietPeriods?(json: string): void;
 }
 
 let native: SpokenNudgesNative | null = null;
@@ -205,6 +213,54 @@ export function setSpokenQuietHours(cfg: QuietConfig): void {
   }
 }
 
+/**
+ * Espelha no nativo a LISTA EFETIVA de períodos sem som (manuais + sono derivado
+ * do horário de dormir), que o serviço confere no disparo com o app fechado.
+ * Antes só a 1ª janela chegava ao nativo — e o init a sobrescrevia com o horário
+ * silencioso legado (em geral desligado), então a coruja falava no trabalho e
+ * durante o sono. Build nativo antigo (sem setQuietPeriods): espelha a 1ª janela.
+ */
+export function setSpokenQuietPeriods(periods: QuietPeriod[]): void {
+  if (!native) return;
+  try {
+    if (native.setQuietPeriods) {
+      native.setQuietPeriods(
+        JSON.stringify(
+          periods.map((p) => ({
+            start: quietHhmmToMin(p.start),
+            end: quietHhmmToMin(p.end),
+            days: p.days,
+          })),
+        ),
+      );
+      return;
+    }
+  } catch {
+    /* cai na janela única */
+  }
+  const first = periods[0];
+  setSpokenQuietHours(
+    first
+      ? {
+          spokenQuietEnabled: true,
+          spokenQuietStart: first.start,
+          spokenQuietEnd: first.end,
+          spokenQuietDays: first.days,
+        }
+      : { spokenQuietEnabled: false },
+  );
+}
+
+/** Lê a lista efetiva de períodos sem som e a espelha no nativo. Best-effort. */
+export async function mirrorSpokenQuietPeriods(): Promise<void> {
+  if (!native) return;
+  try {
+    setSpokenQuietPeriods(await getEffectiveQuietPeriods());
+  } catch {
+    /* best-effort: fica o último espelho */
+  }
+}
+
 /** Estamos AGORA dentro do horário silencioso? (gate da fala em primeiro plano). */
 export function isSpokenQuietNow(cfg: QuietConfig | null | undefined): boolean {
   if (!cfg?.spokenQuietEnabled) return false;
@@ -218,8 +274,8 @@ export function isSpokenQuietNow(cfg: QuietConfig | null | undefined): boolean {
 }
 
 /**
- * Diagnóstico da VOZ: lista, em português, tudo que poderia estar impedindo o
- * Askeo de falar os avisos — para o usuário (e a gente) entender por que
+ * Diagnóstico da VOZ: lista, em português, tudo que poderia estar impedindo a
+ * Comentora de falar os avisos — para o usuário (e a gente) entender por que
  * está mudo. Mostrado num Alert pelo botão "Por que a voz não fala?".
  */
 export async function getVoiceDiagnostics(): Promise<string> {
@@ -318,7 +374,7 @@ async function scheduleSpokenOneShot(
   id: string,
   text: string,
   atEpochMs: number,
-  title = 'Askeo',
+  title = 'Comentora',
 ): Promise<{ ok: boolean; usedGemini: boolean }> {
   if (!native) return { ok: false, usedGemini: false };
   const trimmed = (text || '').trim();
@@ -364,7 +420,7 @@ async function scheduleSpokenOneShot(
 
 /**
  * Agenda um alarme falado de TESTE daqui a `seconds`. Ótimo para validar o
- * mecanismo: agendar, travar a tela / fechar o app, e ouvir o Askeo falar.
+ * mecanismo: agendar, travar a tela / fechar o app, e ouvir a Comentora falar.
  * Usa a MESMA voz que os nudges (Gemini se configurado; senão, voz do sistema).
  */
 export async function scheduleSpokenTest(
@@ -372,7 +428,7 @@ export async function scheduleSpokenTest(
 ): Promise<{ ok: boolean; reason?: string }> {
   if (!native) return { ok: false, reason: 'recurso indisponível neste aparelho' };
   const text =
-    'Oi! Aqui é o Askeo, falando com você em voz alta — mesmo com a tela apagada. ' +
+    'Oi! Aqui é a Comentora, falando com você em voz alta — mesmo com a tela apagada. ' +
     'Se você está ouvindo isto, os lembretes falados estão funcionando.';
   const r = await scheduleSpokenOneShot(TEST_ID, text, Date.now() + seconds * 1000);
   return r.ok ? { ok: true } : { ok: false, reason: 'falha ao agendar' };
@@ -380,7 +436,7 @@ export async function scheduleSpokenTest(
 
 /**
  * Sincroniza os alarmes falados das INSPIRAÇÕES com a lista (texto + horário).
- * Cancela os antigos e re-cria conforme a config. Best-effort: se um trecho
+ * Re-cria conforme a config e, no fim, cancela os que sobraram. Best-effort: se um trecho
  * falhar (cota/rede), os outros seguem. Chamado por scheduleInspirationNotifications.
  */
 /**
@@ -428,21 +484,42 @@ function singleFlight<T>(run: (items: T) => Promise<void>): (items: T) => Promis
   return trigger;
 }
 
+/** Ids armados no nativo com esse prefixo (antes de ressincronizar). */
+function scheduledWithPrefix(prefix: string): string[] {
+  try {
+    return native ? native.scheduledIds().filter((id) => id.startsWith(prefix)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Cancela os ids de `before` que não foram (re)agendados nesta sincronização. */
+async function cancelStale(before: string[], keep: Set<string>): Promise<void> {
+  if (!native) return;
+  for (const id of before) {
+    if (keep.has(id)) continue;
+    try {
+      await native.cancel(id);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export const syncSpokenInspirations = singleFlight(syncSpokenInspirationsOnce);
 
 async function syncSpokenInspirationsOnce(
   items: { text: string; hour: number; minute: number; audioPath?: string }[],
 ): Promise<void> {
   if (!native) return;
+  const n = native;
 
-  // remove os alarmes falados de inspiração anteriores
-  try {
-    for (const id of native.scheduledIds()) {
-      if (id.startsWith(INSP_PREFIX)) await native.cancel(id);
-    }
-  } catch {
-    /* ignore */
-  }
+  // Os antigos só saem DEPOIS de os novos estarem armados (ver cancelStale): o
+  // laço espera rede (Gemini TTS) item a item e, se o JS congelar no meio (app
+  // em segundo plano), cancelar tudo antes deixava os lembretes sem voz até a
+  // próxima abertura. native.schedule já substitui o mesmo id.
+  const before = scheduledWithPrefix(INSP_PREFIX);
+  const scheduled = new Set<string>();
 
   let enabled = false;
   let useGemini = false;
@@ -453,9 +530,13 @@ async function syncSpokenInspirationsOnce(
     useGemini = c.voiceProvider === 'gemini';
     voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
   } catch {
+    await cancelStale(before, scheduled);
     return;
   }
-  if (!enabled) return;
+  if (!enabled) {
+    await cancelStale(before, scheduled);
+    return;
+  }
 
   // Pré-render na voz do Gemini só se o provider global for "gemini" E houver
   // chave; senão, voz do sistema.
@@ -492,19 +573,17 @@ async function syncSpokenInspirationsOnce(
         audioPath = ''; // cota/rede/sem-áudio → esta frase usa a voz do sistema
       }
     }
+    const id = `${INSP_PREFIX}${i}`;
     try {
-      await native.schedule(
-        `${INSP_PREFIX}${i}`,
-        nextDailyEpoch(it.hour, it.minute),
-        audioPath,
-        true,
-        'Askeo',
-        it.text,
-      );
+      await n.schedule(id, nextDailyEpoch(it.hour, it.minute), audioPath, true, 'Comentora', it.text);
+      scheduled.add(id);
     } catch {
       // segue para os próximos
     }
   }
+
+  // Agora sim: remove os que não fazem mais parte da lista.
+  await cancelStale(before, scheduled);
 
   // Limpa WAVs órfãos (voz/frases mudaram). Só quando geramos via Gemini e ao
   // menos um WAV foi preparado — assim nunca apagamos áudio ainda válido.
@@ -515,6 +594,17 @@ async function syncSpokenInspirationsOnce(
       /* best-effort */
     }
   }
+}
+
+/** Um dia em ms — para pular a ocorrência de hoje de um alarme diário. */
+const DAY_MS_SPOKEN = 24 * 60 * 60_000;
+
+/** Data local YYYY-MM-DD de um epoch (ms) — compara com o `skipDate` decidido. */
+function localDateKeyOf(epochMs: number): string {
+  const d = new Date(epochMs);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
 }
 
 /** Próximo epoch (ms) no dia da semana `dow` (0=domingo … 6=sábado) e hora/min. */
@@ -543,18 +633,33 @@ function nextWeeklyEpoch(dow: number, hour: number, minute: number): number {
 export const syncSpokenMedications = singleFlight(syncSpokenMedicationsOnce);
 
 async function syncSpokenMedicationsOnce(
-  items: { id: number; text: string; hour: number; minute: number; daysOfWeek: number[] }[],
+  items: {
+    id: number;
+    text: string;
+    hour: number;
+    minute: number;
+    daysOfWeek: number[];
+    /**
+     * Já respondido antes do horário: a ocorrência DESTE dia (YYYY-MM-DD local,
+     * o dia em que se decidiu) não toca. É a data, não um booleano: esta
+     * sincronização pode rodar bem depois (fila do singleFlight, Gemini, JS
+     * congelado em segundo plano) — se o horário já tiver passado, a próxima
+     * ocorrência é a de amanhã e não pode ser pulada.
+     */
+    skipDate?: string;
+  }[],
 ): Promise<void> {
   if (!native) return;
+  const n = native;
 
-  // remove os falados de medicamento anteriores
-  try {
-    for (const id of native.scheduledIds()) {
-      if (id.startsWith(MED_SPOKEN_PREFIX)) await native.cancel(id);
-    }
-  } catch {
-    /* ignore */
-  }
+  // Roda em todo reagendamento (abrir o app, salvar, mudar o horário de dormir):
+  // mantém o nativo com os períodos sem som atuais, inclusive o sono derivado.
+  await mirrorSpokenQuietPeriods();
+
+  // Mesma ordem das inspirações: agenda os novos primeiro, cancela os que
+  // sobraram no fim — um congelamento do JS no meio não deixa nada desarmado.
+  const before = scheduledWithPrefix(MED_SPOKEN_PREFIX);
+  const scheduled = new Set<string>();
 
   let enabled = false;
   let useGemini = false;
@@ -565,9 +670,13 @@ async function syncSpokenMedicationsOnce(
     useGemini = c.voiceProvider === 'gemini';
     voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
   } catch {
+    await cancelStale(before, scheduled);
     return;
   }
-  if (!enabled) return;
+  if (!enabled) {
+    await cancelStale(before, scheduled);
+    return;
+  }
 
   let renderGemini = useGemini;
   if (renderGemini) {
@@ -604,35 +713,54 @@ async function syncSpokenMedicationsOnce(
     }
 
     if (daily) {
+      const id = `${MED_SPOKEN_PREFIX}${it.id}`;
+      // skipDate: só pula se a próxima ocorrência ainda cair no dia decidido.
+      let at = nextDailyEpoch(it.hour, it.minute);
+      if (it.skipDate && localDateKeyOf(at) === it.skipDate) at += DAY_MS_SPOKEN;
       try {
-        await native.schedule(
-          `${MED_SPOKEN_PREFIX}${it.id}`,
-          nextDailyEpoch(it.hour, it.minute),
+        await n.schedule(
+          id,
+          at,
           audioPath,
           true,
-          'Askeo',
+          'Comentora',
           text,
         );
+        scheduled.add(id);
       } catch {
         /* segue */
       }
     } else {
       for (const dow of it.daysOfWeek) {
+        // skipDate: a ocorrência do dia decidido vai para a semana seguinte (as
+        // dos outros dias, não). Compara a DATA da próxima ocorrência, nunca o
+        // dia da semana de agora — a passada pode retomar depois da meia-noite.
+        let at = nextWeeklyEpoch(dow, it.hour, it.minute);
+        if (it.skipDate && localDateKeyOf(at) === it.skipDate) {
+          const d = new Date(at);
+          d.setDate(d.getDate() + 7);
+          at = d.getTime();
+        }
+        const id = `${MED_SPOKEN_PREFIX}${it.id}_${dow}`;
         try {
-          await native.schedule(
-            `${MED_SPOKEN_PREFIX}${it.id}_${dow}`,
-            nextWeeklyEpoch(dow, it.hour, it.minute),
+          await n.schedule(
+            id,
+            at,
             audioPath,
             false, // one-shot; re-armado no próximo scheduleAllMedications
-            'Askeo',
+            'Comentora',
             text,
           );
+          scheduled.add(id);
         } catch {
           /* segue */
         }
       }
     }
   }
+
+  // Remove os que não foram reagendados (lembrete apagado, dia desmarcado).
+  await cancelStale(before, scheduled);
 
   if (renderGemini && preparedAny) {
     try {

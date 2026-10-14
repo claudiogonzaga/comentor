@@ -49,7 +49,7 @@ import type { BreathingCustomSound, OwlSpeciesId } from '../types';
 
 /**
  * "Configurar Sons e Notificações" — reúne TUDO de áudio e avisos numa tela:
- * o canto da coruja, sons/duração da respiração, a voz do Askeo e (vindo
+ * o canto da coruja, sons/duração da respiração, a voz da Comentora e (vindo
  * de Configurações) o bloco de notificações: chat com voz, falar notificações,
  * lembretes do dia, modo inspiração, avisos falados (fone/horário silencioso),
  * teste, Não Perturbe e volume. Tudo salva automaticamente.
@@ -91,7 +91,7 @@ export function SoundsVoiceScreen() {
       if (!granted) {
         Alert.alert(
           'Notificações desligadas',
-          'O Android está bloqueando as notificações do Askeo. Vá em Configurações do Android → Apps → Askeo → Notificações e ative tudo.',
+          'O Android está bloqueando as notificações da Comentora. Vá em Configurações do Android → Apps → Áskesis → Notificações e ative tudo.',
         );
         return;
       }
@@ -168,8 +168,8 @@ export function SoundsVoiceScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={[typography.small, { color: colors.text.secondary, marginBottom: spacing.md }]}>
           Escolha o canto da coruja, os sons da respiração e como você quer ser
-          avisado — tudo salva automaticamente. (A VOZ do Askeo fica em
-          &quot;Cérebro e Voz do Askeo&quot;.)
+          avisado — tudo salva automaticamente. (A VOZ da Comentora fica em
+          &quot;Cérebro e Voz da Comentora&quot;.)
         </Text>
 
         <OwlSoundPicker
@@ -188,7 +188,7 @@ export function SoundsVoiceScreen() {
             Antes de falar um lembrete, uma cobrança ou uma inspiração, a coruja
             canta e espera este tempo. Se não for um bom momento: com a tela
             apagada, toque em &quot;Calar agora&quot; na notificação da fala; com o
-            app aberto, arraste o volume do Askeo para zero na tela inicial.
+            app aberto, arraste o volume da Comentora para zero na tela inicial.
             (As teclas de volume do celular nem sempre alcançam a voz no
             alto-falante — ela usa o volume de alarme.)
           </Text>
@@ -252,7 +252,7 @@ export function SoundsVoiceScreen() {
           }}
         />
 
-        {/* A VOZ do Askeo agora mora em "Cérebro e Voz do Askeo". */}
+        {/* A VOZ da Comentora agora mora em "Cérebro e Voz da Comentora". */}
 
         {/* ——— Notificações e avisos (veio de Configurações) ——— */}
         <Card style={styles.card}>
@@ -290,9 +290,9 @@ export function SoundsVoiceScreen() {
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
                 Alternativa ao som: a coruja lê a notificação em voz alta (usa a
-                voz escolhida acima) — útil se você não escuta o piado. Não fala
+                voz escolhida em Cérebro e Voz) — útil se você não escuta o piado. Não fala
                 por cima de uma chamada: se Teams/Meet/WhatsApp estiver em uso,
-                esse app fica em primeiro plano e o Askeo não fala. Por
+                esse app fica em primeiro plano e a Comentora não fala. Por
                 limite do Android, a leitura em voz só funciona com o app aberto
                 em primeiro plano — com a tela bloqueada quem te avisa é o piado
                 da coruja.
@@ -333,7 +333,7 @@ export function SoundsVoiceScreen() {
                 Modo inspiração
               </Text>
               <Text style={[typography.small, { color: colors.text.secondary }]}>
-                Ao longo do dia (8h–21h) o Askeo te manda uma frase: citações,
+                Ao longo do dia (8h–21h) a Comentora te manda uma frase: citações,
                 fatos históricos e ciência do sono. Não são lembretes — lembrete é
                 o que você tem para FAZER (hábitos, remédios, tarefas), e fica em
                 "Hábitos saudáveis e lembretes". Escolha quantas você quer receber
@@ -402,9 +402,9 @@ export function SoundsVoiceScreen() {
                     Falar em voz alta
                   </Text>
                   <Text style={[typography.small, { color: colors.text.secondary }]}>
-                    O Askeo FALA em voz alta os avisos inspiradores E os seus
+                    A Comentora FALA em voz alta os avisos inspiradores E os seus
                     lembretes (remédio, hábitos), mesmo com a tela apagada ou o app
-                    fechado. Usa a voz escolhida acima (a voz do Gemini é preparada
+                    fechado. Usa a voz escolhida em Cérebro e Voz (a voz do Gemini é preparada
                     uma vez e reaproveitada; sem voz/cota, cai na voz do sistema).
                   </Text>
                 </View>
@@ -430,7 +430,7 @@ export function SoundsVoiceScreen() {
                         if (!isIgnoringBatteryOptimizations()) {
                           Alert.alert(
                             'Desative a economia de bateria',
-                            'Em alguns celulares (Xiaomi, Samsung…) a economia de bateria pode impedir o Askeo de falar. Recomendo liberar a execução sem restrição.',
+                            'Em alguns celulares (Xiaomi, Samsung…) a economia de bateria pode impedir a Comentora de falar. Recomendo liberar a execução sem restrição.',
                             [
                               { text: 'Agora não', style: 'cancel' },
                               {
@@ -459,7 +459,7 @@ export function SoundsVoiceScreen() {
                       Só falar com fone de ouvido
                     </Text>
                     <Text style={[typography.small, { color: colors.text.secondary }]}>
-                      Quando ligado, o Askeo só fala se houver fone conectado
+                      Quando ligado, a Comentora só fala se houver fone conectado
                       (com fio, Bluetooth ou USB). De qualquer forma, com fone
                       conectado o som SEMPRE sai pelo fone — nunca no alto-falante.
                     </Text>
@@ -473,7 +473,7 @@ export function SoundsVoiceScreen() {
                         if (next && !isHeadphonesConnected()) {
                           Alert.alert(
                             'Sem fone agora',
-                            'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, o Askeo volta a falar — pelo fone.',
+                            'Enquanto não houver fone conectado, os avisos ficarão só como notificação (sem voz). Ao conectar um fone, a Comentora volta a falar — pelo fone.',
                           );
                         }
                       } catch (err) {
@@ -496,7 +496,7 @@ export function SoundsVoiceScreen() {
                       if (r.ok) {
                         Alert.alert(
                           'Teste agendado ✓',
-                          'Em 1 minuto o Askeo vai falar. Pode trancar a tela ou até fechar o app — você deve ouvir a voz mesmo assim.',
+                          'Em 1 minuto a Comentora vai falar. Pode trancar a tela ou até fechar o app — você deve ouvir a voz mesmo assim.',
                         );
                       } else {
                         Alert.alert('Não consegui agendar o teste', r.reason ?? 'erro desconhecido');

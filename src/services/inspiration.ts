@@ -10,6 +10,7 @@ import {
   setAudioClipRating,
   setAudioDeckSeqEnd,
   setAudioDeckSeqStart,
+  setAudioDeckSequencePosition,
   setInspirationCardRating,
   setKV,
 } from './database';
@@ -22,7 +23,7 @@ import { COMENTORA_MESSAGES } from '../constants/inspirationDefaults';
 import type { AudioClip, InspirationCard } from '../types';
 
 /**
- * Modo "inspiração": quando ligado, o Askeo dispara um alerta a cada hora
+ * Modo "inspiração": quando ligado, a Comentora dispara um alerta a cada hora
  * cheia dentro de uma janela diurna, com mensagens curtas de otimismo,
  * persistência e inspiração. São lembretes locais DIÁRIOS (um por hora), então
  * funcionam mesmo com o app fechado, e se repetem todo dia até o usuário
@@ -34,6 +35,13 @@ import type { AudioClip, InspirationCard } from '../types';
  */
 const INSPIRATION_START_HOUR = 8;
 const INSPIRATION_END_HOUR = 21;
+
+/** Minuto do dia do horário `i` (de `n`) espalhado na janela diurna [START, END]. */
+function inspirationSlotMinute(i: number, n: number): number {
+  const startMin = INSPIRATION_START_HOUR * 60;
+  const span = INSPIRATION_END_HOUR * 60 - startMin;
+  return n === 1 ? Math.round(startMin + span / 2) : Math.round(startMin + (span * i) / (n - 1));
+}
 
 /** data.type das notificações deste modo — usado para cancelar só elas. */
 const INSPIRATION_TYPE = 'inspiration';
@@ -99,7 +107,7 @@ function clipToMessage(c: AudioClip, deckName: string, total: number): Inspirati
 }
 
 /**
- * Mensagens padrão do Askeo (fallback se a biblioteca estiver vazia — ex.:
+ * Mensagens padrão da Comentora (fallback se a biblioteca estiver vazia — ex.:
  * todos os packs desligados). Mantém o app sempre com algo a dizer.
  */
 const FALLBACK_MESSAGES: InspirationMessage[] = COMENTORA_MESSAGES.map((m) => ({
@@ -188,6 +196,14 @@ interface Slot {
   minute: number;
   cardId: number | null;
   clipId?: number | null;
+  /**
+   * Posição do trecho na sequência do dia do baralho (0 = trecho de partida). Com
+   * o k0, a ordem do relógio não é a da leitura: o trecho mais avançado que
+   * disparou é o de MAIOR seq, não o do horário mais recente.
+   */
+  seq?: number;
+  /** false = a notificação foi suprimida (janela noturna) e nunca é entregue. */
+  delivered?: boolean;
 }
 /** Referência única do que um horário toca: card = id positivo, trecho de áudio = -id. */
 function slotRef(s: Slot): number | null {
@@ -232,7 +248,8 @@ const COUNTED_KEY = 'inspiration_plays_counted_until';
  * Conta as EXECUÇÕES dos trechos de áudio que dispararam desde a última contagem:
  * os alarmes falados tocam com o app fechado e o JS não vê, então, a cada
  * reagendamento, somamos os horários (de todos os dias) que já passaram desde a
- * última vez. Só conta se a fala está ligada (sem ela o alerta é só notificação).
+ * última vez. Só conta EXECUÇÃO se a fala está ligada (sem ela o alerta é só
+ * notificação); o cursor da sequência anda de qualquer jeito (ver abaixo).
  */
 async function countClipPlays(armed: ArmedState, now: Date): Promise<void> {
   const nowMs = now.getTime();
@@ -241,23 +258,45 @@ async function countClipPlays(armed: ArmedState, now: Date): Promise<void> {
   await setKV(COUNTED_KEY, String(nowMs));
   const clipSlots = armed.slots.filter((s) => s.clipId);
   if (!clipSlots.length || from <= 0 || nowMs - from > 30 * 86_400_000) return;
+  // O áudio só TOCOU se a fala estava ligada, fora do modo silencioso e com volume.
+  // Com "só com fone" não dá para saber, daqui, se havia fone na hora: não conta.
+  // Mas o alerta chegou de todo jeito (falado ou como notificação com o texto do
+  // trecho): sem um `return` aqui, o cursor da sequência anda e o audiolivro não
+  // recomeça do trecho 1 todo dia para quem ouve com "só com fone".
+  let audible = false;
   try {
     const c = await getUserConfig();
-    if (!c.spokenNudgesEnabled || c.silentMode || !c.inspirationModeEnabled) return;
-    // Com "só com fone" não dá para saber, daqui, se havia fone na hora: não conta.
-    if (c.spokenHeadphonesOnly || (c.nudgeVolume ?? 1) <= 0) return;
+    audible =
+      !!c.spokenNudgesEnabled &&
+      !c.silentMode &&
+      !!c.inspirationModeEnabled &&
+      !c.spokenHeadphonesOnly &&
+      (c.nudgeVolume ?? 1) > 0;
   } catch {
-    return;
+    audible = false;
   }
   // Horário silencioso: o alerta chegou só como notificação, sem tocar o áudio.
-  const quiet = await loadQuietPeriods().catch(() => []);
+  const quiet = audible ? await loadQuietPeriods().catch(() => []) : [];
   const tally = new Map<number, { n: number; last: number }>();
+  // Último disparo de cada trecho (com ou sem som): é o que move o cursor. `seq`
+  // (-1 se o armado é antigo ou o baralho é aleatório) decide o mais avançado.
+  const lastFired = new Map<number, { at: number; seq: number }>();
   const day = new Date(from);
   day.setHours(0, 0, 0, 0);
   for (; day.getTime() <= nowMs; day.setDate(day.getDate() + 1)) {
     for (const s of clipSlots) {
       const t = slotTime(day, s);
-      if (t > from && t <= nowMs && !anyQuietAt(quiet, s.hour * 60 + s.minute, day.getDay())) {
+      if (t > from && t <= nowMs) {
+        // Sem fala, um horário suprimido (janela noturna) não entregou nada: o
+        // trecho dele não "tocou" e não pode mover o cursor.
+        if (audible || s.delivered !== false) {
+          const prevF = lastFired.get(s.clipId!);
+          lastFired.set(s.clipId!, {
+            at: Math.max(prevF?.at ?? 0, t),
+            seq: Math.max(prevF?.seq ?? -1, s.seq ?? -1),
+          });
+        }
+        if (!audible || anyQuietAt(quiet, s.hour * 60 + s.minute, day.getDay())) continue;
         const cur = tally.get(s.clipId!) ?? { n: 0, last: 0 };
         cur.n++;
         cur.last = Math.max(cur.last, t);
@@ -265,15 +304,19 @@ async function countClipPlays(armed: ArmedState, now: Date): Promise<void> {
       }
     }
   }
-  // Execuções e, para a SEQUÊNCIA, o último trecho que de fato tocou em cada baralho:
-  // o dia seguinte continua depois dele, mesmo que o app não tenha sido aberto antes.
-  const lastByDeck = new Map<number, { ord: number; at: number }>();
-  for (const [id, v] of tally) {
-    await addAudioClipPlays(id, v.n, new Date(v.last)).catch(() => {});
+  for (const [id, v] of tally) await addAudioClipPlays(id, v.n, new Date(v.last)).catch(() => {});
+  // Para a SEQUÊNCIA, o último trecho que disparou em cada baralho: o dia seguinte
+  // continua depois dele, mesmo que o app não tenha sido aberto antes.
+  // Na sequência, o mais avançado é o de maior `seq` (a grade do dia não segue a
+  // ordem do relógio, ver k0); sem `seq`, cai no horário mais recente, como antes.
+  const lastByDeck = new Map<number, { ord: number; at: number; seq: number }>();
+  for (const [id, f] of lastFired) {
     const clip = await getAudioClip(id).catch(() => null);
     if (!clip) continue;
     const cur = lastByDeck.get(clip.deckId);
-    if (!cur || v.last > cur.at) lastByDeck.set(clip.deckId, { ord: clip.ord, at: v.last });
+    if (!cur || (f.seq !== cur.seq ? f.seq > cur.seq : f.at > cur.at)) {
+      lastByDeck.set(clip.deckId, { ord: clip.ord, at: f.at, seq: f.seq });
+    }
   }
   for (const [deckId, v] of lastByDeck) await setAudioDeckSeqEnd(deckId, v.ord).catch(() => {});
 }
@@ -434,10 +477,27 @@ export function scheduleInspirationNotifications(): Promise<void> {
   return schedRunning;
 }
 
+/** "Começar a sequência daqui" / "Recomeçar" pedidos, aplicados no próximo reagendamento. */
+const pendingSeqPicks = new Map<number, number>();
+
+/**
+ * Põe a SEQUÊNCIA do baralho no trecho `ord` (0-based) e reagenda: ele vai para o
+ * PRÓXIMO horário do baralho que ainda não passou. Aplicado dentro do reagendamento
+ * serializado, DEPOIS de contar o que já tocou: senão a contagem (countClipPlays)
+ * gravaria por cima, como "último que tocou", um trecho da lista antiga.
+ */
+export function setSequencePosition(deckId: number, ord: number): Promise<void> {
+  pendingSeqPicks.set(deckId, ord);
+  return scheduleInspirationNotifications();
+}
+
 async function scheduleInspirationNotificationsOnce(): Promise<void> {
   // O que já disparou hoje (do armado anterior) precisa ser guardado ANTES de
   // reatribuir os cards dos horários.
   await recordFired(new Date()).catch(() => {});
+  const picks = [...pendingSeqPicks];
+  pendingSeqPicks.clear();
+  for (const [deckId, ord] of picks) await setAudioDeckSequencePosition(deckId, ord).catch(() => {});
   await cancelInspirationNotifications();
 
   let enabled = false;
@@ -487,12 +547,18 @@ async function scheduleInspirationNotificationsOnce(): Promise<void> {
   const n = Math.max(1, Math.min(14, Math.round(perDay)));
   const sourceCount = decks.length + (textPool ? 1 : 0);
   // Horário i → fonte (i + rot) % S. `rot` muda a cada dia: com mais fontes do que
-  // horários (ex.: 3 baralhos e 2 alertas por dia), todas têm a sua vez.
-  const rot = Math.floor(Date.now() / 86_400_000) % sourceCount;
+  // horários (ex.: 3 baralhos e 2 alertas por dia), todas têm a sua vez. O dia é o
+  // LOCAL (como `today`): pelo dia UTC, a rotação virava às 20h/21h e reabrir o app
+  // à noite trocava a fonte dos horários que restavam.
+  const nowD = new Date();
+  const localDay = Math.floor(Date.UTC(nowD.getFullYear(), nowD.getMonth(), nowD.getDate()) / 86_400_000);
+  const rot = localDay % sourceCount;
   const sourceOf = (i: number) => (i + rot) % sourceCount;
   const counts = new Array<number>(sourceCount).fill(0);
   for (let i = 0; i < n; i++) counts[sourceOf(i)]++;
   const perSource: InspirationMessage[][] = [];
+  // Mensagem → posição na sequência do dia (só baralhos em sequência; ver Slot.seq).
+  const seqOf = new Map<InspirationMessage, number>();
   for (let k = 0; k < decks.length; k++) {
     const d = decks[k];
     const count = counts[k];
@@ -504,15 +570,39 @@ async function scheduleInspirationNotificationsOnce(): Promise<void> {
       // NA SEQUÊNCIA: continua de onde o último dia parou; o ponto de partida é
       // fixo durante o dia (reagendar não reembaralha) e avança na virada.
       let startOrd = d.seqStartOrd;
+      // k0 = em qual dos horários DESTE baralho hoje cai o trecho de partida. Os
+      // alertas são diários: um horário que já passou só toca amanhã cedo. Pôr o
+      // trecho de partida nele (abrindo o app às 10h, no das 8h) fazia o dia tocar
+      // fora de ordem e o "último que tocou" amanhecer no início da lista. Então o
+      // trecho de partida vai para o PRÓXIMO horário futuro e os que já passaram
+      // recebem a continuação; o horário mais recente que disparou é sempre o
+      // trecho mais avançado — por isso cada horário guarda a sua posição `seq`
+      // na sequência, e countClipPlays grava como fim o de maior seq que disparou.
+      const k0Key = `seq_k0_${d.id}`;
+      let k0 = 0;
       if (d.seqDate !== today) {
         const after = d.clips.find((c) => c.ord > d.seqEndOrd);
         startOrd = (after ?? d.clips[0]).ord;
+        const nowMin = nowD.getHours() * 60 + nowD.getMinutes();
+        let passed = 0;
+        for (let i = 0; i < n; i++) {
+          if (sourceOf(i) === k && inspirationSlotMinute(i, n) <= nowMin) passed++;
+        }
+        k0 = passed >= count ? 0 : passed; // todos já passaram: amanhã começa no 1º
+        await setKV(k0Key, `${today}:${k0}`).catch(() => {});
+      } else {
+        // Mesmo dia: o mesmo k0 da virada (reagendar não muda quem toca quando).
+        const raw = await getKV(k0Key).catch(() => null);
+        const m = raw ? /^(.+):(\d+)$/.exec(raw) : null;
+        if (m && m[1] === today) k0 = Number(m[2]) % count;
       }
       let i0 = d.clips.findIndex((c) => c.ord >= startOrd);
       if (i0 < 0) i0 = 0;
-      const list: InspirationMessage[] = [];
+      const list = new Array<InspirationMessage>(count);
       for (let j = 0; j < count; j++) {
-        list.push(clipToMessage(d.clips[(i0 + j) % d.clips.length], d.name, d.totalCount));
+        const m = clipToMessage(d.clips[(i0 + j) % d.clips.length], d.name, d.totalCount);
+        list[(k0 + j) % count] = m;
+        seqOf.set(m, j);
       }
       // Só o ponto de partida do dia; o "último que tocou" é registrado quando o
       // alerta dispara (countClipPlays).
@@ -536,22 +626,18 @@ async function scheduleInspirationNotificationsOnce(): Promise<void> {
   const armedSlots: Slot[] = [];
   // coletados para, ao final, agendar as versões FALADAS (se o recurso estiver on)
   const spokenItems: { text: string; hour: number; minute: number; audioPath?: string }[] = [];
-  const startMin = INSPIRATION_START_HOUR * 60;
-  const endMin = INSPIRATION_END_HOUR * 60;
-  const span = endMin - startMin;
 
   for (let i = 0; i < n; i++) {
-    const t =
-      n === 1 ? Math.round(startMin + span / 2) : Math.round(startMin + (span * i) / (n - 1));
+    const t = inspirationSlotMinute(i, n);
     const hour = Math.floor(t / 60);
     const minute = t % 60;
     const msg = messages[i];
     // a versão falada lê o texto limpo (sem aspas; o título é decorativo); o trecho
     // de áudio toca o próprio arquivo
     spokenItems.push({ text: msg.speak, hour, minute, ...(msg.audioUri ? { audioPath: msg.audioUri } : {}) });
-    armedSlots.push({ hour, minute, cardId: msg.cardId, clipId: msg.clipId });
+    let delivered = false;
     try {
-      await gatedSchedule({
+      const id = await gatedSchedule({
         content: {
           title: msg.title,
           body: msg.body,
@@ -566,9 +652,12 @@ async function scheduleInspirationNotificationsOnce(): Promise<void> {
           channelId,
         },
       });
+      delivered = id != null; // null = suprimido (janela noturna)
     } catch (err) {
       console.warn(`failed to schedule inspiration alert @${hour}:${minute}:`, err);
     }
+    const seq = seqOf.get(msg);
+    armedSlots.push({ hour, minute, cardId: msg.cardId, clipId: msg.clipId, delivered, ...(seq != null ? { seq } : {}) });
   }
 
   await setKV(ARMED_KEY, JSON.stringify({ armedAt: Date.now(), slots: armedSlots })).catch(() => {});
