@@ -112,7 +112,8 @@ export function ShareScreen({ route, navigation }: Props) {
         status: 'error',
         message: e instanceof Error ? e.message : String(e),
         keyError,
-        canRetry: !keyError,
+        // "tentar de novo" também depois de trocar a chave: a do Claude não refaz a análise sozinha
+        canRetry: true,
       });
     }
   }, [sharedText, geminiKey, model, pillars, rules, noteLang, learnedPrefs, user]);

@@ -6,6 +6,7 @@ import {
   getKV,
   getUserConfig,
   listActiveInspirationCards,
+  listAudioDecks,
   listEnabledAudioDecksWithClips,
   setAudioClipRating,
   setAudioDeckSeqEnd,
@@ -411,8 +412,10 @@ export async function getCurrentInspiration(now = new Date()): Promise<CurrentIn
   if (ref < 0) {
     const clip = await getAudioClip(-ref);
     if (!clip) return null;
-    const deck = (await listEnabledAudioDecksWithClips()).find((d) => d.id === clip.deckId);
-    return { kind: 'clip', clip, deckName: deck?.name ?? 'Baralho de áudio', total: deck?.totalCount ?? clip.ord + 1 };
+    // Baralho desligado (ou substituído por uma versão nova): o cartão espera o próximo alerta.
+    const deck = (await listAudioDecks()).find((d) => d.id === clip.deckId);
+    if (!deck?.enabled) return null;
+    return { kind: 'clip', clip, deckName: deck.name, total: deck.clipCount };
   }
   const card = await getInspirationCardById(ref);
   return card ? { kind: 'card', card } : null;

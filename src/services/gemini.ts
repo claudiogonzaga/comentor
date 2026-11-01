@@ -148,7 +148,7 @@ async function activeLlm(task: AiTaskId): Promise<ActiveLlm | null> {
 
 /** Há um provedor de API pronto para atender (Claude com chave, ou Gemini com chave)? */
 export async function hasActiveLlm(): Promise<boolean> {
-  return !!(await activeLlm('text'));
+  return !!(await activeLlm('chat'));
 }
 
 interface RunParams {
@@ -259,8 +259,9 @@ export async function continueConversation(
   model: GeminiModel,
   history: ChatMessage[],
   userMessage: string,
+  task: AiTaskId = 'chat',
 ): Promise<{ text: string; offline: boolean }> {
-  const llm = await activeLlm('chat');
+  const llm = await activeLlm(task);
   if (!llm) {
     return {
       text: 'Estou offline agora. Mas a resposta não muda: seu corpo precisa de sono. A gente conversa direito quando você configurar a chave da API.',
@@ -347,7 +348,7 @@ export async function generateText(
   userPrompt: string,
   opts: { maxOutputTokens?: number; temperature?: number; timeoutMs?: number; json?: boolean } = {},
 ): Promise<string> {
-  const llm = await activeLlm('text');
+  const llm = await activeLlm('coach');
   if (!llm) throw new Error('sem chave da API');
   return run(
     llm,

@@ -162,6 +162,12 @@ function clipStartKey(text: string | null): string {
   return normKey(text ?? '').slice(0, 40);
 }
 
+/** Mesmo trecho? Um texto recortado curto casa pelo começo do outro; texto curtíssimo, só igual. */
+function sameClipStart(a: string, b: string): boolean {
+  if (a === b) return true;
+  return Math.min(a.length, b.length) >= 12 && (a.startsWith(b) || b.startsWith(a));
+}
+
 const COLS: Record<string, keyof ManifestRow | 'file'> = {
   arquivo: 'file', file: 'file', filename: 'file',
   ordem: 'order', order: 'order', posicao: 'order', sequencia: 'order', ordemdeleitura: 'order',
@@ -299,8 +305,12 @@ export interface ImportAudioDeckResult {
   tooLong: number;
   skipped: { name: string; reason: string }[];
   restoredStats: boolean;
-  /** Versão nova de um baralho: o antigo, desligado, e quantos trechos herdaram o histórico dele. */
-  replaced?: { name: string; inherited: number };
+  /**
+   * Versão nova de um baralho: o nome pedido em "replaces" e quantos trechos herdaram
+   * o histórico. `found` falso: não há baralho com esse nome; `inherited` 0: nenhum
+   * trecho casou, e o antigo segue ligado.
+   */
+  replaced?: { name: string; found: boolean; inherited: number };
   error?: string;
 }
 
@@ -502,22 +512,29 @@ export async function importAudioDeckFromZip(
     // antigo). Cada trecho herda o histórico do trecho antigo de mesmo começo de
     // texto: um trecho recortado continua começando igual.
     const dj = deckJson as { name?: string; playMode?: string; seqEndOrd?: unknown; replaces?: unknown } | null;
+    const replaces = typeof dj?.replaces === 'string' ? dj.replaces : null;
+    // Com nomes repetidos, vale a versão em uso: a ligada e, entre elas, a mais nova.
     const oldDeck =
-      typeof dj?.replaces === 'string'
-        ? (await listAudioDecks()).find((k) => k.name === dj.replaces && k.id !== deckId) ?? null
-        : null;
-    const oldByStart = new Map<string, AudioClip[]>();
-    for (const c of oldDeck ? await listAudioClips(oldDeck.id) : []) {
-      const key = clipStartKey(c.text);
-      if (key) oldByStart.set(key, [...(oldByStart.get(key) ?? []), c]);
-    }
+      (replaces
+        ? (await listAudioDecks())
+            .filter((k) => k.name === replaces && k.id !== deckId)
+            .sort((a, b) => Number(b.enabled) - Number(a.enabled) || b.id - a.id)[0]
+        : null) ?? null;
+    const oldPool = (oldDeck ? await listAudioClips(oldDeck.id) : [])
+      .map((clip) => ({ clip, key: clipStartKey(clip.text) }))
+      .filter((x) => x.key);
+    const takeOld = (text: string | null): AudioClip | undefined => {
+      const key = clipStartKey(text);
+      const at = key ? oldPool.findIndex((x) => sameClipStart(x.key, key)) : -1;
+      return at < 0 ? undefined : oldPool.splice(at, 1)[0].clip;
+    };
     const inherited: { oldOrd: number; newOrd: number }[] = [];
 
     let restoredStats = false;
     const clips: NewAudioClip[] = saved.map((s, i) => {
       const m = manifest.get(fileKey(s.path));
       if (m && (m.likes != null || m.dislikes != null || m.plays != null || m.rating != null)) restoredStats = true;
-      const old = oldByStart.get(clipStartKey(m?.text ?? null))?.shift();
+      const old = takeOld(m?.text ?? null);
       if (old) inherited.push({ oldOrd: old.ord, newOrd: i });
       return {
         ord: i,
@@ -527,11 +544,12 @@ export async function importAudioDeckFromZip(
         author: m?.author ?? null,
         reference: m?.reference ?? null,
         durationMs: null,
-        rating: m?.rating ?? old?.rating,
-        likes: m?.likes ?? old?.likes,
-        dislikes: m?.dislikes ?? old?.dislikes,
-        plays: m?.plays ?? old?.plays,
-        lastPlayedAt: m?.lastPlayedAt ?? old?.lastPlayedAt ?? null,
+        // zero na planilha não apaga o histórico herdado
+        rating: m?.rating || old?.rating,
+        likes: m?.likes || old?.likes,
+        dislikes: m?.dislikes || old?.dislikes,
+        plays: m?.plays || old?.plays,
+        lastPlayedAt: m?.lastPlayedAt || old?.lastPlayedAt || null,
       };
     });
     await addAudioClips(deckId, clips);
@@ -547,14 +565,14 @@ export async function importAudioDeckFromZip(
         await setAudioDeckSeqEnd(deckId, end);
       }
     }
-    if (oldDeck) {
-      // A leitura segue do mesmo ponto; o antigo só é desligado: apagar é decisão da pessoa.
+    // A leitura segue do mesmo ponto, se o antigo era lido em sequência.
+    if (oldDeck && inherited.length && oldDeck.playMode === 'sequence') {
+      if (!dj?.playMode) await setAudioDeckMode(deckId, 'sequence');
       if (typeof dj?.seqEndOrd !== 'number') {
         const oldEnd = await getAudioDeckSeqEnd(oldDeck.id);
         const newEnd = inherited.filter((x) => x.oldOrd <= oldEnd).reduce((max, x) => Math.max(max, x.newOrd), -1);
         await setAudioDeckSeqEnd(deckId, newEnd);
       }
-      await setAudioDeckEnabled(oldDeck.id, false);
     }
 
     // Mede a duração (4 por vez): trecho acima do limite não toca nos alertas.
@@ -574,6 +592,9 @@ export async function importAudioDeckFromZip(
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
 
+    // Só com o novo pronto. Desliga, não apaga: apagar é decisão da pessoa.
+    if (oldDeck && inherited.length) await setAudioDeckEnabled(oldDeck.id, false);
+
     const finalName = (dj?.name && typeof dj.name === 'string' ? dj.name : deckName).slice(0, 80);
     return {
       deckId,
@@ -582,7 +603,7 @@ export async function importAudioDeckFromZip(
       tooLong,
       skipped,
       restoredStats,
-      ...(oldDeck ? { replaced: { name: oldDeck.name, inherited: inherited.length } } : {}),
+      ...(replaces ? { replaced: { name: replaces, found: !!oldDeck, inherited: inherited.length } } : {}),
     };
   } catch (e) {
     try {

@@ -134,6 +134,7 @@ export async function generateInterviewQuestion(
     opts.geminiModel,
     chatHistory,
     userText ?? '[início da entrevista — faça a pergunta-âncora]',
+    'interview',
   );
   // continueConversation não lança: em falha devolve a frase de reserva do coach
   // de sono ("você ainda está acordado…"), que não pode virar pergunta da entrevista.
@@ -195,7 +196,7 @@ export async function summarizeInterview(
       systemPrompt:
         'Você é um analista que extrai dados estruturados de conversas. Responda apenas com JSON válido.',
     };
-    const result = await continueConversationRemote(fakeContext, opts.geminiModel, [], userPrompt);
+    const result = await continueConversationRemote(fakeContext, opts.geminiModel, [], userPrompt, 'interview');
     if (result.offline) throw new Error('A IA não respondeu agora. Tente de novo.');
     raw = result.text;
   }

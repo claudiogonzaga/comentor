@@ -8,7 +8,7 @@
 import { claudeEffort, claudeModelInfo, DEFAULT_CLAUDE_EFFORT, DEFAULT_CLAUDE_MODEL, getClaudeKey } from './claude';
 import { getKV, getUserConfig, setKV } from './database';
 
-export type AiTaskId = 'coach' | 'chat' | 'text' | 'aspisFeed' | 'aspisVideo' | 'aspisAsk' | 'aspisCheck' | 'aspisSimple';
+export type AiTaskId = 'coach' | 'chat' | 'interview' | 'aspisFeed' | 'aspisVideo' | 'aspisAsk' | 'aspisCheck' | 'aspisSimple';
 
 export interface AiTaskInfo {
   id: AiTaskId;
@@ -20,9 +20,9 @@ export interface AiTaskInfo {
 }
 
 export const AI_TASKS: AiTaskInfo[] = [
-  { id: 'coach', label: 'Comentora · cobranças e argumentos', sub: 'o que ela diz nos lembretes e na soneca', model: null, effort: null },
+  { id: 'coach', label: 'Comentora · cobranças e argumentos', sub: 'o que ela diz nos lembretes, nas insistências e na soneca', model: null, effort: null },
   { id: 'chat', label: 'Comentora · conversa', sub: 'o chat com ela', model: null, effort: null },
-  { id: 'text', label: 'Comentora · outros textos', sub: 'entrevista, resumos e frases', model: null, effort: null },
+  { id: 'interview', label: 'Comentora · entrevista', sub: 'a entrevista inicial e a extração do que você respondeu', model: null, effort: null },
   // A triagem roda em dezenas de vídeos a cada busca: o Haiku custa um vigésimo do Sonnet.
   { id: 'aspisFeed', label: 'Aspis · triagem do feed', sub: 'nota e síntese de cada vídeo novo', model: 'claude-haiku-5-5', effort: 'medium' },
   { id: 'aspisVideo', label: 'Aspis · vídeo compartilhado', sub: 'a análise do vídeo que você manda ao app', model: 'claude-sonnet-5-5', effort: 'medium' },

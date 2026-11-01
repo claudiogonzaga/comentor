@@ -113,6 +113,8 @@ export function AudioDecksScreen() {
     if (busy) return;
     setBusy('Escolhendo o arquivo…');
     try {
+      // Conta antes o que já tocou: uma versão nova herda o histórico e a posição do antigo.
+      await scheduleInspirationNotifications().catch(() => {});
       const r = await importAudioDeckFromZip((m) => setBusy(m));
       if (r.error) {
         Alert.alert('Importar baralho de áudio', r.error);
@@ -125,8 +127,12 @@ export function AudioDecksScreen() {
       if (r.restoredStats) lines.push('As estatísticas (👍, 👎, execuções) foram restauradas.');
       if (r.replaced) {
         lines.push(
-          `Substitui "${r.replaced.name}": ${r.replaced.inherited} trechos herdaram 👍, 👎 e execuções, e a leitura segue do mesmo ponto. ` +
-            'O baralho antigo foi desligado; apague-o quando quiser.',
+          !r.replaced.found
+            ? `Não achei o baralho "${r.replaced.name}": este entrou como novo, sem herdar nada.`
+            : !r.replaced.inherited
+              ? `Nenhum trecho casou com os de "${r.replaced.name}": este entrou como novo, e o antigo segue ligado.`
+              : `Substitui "${r.replaced.name}": ${r.replaced.inherited} trechos herdaram 👍, 👎 e execuções, e a leitura segue do mesmo ponto. ` +
+                'O baralho antigo foi desligado; apague-o quando quiser.',
         );
       }
       if (r.tooLong) lines.push(`${r.tooLong} trecho(s) passam de ${AUDIO_DECK_SPEC.maxClipSeconds} s e não vão tocar nos alertas.`);
