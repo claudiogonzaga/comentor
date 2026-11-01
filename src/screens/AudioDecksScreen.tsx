@@ -123,6 +123,12 @@ export function AudioDecksScreen() {
       reschedule();
       const lines = [`"${r.name}": ${r.imported} trechos importados.`];
       if (r.restoredStats) lines.push('As estatísticas (👍, 👎, execuções) foram restauradas.');
+      if (r.replaced) {
+        lines.push(
+          `Substitui "${r.replaced.name}": ${r.replaced.inherited} trechos herdaram 👍, 👎 e execuções, e a leitura segue do mesmo ponto. ` +
+            'O baralho antigo foi desligado; apague-o quando quiser.',
+        );
+      }
       if (r.tooLong) lines.push(`${r.tooLong} trecho(s) passam de ${AUDIO_DECK_SPEC.maxClipSeconds} s e não vão tocar nos alertas.`);
       if (r.skipped.length) {
         lines.push(

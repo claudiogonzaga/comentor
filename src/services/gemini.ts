@@ -1,7 +1,7 @@
 import type { ChatMessage, GeminiModel, IntensityLevel, Tone } from '../types';
 import { getApiKey } from './secureStore';
-import { getUserConfig } from './database';
-import { DEFAULT_CLAUDE_EFFORT, DEFAULT_CLAUDE_MODEL, claudeComplete, getClaudeKey } from './claude';
+import { claudeForTask, type AiTaskId } from './aiTasks';
+import { claudeComplete } from './claude';
 import { pickFallback } from './fallbackMessages';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { DEFAULT_SYSTEM_PROMPT, fillTemplate } from '../constants/promptTemplate';
@@ -139,29 +139,16 @@ async function runGenerate(
 
 type ActiveLlm = { provider: 'claude'; apiKey: string; model: string; effort: string } | { provider: 'gemini'; apiKey: string };
 
-async function activeLlm(): Promise<ActiveLlm | null> {
-  let provider: 'gemini' | 'claude' = 'gemini';
-  let claudeModel = DEFAULT_CLAUDE_MODEL;
-  let effort: string = DEFAULT_CLAUDE_EFFORT;
-  try {
-    const c = await getUserConfig();
-    provider = c.aiProvider;
-    claudeModel = c.claudeModel || DEFAULT_CLAUDE_MODEL;
-    effort = c.claudeEffort || DEFAULT_CLAUDE_EFFORT;
-  } catch {
-    /* sem config legível: Gemini */
-  }
-  if (provider === 'claude') {
-    const k = await getClaudeKey();
-    if (k) return { provider: 'claude', apiKey: k, model: claudeModel, effort };
-  }
+async function activeLlm(task: AiTaskId): Promise<ActiveLlm | null> {
+  const claude = await claudeForTask(task);
+  if (claude) return { provider: 'claude', ...claude };
   const g = await getApiKey();
   return g ? { provider: 'gemini', apiKey: g } : null;
 }
 
 /** Há um provedor de API pronto para atender (Claude com chave, ou Gemini com chave)? */
 export async function hasActiveLlm(): Promise<boolean> {
-  return !!(await activeLlm());
+  return !!(await activeLlm('text'));
 }
 
 interface RunParams {
@@ -217,7 +204,7 @@ export async function generateCoachMessage(
   model: GeminiModel,
   history: ChatMessage[],
 ): Promise<{ text: string; offline: boolean }> {
-  const llm = await activeLlm();
+  const llm = await activeLlm('coach');
   if (!llm) {
     return {
       text: pickFallback(context.level, context.tone, {
@@ -273,7 +260,7 @@ export async function continueConversation(
   history: ChatMessage[],
   userMessage: string,
 ): Promise<{ text: string; offline: boolean }> {
-  const llm = await activeLlm();
+  const llm = await activeLlm('chat');
   if (!llm) {
     return {
       text: 'Estou offline agora. Mas a resposta não muda: seu corpo precisa de sono. A gente conversa direito quando você configurar a chave da API.',
@@ -315,7 +302,7 @@ export async function generateSnoozeArgument(
   model: GeminiModel,
   snoozeMinutes: number,
 ): Promise<{ text: string; offline: boolean }> {
-  const llm = await activeLlm();
+  const llm = await activeLlm('coach');
   const offlineLine = (() => {
     const opts = [
       `Mais ${snoozeMinutes}? A gente sabe como isso termina. Toda noite assim, a manhã cobra. Repensa.`,
@@ -360,7 +347,7 @@ export async function generateText(
   userPrompt: string,
   opts: { maxOutputTokens?: number; temperature?: number; timeoutMs?: number; json?: boolean } = {},
 ): Promise<string> {
-  const llm = await activeLlm();
+  const llm = await activeLlm('text');
   if (!llm) throw new Error('sem chave da API');
   return run(
     llm,

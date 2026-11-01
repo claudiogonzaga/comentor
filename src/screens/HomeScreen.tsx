@@ -312,7 +312,7 @@ export function HomeScreen() {
     pending.filter((t) => hhmmToMin(t.time)! > nowMin).sort((a, b) => hhmmToMin(a.time)! - hhmmToMin(b.time)!)[0] ?? null;
 
   return (
-    <ScreenContainer edges={['top']}>
+    <ScreenContainer edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.scroll}>
         {updateInfo?.available && updateInfo.latestVersion && (
           <Pressable

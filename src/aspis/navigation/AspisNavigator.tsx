@@ -37,7 +37,7 @@ function GatedFeed(props: React.ComponentProps<typeof FeedScreen>) {
     }, []),
   );
 
-  if (gateOn === null) return <ScreenContainer edges={['top']}>{null}</ScreenContainer>;
+  if (gateOn === null) return <ScreenContainer>{null}</ScreenContainer>;
   if (gateOn && !bypass && isSleepWindow(bedtime)) {
     return (
       <ScreenContainer>

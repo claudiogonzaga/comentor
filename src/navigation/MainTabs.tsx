@@ -1,6 +1,7 @@
-import { Image, PixelRatio } from 'react-native';
+import { useMemo } from 'react';
+import { Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GreekIcon } from '../components/GreekIcon';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -21,27 +22,28 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
  */
 export function MainTabs() {
   const insets = useSafeAreaInsets();
-  // Margens (10) + ícone (28) + rótulo. A altura padrão da barra (49) não comporta
-  // esse rótulo: com a fonte do Android aumentada, ele entrava por baixo da barra
-  // de navegação do sistema. A altura do rótulo cresce com a fonte; a do ícone, não.
-  const barHeight = 38 + typography.small.lineHeight * PixelRatio.getFontScale() + insets.bottom;
+  // A barra fica em cima e já desconta a barra de status: para as telas dentro
+  // das abas, não há recuo no topo (a moldura grega começa logo abaixo dela).
+  const sceneInsets = useMemo(() => ({ ...insets, top: 0 }), [insets]);
 
   return (
     <Tab.Navigator
       backBehavior="firstRoute"
+      screenLayout={({ children }) => (
+        <SafeAreaInsetsContext.Provider value={sceneInsets}>{children}</SafeAreaInsetsContext.Provider>
+      )}
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: colors.bg.primary },
+        tabBarPosition: 'top',
+        tabBarLabelPosition: 'beside-icon',
         tabBarActiveTintColor: colors.accent.gold,
         tabBarInactiveTintColor: colors.text.tertiary,
-        tabBarLabelStyle: { ...typography.small, fontSize: 12 },
-        // A barra é alta e tomaria o espaço dos campos de texto do Aspis.
-        tabBarHideOnKeyboard: true,
+        tabBarLabelStyle: { ...typography.small, fontSize: 13 },
         tabBarStyle: {
-          height: barHeight,
           backgroundColor: colors.bg.primary,
-          borderTopColor: colors.border,
-          borderTopWidth: 1,
+          borderBottomColor: colors.border,
+          borderBottomWidth: 1,
         },
       }}
     >

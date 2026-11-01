@@ -4,7 +4,7 @@
 // React Native. Só TEXTO — a voz neural continua sendo a do Gemini TTS (o Claude
 // não gera áudio), então a chave do Gemini segue valendo para a voz.
 //
-// Particularidades dos modelos atuais (Opus 5.5 / Sonnet 5.5 / Haiku 5.5):
+// Particularidades dos modelos atuais (Fable 5.1 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5):
 //  - o raciocínio (thinking) é adaptativo e está sempre ligado; a profundidade é
 //    controlada por output_config.effort, que o usuário escolhe (padrão 'medium');
 //  - temperature / top_p / top_k NÃO são aceitos (HTTP 400): não são enviados;
@@ -23,14 +23,18 @@ export interface ClaudeModelInfo {
   id: string;
   label: string;
   sub: string;
+  /** Preço por milhão de tokens: entrada / saída. */
+  price: string;
   /** O parâmetro `fallbacks` existe para este modelo? (o Haiku não tem.) */
   serverFallback: boolean;
 }
 
+/** Os mesmos modelos do Grafê, do mais forte ao mais barato. */
 export const CLAUDE_MODELS: ClaudeModelInfo[] = [
-  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', sub: 'equilíbrio entre qualidade, rapidez e custo (padrão)', serverFallback: true },
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', sub: 'o mais capaz — respostas mais finas, mais caro', serverFallback: true },
-  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', sub: 'o mais rápido e barato', serverFallback: false },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', sub: 'o mais capaz e o mais caro; pode demorar bem mais', price: 'US$ 10 / 50', serverFallback: true },
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', sub: 'respostas mais finas, mais caro', price: 'US$ 4 / 20', serverFallback: true },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', sub: 'equilíbrio entre qualidade, rapidez e custo (padrão)', price: 'US$ 2 / 10', serverFallback: true },
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', sub: 'o mais rápido e barato', price: 'US$ 0,10 / 0,50', serverFallback: false },
 ];
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
@@ -53,7 +57,11 @@ export function claudeEffort(id: string | null | undefined): ClaudeEffort {
 }
 
 export function claudeModelInfo(id: string | null | undefined): ClaudeModelInfo {
-  return CLAUDE_MODELS.find((m) => m.id === id) ?? CLAUDE_MODELS[0];
+  return (
+    CLAUDE_MODELS.find((m) => m.id === id) ??
+    CLAUDE_MODELS.find((m) => m.id === DEFAULT_CLAUDE_MODEL) ??
+    CLAUDE_MODELS[0]
+  );
 }
 
 // ——— Chave (guardada cifrada, separada da do Gemini) ———
@@ -94,8 +102,16 @@ export interface ClaudeRequest {
   timeoutMs?: number;
 }
 
+interface ApiBlock {
+  type: string;
+  text?: string;
+  citations?: { url?: string; title?: string }[] | null;
+  /** web_search_tool_result: lista de resultados; em erro, um objeto só. */
+  content?: unknown;
+}
+
 interface ApiResponse {
-  content?: { type: string; text?: string }[];
+  content?: ApiBlock[];
   stop_reason?: string | null;
   stop_details?: { category?: string | null; explanation?: string | null } | null;
   error?: { type?: string; message?: string };
@@ -159,6 +175,26 @@ function normalizeTurns(turns: ClaudeTurn[]): { role: 'user' | 'assistant'; cont
   return out;
 }
 
+function requestBody(info: ClaudeModelInfo, req: ClaudeRequest, messages: unknown[]) {
+  const effort = claudeEffort(req.effort);
+  return {
+    model: info.id,
+    // folga para o raciocínio, que conta no mesmo teto
+    max_tokens: Math.max(effort === 'low' ? 4096 : effort === 'medium' ? 8192 : 16000, req.maxOutputTokens * 4),
+    output_config: { effort },
+    ...(req.system ? { system: req.system } : {}),
+    messages,
+  };
+}
+
+function joinText(blocks: ApiBlock[]): string {
+  return blocks
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text as string)
+    .join('')
+    .trim();
+}
+
 /**
  * Gera uma resposta de texto. Lança ClaudeError em falha (chave, limite, rede,
  * recusa, resposta vazia) — quem chama decide o texto de reserva.
@@ -167,19 +203,83 @@ export async function claudeComplete(apiKey: string, req: ClaudeRequest): Promis
   const messages = normalizeTurns(req.turns);
   if (!messages.length) throw new ClaudeError('conversa vazia');
   const info = claudeModelInfo(req.model);
-  const effort = claudeEffort(req.effort);
   // Respeita o teto de quem chama: um piso aqui fazia a requisição seguir (e ser
   // cobrada) depois que o chamador já tinha desistido e descartado o resultado.
-  const timeoutMs = req.timeoutMs ?? 45_000;
-  const base = {
-    model: info.id,
-    // folga para o raciocínio, que conta no mesmo teto
-    max_tokens: Math.max(effort === 'low' ? 4096 : effort === 'medium' ? 8192 : 16000, req.maxOutputTokens * 4),
-    output_config: { effort },
-    ...(req.system ? { system: req.system } : {}),
-    messages,
+  const j = await send(apiKey, info, requestBody(info, req, messages), req.timeoutMs ?? 45_000, true);
+  return joinText(j.content ?? []);
+}
+
+/**
+ * Como claudeComplete, com busca na web (a ferramenta roda nos servidores da
+ * Anthropic). Devolve o texto final e as fontes: as citadas na resposta ou, se ela
+ * não citar nenhuma, as que a busca trouxe.
+ */
+export async function claudeWebSearch(
+  apiKey: string,
+  req: ClaudeRequest,
+): Promise<{ text: string; sources: { uri: string; title: string }[] }> {
+  const messages = normalizeTurns(req.turns);
+  if (!messages.length) throw new ClaudeError('conversa vazia');
+  const info = claudeModelInfo(req.model);
+  const timeoutMs = req.timeoutMs ?? 120_000;
+
+  const run = async (toolType: string): Promise<ApiBlock[]> => {
+    const tools = [{ type: toolType, name: 'web_search', max_uses: 5 }];
+    const history: unknown[] = [...messages];
+    const blocks: ApiBlock[] = [];
+    // pause_turn: o laço da busca parou no limite de iterações; devolver a resposta o retoma.
+    for (let round = 0; round < 4; round++) {
+      const j = await send(apiKey, info, { ...requestBody(info, req, history), tools }, timeoutMs, false);
+      blocks.push(...(j.content ?? []));
+      if (j.stop_reason !== 'pause_turn') break;
+      history.push({ role: 'assistant', content: j.content ?? [] });
+    }
+    return blocks;
   };
 
+  let blocks: ApiBlock[];
+  try {
+    blocks = await run('web_search_20260209');
+  } catch (e) {
+    // Modelo sem a variante nova da ferramenta: tenta a básica uma vez.
+    if (!(e instanceof ClaudeError && e.status === 400 && /web_search|tool/i.test(e.message))) throw e;
+    blocks = await run('web_search_20250305');
+  }
+
+  // A resposta é o que vem depois da última ferramenta; o texto antes dela é só o caminho.
+  let lastTool = -1;
+  blocks.forEach((b, i) => {
+    if (b.type.endsWith('_tool_result')) lastTool = i;
+  });
+  const answer = blocks.slice(lastTool + 1);
+  const text = joinText(answer);
+  if (!text) throw new ClaudeError('resposta vazia');
+
+  const seen = new Set<string>();
+  const sources: { uri: string; title: string }[] = [];
+  const add = (url: unknown, title: unknown) => {
+    if (typeof url !== 'string' || !url || seen.has(url)) return;
+    seen.add(url);
+    sources.push({ uri: url, title: typeof title === 'string' && title ? title : url });
+  };
+  for (const b of answer) for (const c of b.citations ?? []) add(c.url, c.title);
+  if (!sources.length) {
+    for (const b of blocks) {
+      if (b.type !== 'web_search_tool_result' || !Array.isArray(b.content)) continue;
+      for (const r of b.content as { url?: unknown; title?: unknown }[]) add(r.url, r.title);
+    }
+  }
+  return { text, sources };
+}
+
+/** Envia o pedido, com novas tentativas. `needText`: resposta sem texto também é falha. */
+async function send(
+  apiKey: string,
+  info: ClaudeModelInfo,
+  base: object,
+  timeoutMs: number,
+  needText: boolean,
+): Promise<ApiResponse> {
   let useFallback = info.serverFallback;
   let lastErr: ClaudeError | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -215,16 +315,11 @@ export async function claudeComplete(apiKey: string, req: ClaudeRequest): Promis
     if (j.stop_reason === 'refusal') {
       throw new ClaudeError(`o Claude recusou este pedido${j.stop_details?.category ? ` (${j.stop_details.category})` : ''}`);
     }
-    const text = (j.content ?? [])
-      .filter((b) => b.type === 'text' && typeof b.text === 'string')
-      .map((b) => b.text as string)
-      .join('')
-      .trim();
-    if (!text) {
+    if (needText && !joinText(j.content ?? [])) {
       lastErr = new ClaudeError(j.stop_reason === 'max_tokens' ? 'resposta cortada pelo limite de tokens' : 'resposta vazia');
       continue;
     }
-    return text;
+    return j;
   }
   throw lastErr ?? new ClaudeError('todas as tentativas falharam');
 }

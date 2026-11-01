@@ -24,6 +24,7 @@ import { VideoRow } from '../components/VideoRow';
 import { AUTO_REFRESH_AFTER_MS, PERIOD_LABELS, PERIODS, starsToThreshold } from '../constants/defaults';
 import { getAccessToken, NotSignedInError } from '../services/auth';
 import { GeminiError, NoGeminiKeyError } from '../services/brain';
+import { claudeForTask } from '../../services/aiTasks';
 import * as db from '../services/db';
 import { refreshFeed } from '../services/pipeline';
 import { useAppStore } from '../store/useAppStore';
@@ -91,10 +92,10 @@ export function FeedScreen({ navigation }: Props) {
 
   const onRefresh = useCallback(async () => {
     setBanner(null);
-    if (!geminiKey) {
+    if (!geminiKey && !(await claudeForTask('aspisFeed'))) {
       setBanner({
         kind: 'err',
-        text: 'Cole a sua chave Gemini em Configurações para analisar vídeos.',
+        text: 'Cole a sua chave do Gemini ou do Claude em Configurações para analisar vídeos.',
         toSettings: true,
       });
       return;
@@ -153,10 +154,18 @@ export function FeedScreen({ navigation }: Props) {
   // para não abrir login/erro sozinho.
   const autoRan = useRef(false);
   useEffect(() => {
-    if (autoRan.current || !user || !geminiKey) return;
-    autoRan.current = true;
-    const last = Date.parse(db.getMeta('last_run') || '');
-    if (!Number.isFinite(last) || Date.now() - last > AUTO_REFRESH_AFTER_MS) onRefresh();
+    if (autoRan.current || !user) return;
+    let alive = true;
+    void (async () => {
+      if (!geminiKey && !(await claudeForTask('aspisFeed'))) return;
+      if (!alive || autoRan.current) return;
+      autoRan.current = true;
+      const last = Date.parse(db.getMeta('last_run') || '');
+      if (!Number.isFinite(last) || Date.now() - last > AUTO_REFRESH_AFTER_MS) onRefresh();
+    })();
+    return () => {
+      alive = false;
+    };
   }, [user, geminiKey, onRefresh]);
 
   const header = (
@@ -283,7 +292,7 @@ export function FeedScreen({ navigation }: Props) {
   );
 
   return (
-    <ScreenContainer edges={['top']}>
+    <ScreenContainer>
       <FlatList
         data={videos}
         keyExtractor={(v) => v.video_id}

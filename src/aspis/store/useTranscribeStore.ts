@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 
 import { analyzeTranscript } from '../services/brain';
+import { claudeForTask } from '../../services/aiTasks';
 import { fetchTranscript } from '../services/captions';
 import * as db from '../services/db';
 import { findMedia } from '../services/media';
@@ -146,7 +147,7 @@ export const useTranscribeStore = create<TranscribeState>((set, get) => {
     // 3) triagem feita só por título/descrição → refaz com o conteúdo real
     const { geminiKey, model, pillars, rules, noteLang, learnedPrefs, bumpFeed } =
       useAppStore.getState();
-    if (video.content_source === 'metadata' && geminiKey) {
+    if (video.content_source === 'metadata' && (geminiKey || (await claudeForTask('aspisFeed')))) {
       setJob(videoId, { stage: 'analyzing', progress: 0, auto });
       const analysis = await analyzeTranscript(metaOf(video), transcript, {
         apiKey: geminiKey, model, pillars, rules, noteLang, learnedPrefs,

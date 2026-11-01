@@ -157,6 +157,11 @@ function normKey(s: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+/** O começo do texto de um trecho, para reconhecê-lo numa versão nova do baralho. */
+function clipStartKey(text: string | null): string {
+  return normKey(text ?? '').slice(0, 40);
+}
+
 const COLS: Record<string, keyof ManifestRow | 'file'> = {
   arquivo: 'file', file: 'file', filename: 'file',
   ordem: 'order', order: 'order', posicao: 'order', sequencia: 'order', ordemdeleitura: 'order',
@@ -294,6 +299,8 @@ export interface ImportAudioDeckResult {
   tooLong: number;
   skipped: { name: string; reason: string }[];
   restoredStats: boolean;
+  /** Versão nova de um baralho: o antigo, desligado, e quantos trechos herdaram o histórico dele. */
+  replaced?: { name: string; inherited: number };
   error?: string;
 }
 
@@ -344,7 +351,7 @@ export async function importAudioDeckFromZip(
   const skipped: { name: string; reason: string }[] = [];
   const saved: { path: string; savedName: string }[] = [];
   let manifestCsv = '';
-  let deckJson: { name?: string; playMode?: string; seqEndOrd?: unknown } | null = null;
+  let deckJson: { name?: string; playMode?: string; seqEndOrd?: unknown; replaces?: unknown } | null = null;
   let aborted: string | null = null;
 
   const unzip = new Unzip();
@@ -490,10 +497,28 @@ export async function importAudioDeckFromZip(
       if (oa == null && ob != null) return 1;
       return naturalCompare(a.path, b.path);
     });
+
+    // Versão nova de um baralho que já existe (deck.json com "replaces": o nome do
+    // antigo). Cada trecho herda o histórico do trecho antigo de mesmo começo de
+    // texto: um trecho recortado continua começando igual.
+    const dj = deckJson as { name?: string; playMode?: string; seqEndOrd?: unknown; replaces?: unknown } | null;
+    const oldDeck =
+      typeof dj?.replaces === 'string'
+        ? (await listAudioDecks()).find((k) => k.name === dj.replaces && k.id !== deckId) ?? null
+        : null;
+    const oldByStart = new Map<string, AudioClip[]>();
+    for (const c of oldDeck ? await listAudioClips(oldDeck.id) : []) {
+      const key = clipStartKey(c.text);
+      if (key) oldByStart.set(key, [...(oldByStart.get(key) ?? []), c]);
+    }
+    const inherited: { oldOrd: number; newOrd: number }[] = [];
+
     let restoredStats = false;
     const clips: NewAudioClip[] = saved.map((s, i) => {
       const m = manifest.get(fileKey(s.path));
       if (m && (m.likes != null || m.dislikes != null || m.plays != null || m.rating != null)) restoredStats = true;
+      const old = oldByStart.get(clipStartKey(m?.text ?? null))?.shift();
+      if (old) inherited.push({ oldOrd: old.ord, newOrd: i });
       return {
         ord: i,
         fileName: s.savedName,
@@ -502,18 +527,17 @@ export async function importAudioDeckFromZip(
         author: m?.author ?? null,
         reference: m?.reference ?? null,
         durationMs: null,
-        rating: m?.rating,
-        likes: m?.likes,
-        dislikes: m?.dislikes,
-        plays: m?.plays,
-        lastPlayedAt: m?.lastPlayedAt ?? null,
+        rating: m?.rating ?? old?.rating,
+        likes: m?.likes ?? old?.likes,
+        dislikes: m?.dislikes ?? old?.dislikes,
+        plays: m?.plays ?? old?.plays,
+        lastPlayedAt: m?.lastPlayedAt ?? old?.lastPlayedAt ?? null,
       };
     });
     await addAudioClips(deckId, clips);
 
     // Nome/modo vindos de um backup (deck.json).
-    const dj = deckJson as { name?: string; playMode?: string; seqEndOrd?: unknown } | null;
-    const { renameAudioDeck, setAudioDeckMode, setAudioDeckSeqEnd } = await import('./database');
+    const { renameAudioDeck, setAudioDeckEnabled, setAudioDeckMode, setAudioDeckSeqEnd } = await import('./database');
     if (dj?.name && typeof dj.name === 'string') await renameAudioDeck(deckId, dj.name.slice(0, 80));
     if (dj?.playMode === 'sequence') {
       await setAudioDeckMode(deckId, 'sequence');
@@ -522,6 +546,15 @@ export async function importAudioDeckFromZip(
       if (typeof end === 'number' && Number.isInteger(end) && end >= -1 && end < clips.length) {
         await setAudioDeckSeqEnd(deckId, end);
       }
+    }
+    if (oldDeck) {
+      // A leitura segue do mesmo ponto; o antigo só é desligado: apagar é decisão da pessoa.
+      if (typeof dj?.seqEndOrd !== 'number') {
+        const oldEnd = await getAudioDeckSeqEnd(oldDeck.id);
+        const newEnd = inherited.filter((x) => x.oldOrd <= oldEnd).reduce((max, x) => Math.max(max, x.newOrd), -1);
+        await setAudioDeckSeqEnd(deckId, newEnd);
+      }
+      await setAudioDeckEnabled(oldDeck.id, false);
     }
 
     // Mede a duração (4 por vez): trecho acima do limite não toca nos alertas.
@@ -542,7 +575,15 @@ export async function importAudioDeckFromZip(
     await Promise.all([worker(), worker(), worker(), worker()]);
 
     const finalName = (dj?.name && typeof dj.name === 'string' ? dj.name : deckName).slice(0, 80);
-    return { deckId, name: finalName, imported: saved.length, tooLong, skipped, restoredStats };
+    return {
+      deckId,
+      name: finalName,
+      imported: saved.length,
+      tooLong,
+      skipped,
+      restoredStats,
+      ...(oldDeck ? { replaced: { name: oldDeck.name, inherited: inherited.length } } : {}),
+    };
   } catch (e) {
     try {
       dir.delete();

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,6 +51,10 @@ function daylight(): number {
 
 export function VaseBackground({ meander = true }: VaseBackgroundProps) {
   const insets = useSafeAreaInsets();
+  // O tamanho real do fundo: dentro de uma aba, ele é menor que a tela.
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
+  const width = measured?.w ?? W;
+  const height = measured?.h ?? H;
 
   const { topColor, bottomColor, lineColor } = useMemo(() => {
     const t = daylight();
@@ -64,8 +68,8 @@ export function VaseBackground({ meander = true }: VaseBackgroundProps) {
   const frame = useMemo(() => {
     const L = insets.left + INSET;
     const T = insets.top + INSET;
-    const R = W - insets.right - INSET;
-    const B = H - insets.bottom - INSET;
+    const R = width - insets.right - INSET;
+    const B = height - insets.bottom - INSET;
     const seg = (pts: [number, number][]) =>
       'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
 
@@ -88,16 +92,24 @@ export function VaseBackground({ meander = true }: VaseBackgroundProps) {
       paths.push(seg(KEY.map(([a, c]) => [R - c, s + a])));
     }
     return { L, T, R, B, paths };
-  }, [insets.left, insets.top, insets.right, insets.bottom]);
+  }, [insets.left, insets.top, insets.right, insets.bottom, width, height]);
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View
+      style={StyleSheet.absoluteFill}
+      pointerEvents="none"
+      onLayout={(e) => {
+        const { width: w, height: h } = e.nativeEvent.layout;
+        // O teclado encolhe a tela: a moldura fica onde está, com o pé atrás dele.
+        setMeasured((m) => (m && m.w === w && m.h >= h ? m : { w, h }));
+      }}
+    >
       <LinearGradient
         colors={[topColor, bottomColor]}
         style={StyleSheet.absoluteFill}
       />
       {meander && (
-        <Svg width={W} height={H} style={StyleSheet.absoluteFill}>
+        <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
           <Rect
             x={frame.L}
             y={frame.T}

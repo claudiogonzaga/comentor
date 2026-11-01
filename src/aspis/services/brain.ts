@@ -2,9 +2,10 @@
 // estruturado (pilar, score, título neutro, resumo, pontos-chave, fatos,
 // citações). Port fiel do brain.py do desktop: mesmo prompt (verbatim),
 // mesmos parâmetros (JSON estrito, temperature 0.3, 4096 tokens) e mesmo
-// parser tolerante. A diferença: aqui a chamada é REST direto na API Gemini
-// com a chave do usuário, e há a camada extra de "assistir" o vídeo via
-// fileUri (a API Gemini aceita URLs públicas do YouTube).
+// parser tolerante. A diferença: aqui a chamada é REST direto na API, com a
+// chave do usuário, no provedor escolhido em Cérebro (Gemini ou Claude, cada
+// tarefa com o seu modelo), e há a camada extra de "assistir" o vídeo via
+// fileUri (só a API Gemini aceita URLs públicas do YouTube).
 
 import {
   ASK_MAX_TOKENS,
@@ -40,12 +41,14 @@ import type {
   VideoMeta,
   VideoRecord,
 } from '../types';
+import { claudeForTask, type AiTaskId } from '../../services/aiTasks';
+import { ClaudeError, claudeComplete, claudeWebSearch } from '../../services/claude';
 import { fetchTranscript } from './captions';
 
 export class NoGeminiKeyError extends Error {
   constructor() {
     super(
-      'Chave do Gemini não configurada. Cole a sua chave em Configurações para o Aspis poder analisar vídeos.',
+      'Nenhuma chave de IA configurada. Cole a do Gemini ou a do Claude em Configurações para o Aspis poder analisar vídeos.',
     );
     this.name = 'NoGeminiKeyError';
   }
@@ -232,6 +235,48 @@ async function callGemini({
   return { text: textParts.join(''), sources: extractSources(data) };
 }
 
+// --- provedor: Claude ou Gemini ----------------------------------------------
+
+const CLAUDE_TIMEOUT_MS = 120_000;
+const CLAUDE_SEARCH_TIMEOUT_MS = 180_000;
+
+// Vídeo anexado só o Gemini sabe assistir: esse pedido vai sempre para ele. No
+// mais, vale o provedor escolhido; Claude sem chave cai no Gemini.
+async function callLlm(task: AiTaskId, call: GeminiCall): Promise<GeminiResult> {
+  const hasVideo = call.parts.some((p) => 'fileData' in p);
+  const claude = hasVideo ? null : await claudeForTask(task);
+  if (!claude) return callGemini(call);
+  const req = {
+    model: claude.model,
+    effort: claude.effort,
+    system: call.json
+      ? `${call.system}\n\nResponda SOMENTE com JSON válido, sem texto antes ou depois e sem cercas de código.`
+      : call.system,
+    turns: [
+      {
+        role: 'user' as const,
+        text: call.parts.map((p) => ('text' in p ? p.text : '')).filter(Boolean).join('\n'),
+      },
+    ],
+    maxOutputTokens: call.maxTokens,
+    timeoutMs: CLAUDE_TIMEOUT_MS,
+  };
+  try {
+    if (call.search) {
+      return await claudeWebSearch(claude.apiKey, {
+        ...req,
+        // os resultados da busca e o raciocínio pedem mais folga
+        maxOutputTokens: Math.max(call.maxTokens, 4000),
+        timeoutMs: CLAUDE_SEARCH_TIMEOUT_MS,
+      });
+    }
+    return { text: await claudeComplete(claude.apiKey, req), sources: [] };
+  } catch (e) {
+    if (e instanceof ClaudeError) throw new GeminiError(e.message, e.status === 401 || e.status === 403);
+    throw e;
+  }
+}
+
 // --- parsing / normalização (port do brain.py) -------------------------------
 
 function parseJsonLoose(raw: string): Record<string, unknown> {
@@ -323,11 +368,12 @@ async function analyzeOnce(
   video: VideoMeta,
   parts: GeminiPart[],
   opts: BrainOptions,
+  task: AiTaskId,
 ): Promise<Analysis> {
   const system = buildSystemText(opts.pillars, opts.rules, opts.noteLang, opts.learnedPrefs);
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const { text } = await callGemini({
+    const { text } = await callLlm(task, {
       apiKey: opts.apiKey,
       model: opts.model,
       system,
@@ -359,29 +405,40 @@ export type AnalyzePhase = 'video' | 'captions' | 'metadata';
 //  c) só metadados (o prompt manda declarar isso no resumo)
 // No feed, `tryVideoUri=false` pula a camada (a) — mesmo comportamento do
 // desktop (transcrição → metadados) e custo/latência viáveis para ~25 vídeos.
+// Com o Claude, que não assiste vídeo, a legenda vem primeiro; sem legenda, o
+// Gemini assiste, se houver chave dele.
 export async function analyze(
   video: VideoMeta,
   opts: BrainOptions,
   tryVideoUri: boolean,
   onPhase?: (phase: AnalyzePhase) => void,
 ): Promise<AnalyzeResult> {
-  if (!opts.apiKey) throw new NoGeminiKeyError();
+  const task: AiTaskId = tryVideoUri ? 'aspisVideo' : 'aspisFeed';
+  const claude = await claudeForTask(task);
+  if (!opts.apiKey && !claude) throw new NoGeminiKeyError();
 
-  if (tryVideoUri) {
+  const watch = async (): Promise<AnalyzeResult | null> => {
     try {
       onPhase?.('video');
       const parts: GeminiPart[] = [
         { fileData: { fileUri: video.url } },
         { text: buildUserMessage(video, null, true) },
       ];
-      const analysis = await analyzeOnce(video, parts, opts);
+      const analysis = await analyzeOnce(video, parts, opts, task);
       return { analysis, source: 'video', transcript: null };
     } catch (e) {
       // chave ruim/ausente não melhora nas camadas seguintes → propaga já
-      if (e instanceof NoGeminiKeyError) throw e;
-      if (e instanceof GeminiError && e.isKeyError) throw e;
+      // (a não ser que elas sejam do Claude, que não usa essa chave)
+      if (!claude && e instanceof NoGeminiKeyError) throw e;
+      if (!claude && e instanceof GeminiError && e.isKeyError) throw e;
       // demais erros (vídeo longo demais, não suportado…) → próxima camada
+      return null;
     }
+  };
+
+  if (tryVideoUri && !claude) {
+    const watched = await watch();
+    if (watched) return watched;
   }
 
   onPhase?.('captions');
@@ -394,13 +451,18 @@ export async function analyze(
 
   if (transcript?.available) {
     const parts: GeminiPart[] = [{ text: buildUserMessage(video, transcript, false) }];
-    const analysis = await analyzeOnce(video, parts, opts);
+    const analysis = await analyzeOnce(video, parts, opts, task);
     return { analysis, source: 'captions', transcript };
+  }
+
+  if (tryVideoUri && claude && opts.apiKey) {
+    const watched = await watch();
+    if (watched) return watched;
   }
 
   onPhase?.('metadata');
   const parts: GeminiPart[] = [{ text: buildUserMessage(video, null, false) }];
-  const analysis = await analyzeOnce(video, parts, opts);
+  const analysis = await analyzeOnce(video, parts, opts, task);
   return { analysis, source: 'metadata', transcript: null };
 }
 
@@ -411,9 +473,9 @@ export async function analyzeTranscript(
   transcript: Transcript,
   opts: BrainOptions,
 ): Promise<Analysis> {
-  if (!opts.apiKey) throw new NoGeminiKeyError();
+  if (!opts.apiKey && !(await claudeForTask('aspisFeed'))) throw new NoGeminiKeyError();
   const parts: GeminiPart[] = [{ text: buildUserMessage(video, transcript, false) }];
-  return analyzeOnce(video, parts, opts);
+  return analyzeOnce(video, parts, opts, 'aspisFeed');
 }
 
 // --- Q&A sobre um vídeo (port do brain.ask) ----------------------------------
@@ -433,7 +495,7 @@ export async function ask(
   const geminiParts: GeminiPart[] = [];
   if (tt) {
     parts.push('\nTRANSCRIÇÃO (fonte da verdade):\n' + tt.slice(0, ASK_TRANSCRIPT_CHARS));
-  } else if (video.content_source === 'video') {
+  } else if (video.content_source === 'video' && (opts.apiKey || !(await claudeForTask('aspisAsk')))) {
     geminiParts.push({ fileData: { fileUri: video.url } });
     parts.push('\n[O VÍDEO está anexado — use o conteúdo dele como fonte da verdade.]');
   } else {
@@ -449,7 +511,7 @@ export async function ask(
   parts.push(`\nPERGUNTA DO USUÁRIO:\n${question}`);
   geminiParts.push({ text: parts.join('\n') });
 
-  const { text } = await callGemini({
+  const { text } = await callLlm('aspisAsk', {
     apiKey: opts.apiKey,
     model: opts.model,
     system: ASK_SYSTEM,
@@ -493,7 +555,7 @@ export async function factCheck(
     '\nFaça a checagem externa e o aprofundamento conforme as instruções do sistema.',
   );
 
-  const { text, sources } = await callGemini({
+  const { text, sources } = await callLlm('aspisCheck', {
     apiKey: opts.apiKey,
     model: opts.model,
     system: FACTCHECK_SYSTEM,
@@ -511,7 +573,7 @@ export async function makeFlashcards(
   text: string,
   opts: Pick<BrainOptions, 'apiKey' | 'model'>,
 ): Promise<Fato[]> {
-  const { text: out } = await callGemini({
+  const { text: out } = await callLlm('aspisSimple', {
     apiKey: opts.apiKey,
     model: opts.model,
     system: FLASHCARD_SYSTEM,
@@ -562,7 +624,7 @@ export async function distillPreferences(
     'VÍDEOS QUE O USUÁRIO SALVOU/DESTACOU (valorizou):',
     positives.length ? positives.map(fmt).join('\n') : '(nenhum)',
   ].join('\n');
-  const { text } = await callGemini({
+  const { text } = await callLlm('aspisSimple', {
     apiKey: opts.apiKey,
     model: opts.model,
     system: DISTILL_SYSTEM,

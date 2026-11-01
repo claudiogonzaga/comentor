@@ -323,6 +323,7 @@ Escolha entre uma API — Gemini (Google) ou Claude (Anthropic), precisa de chav
                 onProviderChange={(p) => setConfig({ aiProvider: p })}
                 onClaudeModelChange={(id) => setConfig({ claudeModel: id })}
                 onKeyState={setHasClaudeKey}
+                perTask
               />
               <Text style={styles.label}>
                 {usingClaude ? 'Modelo Gemini (reserva do texto; a voz usa a chave abaixo)' : 'Modelo Gemini'}

@@ -1,5 +1,5 @@
-// Configurações: conta Google + Drive, chave Gemini (SecureStore), modelo,
-// voz da leitura (Gemini TTS), pilares (CRUD), regras extras da IA e defaults
+// Configurações: conta Google + Drive, provedor de IA (Gemini ou Claude, o mesmo
+// painel de Cérebro e Voz), chave Gemini (SecureStore), modelo, voz da leitura (Gemini TTS), pilares (CRUD), regras extras da IA e defaults
 // de exibição.
 import { ReactNode, useEffect, useState } from 'react';
 import {
@@ -33,6 +33,8 @@ import { MEDIA_SUPPORTED } from '../services/media';
 import { TRANSCRIPTION_SUPPORTED } from '../services/transcription';
 import { useReadAloud } from '../hooks/useReadAloud';
 import { useAppStore } from '../store/useAppStore';
+import { AiProviderPanel } from '../../components/AiProviderPanel';
+import { useAppStore as useRootStore } from '../../store/useAppStore';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
 
@@ -52,6 +54,8 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
 }
 
 export function SettingsScreen({ navigation }: Props) {
+  const rootConfig = useRootStore((s) => s.config);
+  const setRootConfig = useRootStore((s) => s.setConfig);
   const {
     user,
     channel,
@@ -172,8 +176,23 @@ export function SettingsScreen({ navigation }: Props) {
         </Section>
 
         <Section
+          title="Inteligência"
+          sub="Gemini ou Claude, para o Aspis e para a Comentora. No Claude, cada tarefa tem o seu modelo e o seu raciocínio."
+        >
+          <AiProviderPanel
+            provider={rootConfig?.aiProvider ?? 'gemini'}
+            claudeModel={rootConfig?.claudeModel ?? ''}
+            claudeEffort={rootConfig?.claudeEffort ?? 'medium'}
+            onProviderChange={(p) => setRootConfig({ aiProvider: p })}
+            onClaudeModelChange={(id) => setRootConfig({ claudeModel: id })}
+            onClaudeEffortChange={(id) => setRootConfig({ claudeEffort: id })}
+            perTask
+          />
+        </Section>
+
+        <Section
           title="Chave Gemini"
-          sub="A análise roda no aparelho com a SUA chave (fica no Keystore do Android, nunca em texto plano)."
+          sub="A análise roda no aparelho com a SUA chave (fica no Keystore do Android, nunca em texto plano). É também a chave da voz e de assistir vídeos."
         >
           <Text style={styles.masked}>{maskedKey}</Text>
           <TextInput
@@ -206,7 +225,10 @@ export function SettingsScreen({ navigation }: Props) {
           </View>
         </Section>
 
-        <Section title="Modelo" sub="O mesmo cérebro do desktop. Edite se quiser outro modelo Gemini.">
+        <Section
+          title="Modelo do Gemini"
+          sub="Vale com o Gemini como provedor e ao assistir um vídeo sem legenda. Edite se quiser outro modelo."
+        >
           <View style={styles.chips}>
             {MODEL_PRESETS.map((m) => (
               <Chip

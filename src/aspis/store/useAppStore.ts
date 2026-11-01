@@ -6,6 +6,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppStore as useRootStore } from '../../store/useAppStore';
 import { deleteApiKey, getApiKey } from '../../services/secureStore';
+import { claudeForTask } from '../../services/aiTasks';
 import { create } from 'zustand';
 
 import {
@@ -252,7 +253,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   // num perfil que passa a ajustar a pontuação dos próximos vídeos.
   runLearning: async () => {
     const { geminiKey, model } = get();
-    if (!geminiKey) throw new Error('Configure a chave do Gemini para aprender com o feedback.');
+    if (!geminiKey && !(await claudeForTask('aspisSimple'))) {
+      throw new Error('Configure a chave do Gemini ou do Claude para aprender com o feedback.');
+    }
     const { negatives, positives } = db.getFeedbackExamples(40);
     if (negatives.length + positives.length < 3) {
       throw new Error('Poucos sinais ainda — pule ou salve mais alguns vídeos primeiro.');

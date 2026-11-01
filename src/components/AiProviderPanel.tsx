@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, radius, spacing, typography } from '../theme';
+import { AiTaskTable } from './AiTaskTable';
 import {
   CLAUDE_EFFORTS,
   CLAUDE_MODELS,
@@ -14,8 +15,9 @@ import {
 import type { AIProvider } from '../types';
 
 // Quem "pensa" quando a inteligência é por API: Gemini (Google) ou Claude
-// (Anthropic). Tudo aqui salva na hora. A voz neural é sempre a do Gemini — o
-// Claude só gera texto —, então a chave do Gemini continua valendo para a voz.
+// (Anthropic), na Comentora e no Aspis. Tudo aqui salva na hora. A voz neural é
+// sempre a do Gemini — o Claude só gera texto —, então a chave do Gemini continua
+// valendo para a voz.
 
 interface Props {
   provider: AIProvider;
@@ -26,6 +28,8 @@ interface Props {
   onClaudeModelChange: (id: string) => void | Promise<void>;
   /** Avisa a tela se há chave do Claude guardada (para liberar o "Salvar"). */
   onKeyState?: (hasKey: boolean) => void;
+  /** Mostra o modelo e o raciocínio de cada tarefa, em vez de um modelo só para tudo. */
+  perTask?: boolean;
 }
 
 export function AiProviderPanel({
@@ -36,6 +40,7 @@ export function AiProviderPanel({
   onClaudeModelChange,
   onClaudeEffortChange,
   onKeyState,
+  perTask = false,
 }: Props) {
   const [hasKey, setHasKey] = useState(false);
   const [input, setInput] = useState('');
@@ -111,48 +116,55 @@ export function AiProviderPanel({
 
       {provider === 'claude' ? (
         <View>
-          <Text style={[styles.label, { marginTop: spacing.md }]}>Modelo Claude</Text>
-          {CLAUDE_MODELS.map((m) => {
-            const on = m.id === model;
-            return (
-              <Pressable
-                key={m.id}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                onPress={() => void onClaudeModelChange(m.id)}
-                style={[styles.row, on && styles.rowOn]}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>{m.label}</Text>
-                  <Text style={[typography.small, { color: colors.text.secondary }]}>{m.sub}</Text>
-                </View>
-                <View style={[styles.radio, on && styles.radioOn]} />
-              </Pressable>
-            );
-          })}
+          {perTask ? (
+            <AiTaskTable />
+          ) : (
+            <View>
+              <Text style={[styles.label, { marginTop: spacing.md }]}>Modelo Claude</Text>
+              {CLAUDE_MODELS.map((m) => {
+                const on = m.id === model;
+                return (
+                  <Pressable
+                    key={m.id}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    onPress={() => void onClaudeModelChange(m.id)}
+                    style={[styles.row, on && styles.rowOn]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>{m.label}</Text>
+                      <Text style={[typography.small, { color: colors.text.secondary }]}>{m.sub}</Text>
+                    </View>
+                    <View style={[styles.radio, on && styles.radioOn]} />
+                  </Pressable>
+                );
+              })}
 
-          <Text style={[styles.label, { marginTop: spacing.md }]}>Raciocínio</Text>
-          <View style={styles.chips}>
-            {CLAUDE_EFFORTS.map((e) => {
-              const on = e.id === claudeEffort(effortProp);
-              return (
-                <Pressable
-                  key={e.id}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: on }}
-                  accessibilityLabel={`Raciocínio ${e.label}: ${e.sub}`}
-                  onPress={() => void onClaudeEffortChange(e.id)}
-                  style={[styles.chip, on && styles.chipOn]}
-                >
-                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{e.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.note}>
-            {CLAUDE_EFFORTS.find((e) => e.id === claudeEffort(effortProp))?.sub}. Quanto mais alto, melhor a resposta —
-            e mais lenta e mais cara.
-          </Text>
+              <Text style={[styles.label, { marginTop: spacing.md }]}>Raciocínio</Text>
+              <View style={styles.chips}>
+                {CLAUDE_EFFORTS.map((e) => {
+                  const on = e.id === claudeEffort(effortProp);
+                  return (
+                    <Pressable
+                      key={e.id}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`Raciocínio ${e.label}: ${e.sub}`}
+                      onPress={() => void onClaudeEffortChange(e.id)}
+                      style={[styles.chip, on && styles.chipOn]}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{e.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.note}>
+                {CLAUDE_EFFORTS.find((e) => e.id === claudeEffort(effortProp))?.sub}. Quanto mais alto, melhor a resposta —
+                e mais lenta e mais cara.
+              </Text>
+
+            </View>
+          )}
 
           <Text style={[styles.label, { marginTop: spacing.md }]}>Chave da Anthropic</Text>
           {hasKey ? (
@@ -198,9 +210,9 @@ export function AiProviderPanel({
             <Text style={styles.link}>Criar uma chave no console da Anthropic →</Text>
           </Pressable>
           <Text style={styles.note}>
-            O Claude cuida do TEXTO: chat, cobranças, entrevista e argumentos. A voz neural continua sendo a do Gemini
-            (o Claude não gera áudio) — por isso a chave do Gemini, abaixo, segue valendo para a voz. O uso do Claude é
-            cobrado pela Anthropic na sua conta.
+            O Claude cuida do TEXTO: chat, cobranças, entrevista e argumentos da Comentora, e a análise de vídeos do
+            Aspis. Ele não gera áudio nem assiste vídeo: a voz neural continua sendo a do Gemini, e um vídeo sem legenda
+            só é assistido com a chave do Gemini. O uso do Claude é cobrado pela Anthropic na sua conta.
           </Text>
         </View>
       ) : null}
