@@ -21,6 +21,7 @@ import { AboutYouScreen } from '../screens/AboutYouScreen';
 import { BrainVoiceScreen } from '../screens/BrainVoiceScreen';
 import { InspirationLibraryScreen } from '../screens/InspirationLibraryScreen';
 import { AudioDecksScreen } from '../screens/AudioDecksScreen';
+import { AspisNavigator } from '../aspis/navigation/AspisNavigator';
 import { YogaNidraScreen } from '../screens/YogaNidraScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
@@ -85,6 +86,7 @@ export type RootStackParamList = {
   InspirationLibrary: undefined;
   AudioDecks: undefined;
   YogaNidra: undefined;
+  Aspis: { screen: 'Share'; params: { sharedText: string } } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -117,7 +119,7 @@ function appAudioBusy(): boolean {
   return isClipPlaying();
 }
 
-export function RootNavigator({ navigationRef }: { navigationRef: any }) {
+export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: any; onNavReady?: () => void }) {
   const { config } = useAppStore();
   const onboarded = config?.onboardingDone ?? false;
 
@@ -499,6 +501,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
       theme={navTheme}
       onReady={() => {
         flushRef.current?.();
+        onNavReady?.();
       }}
     >
       <Stack.Navigator
@@ -560,6 +563,7 @@ export function RootNavigator({ navigationRef }: { navigationRef: any }) {
           component={InspirationLibraryScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen name="Aspis" component={AspisNavigator} options={{ animation: 'slide_from_right' }} />
         <Stack.Screen
           name="AudioDecks"
           component={AudioDecksScreen}

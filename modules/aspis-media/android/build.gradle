@@ -1,0 +1,35 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.aspismedia'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.aspismedia"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+repositories {
+  mavenCentral()
+}
+
+dependencies {
+  // yt-dlp + Python 3.11 + QuickJS (desafios JS do YouTube) empacotados como
+  // .so — o mesmo motor do download.py do desktop, rodando no aparelho.
+  def ytdlVersion = "0.18.1"
+  implementation "io.github.junkfood02.youtubedl-android:library:$ytdlVersion"
+  implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$ytdlVersion"
+  // Limpeza periódica dos arquivos vencidos, mesmo com o app fechado.
+  implementation "androidx.work:work-runtime-ktx:2.10.1"
+  // Transcrição no celular: sherpa-onnx (onnxruntime) + modelo Parakeet baixado à parte.
+  // AAR oficial do GitHub Releases (não há no Maven Central), ligado pelo
+  // gradleAarProjects do expo-module.config.json; instale com
+  // scripts/fetch-sherpa-onnx.sh.
+  implementation project(':aspis-media$sherpa-onnx')
+  implementation "androidx.core:core-ktx:1.13.1"
+}

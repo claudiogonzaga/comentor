@@ -2,7 +2,7 @@
   "expo": {
     "name": "Áskesis",
     "slug": "comentor",
-    "version": "1.114.0",
+    "version": "1.115.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -93,11 +93,31 @@
       "react-native-health-connect",
       "./plugins/withHealthConnectPermissionDelegate",
       "./plugins/withHealthConnectRationale",
+      "@react-native-google-signin/google-signin",
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": [
+            "text/*"
+          ]
+        }
+      ],
+      "expo-video",
       [
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 26
+            "minSdkVersion": 26,
+            "useLegacyPackaging": true,
+            "buildArchs": [
+              "arm64-v8a"
+            ],
+            "packagingOptions": {
+              "pickFirst": [
+                "**/libc++_shared.so",
+                "**/libonnxruntime.so"
+              ]
+            }
           }
         }
       ]
@@ -109,6 +129,7 @@
     },
     "updates": {
       "url": "https://u.expo.dev/78ad8365-ab78-4722-8fd7-17b1e8546f6d"
-    }
+    },
+    "scheme": "askesis"
   }
 }

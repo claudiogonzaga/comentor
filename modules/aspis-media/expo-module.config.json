@@ -1,0 +1,16 @@
+{
+  "platforms": [
+    "android"
+  ],
+  "android": {
+    "modules": [
+      "expo.modules.aspismedia.AspisMediaModule"
+    ],
+    "gradleAarProjects": [
+      {
+        "name": "sherpa-onnx",
+        "aarFilePath": "android/libs/sherpa-onnx-1.13.8.aar"
+      }
+    ]
+  }
+}

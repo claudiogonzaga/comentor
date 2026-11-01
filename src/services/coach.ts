@@ -25,6 +25,7 @@ import {
   generateSnoozeArgument as generateSnoozeArgumentRemote,
 } from './gemini';
 import { generateLocal, type LocalChatMessage } from './localModel';
+import { pillarsForCoach } from '../aspis/pillarsText';
 import {
   SLEEP_DONE_KV,
   ensureChannel,
@@ -132,6 +133,8 @@ interface CoachingContext {
   recentSnoozeFeedback?: string;
   /** Resumo dos dados de saúde (sono/exercício/passos) do Health Connect. */
   healthContext?: string;
+  /** Pilares do Aspis: os objetivos de vida da pessoa. */
+  lifeGoals?: string;
   /** Falas LITERAIS da própria pessoa em manhãs depois de dormir tarde (datadas). */
   pastSelfQuotes?: string;
   /** Nota quando o hábito de dormir no horário já está consolidado. */
@@ -317,6 +320,11 @@ function buildSystemPromptText(ctx: CoachingContext): string {
         `Use essa informação para personalizar a abordagem — não repita argumentos genéricos se já souber o motivo real.`,
     );
   }
+  if (ctx.lifeGoals && ctx.lifeGoals.trim().length > 0) {
+    extras.push(
+      `\nOBJETIVOS DE VIDA DA PESSOA (os pilares que ela definiu no Aspis — ligue seus argumentos a eles quando couber, sem listá-los):\n${ctx.lifeGoals}`,
+    );
+  }
   if (ctx.healthContext && ctx.healthContext.trim().length > 0) {
     extras.push(
       `\nDADOS DE SAÚDE RECENTES (do Health Connect — use para personalizar, mas não soe robótico citando números crus):\n${ctx.healthContext}`,
@@ -495,6 +503,7 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
   const history = await getRecentChat(habit.id, 10);
   const personalization = await buildPersonalizationContext(habit.id);
   const healthContext = await getHealthContext();
+  const lifeGoals = await pillarsForCoach();
 
   const result = await runCoachGeneration(
     config,
@@ -510,6 +519,7 @@ export async function getCoachMessageForNow(): Promise<CoachInvocationResult> {
       systemPrompt: config.systemPrompt,
       ...personalization,
       healthContext,
+      lifeGoals,
     },
     history,
   );
@@ -542,6 +552,7 @@ export async function getChatOpenerForNow(): Promise<CoachInvocationResult> {
   const recentLogs = await getRecentLogs(habit.id, 14);
   const history = await getRecentChat(habit.id, 6);
   const healthContext = await getHealthContext();
+  const lifeGoals = await pillarsForCoach();
   const personalization = await buildPersonalizationContext(habit.id);
   const micro = await microInterviewInstruction();
 
@@ -559,6 +570,7 @@ export async function getChatOpenerForNow(): Promise<CoachInvocationResult> {
       systemPrompt: micro ? `${CHAT_OPENER_PROMPT}\n\n${micro}` : CHAT_OPENER_PROMPT,
       ...personalization,
       healthContext,
+      lifeGoals,
     },
     history,
   );
@@ -650,6 +662,7 @@ export async function getConvinceMessageForNow(): Promise<ConvinceResult> {
   const history = await getRecentChat(habit.id, 6);
   const personalization = await buildPersonalizationContext(habit.id);
   const healthContext = await getHealthContext();
+  const lifeGoals = await pillarsForCoach();
   const focus = pickConvinceFocus(config.bedtime);
 
   const instruction =
@@ -674,6 +687,7 @@ export async function getConvinceMessageForNow(): Promise<ConvinceResult> {
       systemPrompt: config.systemPrompt,
       ...personalization,
       healthContext,
+      lifeGoals,
     },
     history,
     instruction,
@@ -703,6 +717,7 @@ export async function sendUserMessage(
 
   const personalization = await buildPersonalizationContext(habitId);
   const healthContext = await getHealthContext();
+  const lifeGoals = await pillarsForCoach();
   const result = await runChatGeneration(
     config,
     {
@@ -717,6 +732,7 @@ export async function sendUserMessage(
       systemPrompt: config.systemPrompt,
       ...personalization,
       healthContext,
+      lifeGoals,
     },
     history,
     text,

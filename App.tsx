@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureResponderEvent, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -13,7 +13,9 @@ import {
   Inter_500Medium,
   Inter_600SemiBold,
 } from '@expo-google-fonts/inter';
+import { useShareIntent } from 'expo-share-intent';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { startAspis } from './src/aspis/bootstrap';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
 import { useAppStore } from './src/store/useAppStore';
 import {
@@ -34,6 +36,8 @@ SplashScreenAPI.preventAutoHideAsync().catch(() => {});
 export default function App() {
   const navigationRef = useRef<any>(null);
   const { ready, init } = useAppStore();
+  const [navReady, setNavReady] = useState(false);
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
   const [fontsLoaded] = useFonts({
     Nunito_700Bold,
@@ -77,6 +81,21 @@ export default function App() {
     }
   }, [ready, fontsLoaded]);
 
+  // O Aspis sobe depois da Comentora: uma falha nele não pode impedir os lembretes.
+  useEffect(() => {
+    if (ready) void startAspis();
+  }, [ready]);
+
+  // Compartilhar → Áskesis (YouTube, navegador): abre a análise do Aspis.
+  useEffect(() => {
+    if (!hasShareIntent || !ready || !fontsLoaded || !navReady) return;
+    const text = shareIntent?.webUrl || shareIntent?.text || '';
+    resetShareIntent();
+    if (text && navigationRef.current?.isReady?.()) {
+      navigationRef.current.navigate('Aspis', { screen: 'Share', params: { sharedText: text } });
+    }
+  }, [hasShareIntent, shareIntent, ready, fontsLoaded, navReady, resetShareIntent]);
+
   if (!ready || !fontsLoaded) {
     return (
       <SafeAreaProvider>
@@ -91,7 +110,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: colors.bg.primary }}>
-        <RootNavigator navigationRef={navigationRef} />
+        <RootNavigator navigationRef={navigationRef} onNavReady={() => setNavReady(true)} />
         <StatusBar style="light" />
       </View>
     </SafeAreaProvider>

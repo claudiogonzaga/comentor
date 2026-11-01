@@ -22,6 +22,7 @@ import { deleteAllDownloadedModels } from '../services/modelDownload';
 import { releaseModel } from '../services/localModel';
 import { resetAllUserData } from '../services/database';
 import { deleteAllAudioDeckFiles } from '../services/audioDecks';
+import { wipeAspisData } from '../aspis/bootstrap';
 import { deleteClaudeKey } from '../services/claude';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { checkForUpdate, getCurrentVersion, type UpdateInfo } from '../services/updateChecker';
@@ -133,6 +134,7 @@ export function SettingsScreen() {
               await deleteClaudeKey().catch(() => {});
               await resetAllUserData();
               deleteAllAudioDeckFiles();
+              await wipeAspisData();
               await deleteLocalDataCopies();
               // O que já estava agendado no sistema (âncoras, correntes de
               // insistência) e os alarmes FALADOS nativos — persistidos e

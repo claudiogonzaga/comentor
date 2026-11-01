@@ -32,6 +32,7 @@ import {
 import { VerticalVolume } from '../components/VerticalVolume';
 import { SequenceCard } from '../components/SequenceCard';
 import { InspirationHomeCard } from '../components/InspirationHomeCard';
+import { AspisHomeCard } from '../aspis/components/AspisHomeCard';
 import { getTodayTodos, type TodoItem } from '../services/todos';
 import { checkExerciseEvidence } from '../services/exerciseDetection';
 import {
@@ -480,6 +481,9 @@ export function HomeScreen() {
 
         {/* Painel de INSPIRAÇÃO (separado do de lembretes). */}
         <InspirationHomeCard />
+
+        {/* O Aspis (o escudo): só o melhor de hoje; o resto mora na seção dele. */}
+        <AspisHomeCard />
 
         {/* Painel de LEMBRETES: cada pendência traz as 3 respostas do coach. */}
         <Card style={styles.todoCard}>
