@@ -163,10 +163,6 @@ export function FeedScreen({ navigation }: Props) {
     <View style={styles.header}>
       <View style={styles.topbar}>
         <View style={styles.wordmark}>
-          {/* Dentro do Áskesis o Aspis é uma seção: volta para a Home da Comentora. */}
-          <Pressable onPress={() => navigation.getParent()?.goBack()} hitSlop={10} accessibilityLabel="Voltar para o início">
-            <Text style={styles.headerAction}>‹</Text>
-          </Pressable>
           <Image source={require('../../../assets/aspis/logo-mark.png')} style={styles.logo} />
           <Text style={styles.appName}>Aspis</Text>
         </View>
@@ -249,7 +245,7 @@ export function FeedScreen({ navigation }: Props) {
         style={{ marginTop: spacing.xl, alignSelf: 'center' }}
       />
       <Text style={styles.emptyHint}>
-        Dica: você já pode usar o Compartilhar → Aspis no YouTube, mesmo sem conectar.
+        Dica: você já pode usar o Compartilhar → Áskesis no YouTube, mesmo sem conectar.
       </Text>
     </View>
   ) : (

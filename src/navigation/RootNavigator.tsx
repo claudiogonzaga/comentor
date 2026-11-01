@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, type NavigatorScreenParams } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
@@ -8,7 +8,6 @@ import { AIChoiceScreen } from '../screens/AIChoiceScreen';
 import { ModelDownloadScreen } from '../screens/ModelDownloadScreen';
 import { InterviewScreen } from '../screens/InterviewScreen';
 import { SnoozeFeedbackScreen } from '../screens/SnoozeFeedbackScreen';
-import { HomeScreen } from '../screens/HomeScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
@@ -21,7 +20,7 @@ import { AboutYouScreen } from '../screens/AboutYouScreen';
 import { BrainVoiceScreen } from '../screens/BrainVoiceScreen';
 import { InspirationLibraryScreen } from '../screens/InspirationLibraryScreen';
 import { AudioDecksScreen } from '../screens/AudioDecksScreen';
-import { AspisNavigator } from '../aspis/navigation/AspisNavigator';
+import { MainTabs, type MainTabParamList } from './MainTabs';
 import { YogaNidraScreen } from '../screens/YogaNidraScreen';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
@@ -70,8 +69,7 @@ export type RootStackParamList = {
   ModelDownload: { modelId: LocalModelId; fromOnboarding?: boolean };
   Interview: { mode: 'onboarding' | 'redo' };
   SnoozeFeedback: { habitId: number; level: 1 | 2 | 3 | 4 | 5 };
-  Main: undefined;
-  Home: undefined;
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Chat: { mode?: 'convince' } | undefined;
   Settings: undefined;
   History: undefined;
@@ -86,7 +84,6 @@ export type RootStackParamList = {
   InspirationLibrary: undefined;
   AudioDecks: undefined;
   YogaNidra: undefined;
-  Aspis: { screen: 'Share'; params: { sharedText: string } } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -186,7 +183,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           await cancelSleepEscalationReminders();
           // …e arma as noites seguintes (a desta noite fica de fora: já foi dormir).
           await rearmSleepReminders().catch(() => {});
-          nav.navigate('Home');
+          nav.navigate('Main', { screen: 'Home' });
           return;
         }
         if (action === SNOOZE_ACTION) {
@@ -221,7 +218,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
       } else if (type === MORNING_TYPE) {
         // Check-in da manhã: Bem / Mal / texto. Só o toque no corpo abre o app.
         await handleMorningResponse(data, action, response.userText ?? undefined);
-        if (action === Notifications.DEFAULT_ACTION_IDENTIFIER) nav.navigate('Home');
+        if (action === Notifications.DEFAULT_ACTION_IDENTIFIER) nav.navigate('Main', { screen: 'Home' });
         return;
       } else if (
         type === 'prep-reminder' ||
@@ -279,7 +276,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           }
           return;
         }
-        nav.navigate('Home');
+        nav.navigate('Main', { screen: 'Home' });
       } else if (type.startsWith('med:')) {
         const snoozeMin = useAppStore.getState().config?.snoozeMinutes ?? 20;
         if (action === MED_DONE_ACTION && typeof data.medId === 'number') {
@@ -304,7 +301,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           }
           return;
         }
-        nav.navigate('Home');
+        nav.navigate('Main', { screen: 'Home' });
       } else if (type === 'inspiration') {
         // 👍/👎 no alerta de inspiração: grava a nota sem abrir o app.
         const { cardId, clipId } = data as { cardId?: number; clipId?: number };
@@ -318,7 +315,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           }
           return;
         }
-        nav.navigate('Home');
+        nav.navigate('Main', { screen: 'Home' });
       } else if (type === REVIEW_TYPE) {
         nav.navigate('Review');
       }
@@ -521,8 +518,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           component={SnoozeFeedbackScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
-        <Stack.Screen name="Main" component={HomeScreen} />
-        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Main" component={MainTabs} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="History" component={HistoryScreen} />
@@ -563,7 +559,6 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           component={InspirationLibraryScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
-        <Stack.Screen name="Aspis" component={AspisNavigator} options={{ animation: 'slide_from_right' }} />
         <Stack.Screen
           name="AudioDecks"
           component={AudioDecksScreen}

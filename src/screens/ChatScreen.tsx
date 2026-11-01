@@ -251,7 +251,7 @@ export function ChatScreen() {
     await cancelSleepEscalationReminders();
     // …e arma as noites seguintes (a desta noite fica de fora: já foi dormir).
     await rearmSleepReminders().catch(() => {});
-    navigation.navigate('Home');
+    navigation.navigate('Main', { screen: 'Home' });
   };
 
   const handleSnooze = () => {

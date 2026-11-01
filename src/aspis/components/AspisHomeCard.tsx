@@ -58,7 +58,7 @@ export function AspisHomeCard() {
             </Text>
           </>
         ) : (
-          <Text style={styles.meta}>Nada novo por aqui. Abra o escudo para buscar ou compartilhe um vídeo do YouTube ›</Text>
+          <Text style={styles.meta}>Nada novo por aqui. Abra a aba Aspis para buscar, ou compartilhe um vídeo do YouTube ›</Text>
         )}
       </Card>
     </Pressable>

@@ -37,7 +37,7 @@ function GatedFeed(props: React.ComponentProps<typeof FeedScreen>) {
     }, []),
   );
 
-  if (gateOn === null) return <ScreenContainer>{null}</ScreenContainer>;
+  if (gateOn === null) return <ScreenContainer edges={['top']}>{null}</ScreenContainer>;
   if (gateOn && !bypass && isSleepWindow(bedtime)) {
     return (
       <ScreenContainer>
@@ -46,8 +46,8 @@ function GatedFeed(props: React.ComponentProps<typeof FeedScreen>) {
           <Text style={styles.body}>
             Já passou da sua hora de dormir ({bedtime}). Os vídeos continuam aqui amanhã, depois das 6h.
           </Text>
-          <Pressable onPress={() => navigation.getParent()?.goBack()} style={styles.primary}>
-            <Text style={styles.primaryText}>Voltar</Text>
+          <Pressable onPress={() => navigation.getParent()?.navigate('Home')} style={styles.primary}>
+            <Text style={styles.primaryText}>Ir para a Comentora</Text>
           </Pressable>
           <Pressable onPress={() => setBypass(true)} hitSlop={8} style={styles.link}>
             <Text style={styles.linkText}>Abrir mesmo assim</Text>
@@ -69,7 +69,7 @@ function GatedFeed(props: React.ComponentProps<typeof FeedScreen>) {
   return <FeedScreen {...props} />;
 }
 
-/** O Aspis como uma seção do Áskesis: uma pilha dentro da navegação principal. */
+/** O Aspis como uma aba do Áskesis: uma pilha própria dentro da aba. */
 export function AspisNavigator() {
   return (
     <Stack.Navigator

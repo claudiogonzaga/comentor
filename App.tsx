@@ -92,7 +92,10 @@ export default function App() {
     const text = shareIntent?.webUrl || shareIntent?.text || '';
     resetShareIntent();
     if (text && navigationRef.current?.isReady?.()) {
-      navigationRef.current.navigate('Aspis', { screen: 'Share', params: { sharedText: text } });
+      navigationRef.current.navigate('Main', {
+        screen: 'Aspis',
+        params: { screen: 'Share', initial: false, params: { sharedText: text } },
+      });
     }
   }, [hasShareIntent, shareIntent, ready, fontsLoaded, navReady, resetShareIntent]);
 
