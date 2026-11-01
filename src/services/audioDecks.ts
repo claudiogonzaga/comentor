@@ -308,9 +308,9 @@ export interface ImportAudioDeckResult {
   /**
    * Versão nova de um baralho: o nome pedido em "replaces" e quantos trechos herdaram
    * o histórico. `found` falso: não há baralho com esse nome; `inherited` 0: nenhum
-   * trecho casou, e o antigo segue ligado.
+   * trecho casou, e o antigo segue ligado. `keptPosition`: a leitura em sequência segue do mesmo ponto.
    */
-  replaced?: { name: string; found: boolean; inherited: number };
+  replaced?: { name: string; found: boolean; inherited: number; keptPosition: boolean };
   error?: string;
 }
 
@@ -566,7 +566,8 @@ export async function importAudioDeckFromZip(
       }
     }
     // A leitura segue do mesmo ponto, se o antigo era lido em sequência.
-    if (oldDeck && inherited.length && oldDeck.playMode === 'sequence') {
+    const keptPosition = !!oldDeck && inherited.length > 0 && oldDeck.playMode === 'sequence';
+    if (oldDeck && keptPosition) {
       if (!dj?.playMode) await setAudioDeckMode(deckId, 'sequence');
       if (typeof dj?.seqEndOrd !== 'number') {
         const oldEnd = await getAudioDeckSeqEnd(oldDeck.id);
@@ -603,7 +604,7 @@ export async function importAudioDeckFromZip(
       tooLong,
       skipped,
       restoredStats,
-      ...(replaces ? { replaced: { name: replaces, found: !!oldDeck, inherited: inherited.length } } : {}),
+      ...(replaces ? { replaced: { name: replaces, found: !!oldDeck, inherited: inherited.length, keptPosition } } : {}),
     };
   } catch (e) {
     try {

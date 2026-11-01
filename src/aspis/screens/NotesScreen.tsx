@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
   },
-  back: { ...typography.body, color: colors.accent.gold, width: 60 },
+  back: { ...typography.body, color: colors.accent.gold, minWidth: 60 },
   title: { ...typography.subtitle, color: colors.text.primary },
   search: {
     marginHorizontal: spacing.xl,

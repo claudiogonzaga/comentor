@@ -473,7 +473,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
-  back: { ...typography.body, color: colors.accent.gold, width: 60 },
+  back: { ...typography.body, color: colors.accent.gold, minWidth: 60 },
   title: { ...typography.subtitle, color: colors.text.primary },
   section: { gap: 2 },
   secTitle: { ...typography.subtitle, fontSize: 16, color: colors.text.primary },

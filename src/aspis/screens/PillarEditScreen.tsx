@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.lg,
   },
-  back: { ...typography.body, color: colors.accent.gold, width: 60 },
+  back: { ...typography.body, color: colors.accent.gold, minWidth: 60 },
   title: { ...typography.subtitle, color: colors.text.primary },
   label: { ...typography.label, color: colors.text.secondary },
   input: {

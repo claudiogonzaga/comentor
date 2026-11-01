@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
   },
-  back: { ...typography.body, color: colors.accent.gold, width: 60 },
+  back: { ...typography.body, color: colors.accent.gold, minWidth: 60 },
   topTitle: { ...typography.subtitle, color: colors.text.primary },
   scroll: { padding: spacing.xl, paddingTop: spacing.lg, gap: spacing.lg },
 

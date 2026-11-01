@@ -131,7 +131,8 @@ export function AudioDecksScreen() {
             ? `Não achei o baralho "${r.replaced.name}": este entrou como novo, sem herdar nada.`
             : !r.replaced.inherited
               ? `Nenhum trecho casou com os de "${r.replaced.name}": este entrou como novo, e o antigo segue ligado.`
-              : `Substitui "${r.replaced.name}": ${r.replaced.inherited} trechos herdaram 👍, 👎 e execuções, e a leitura segue do mesmo ponto. ` +
+              : `Substitui "${r.replaced.name}": ${r.replaced.inherited} trechos herdaram 👍, 👎 e execuções` +
+                `${r.replaced.keptPosition ? ', e a leitura segue do mesmo ponto' : ''}. ` +
                 'O baralho antigo foi desligado; apague-o quando quiser.',
         );
       }

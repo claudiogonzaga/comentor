@@ -144,7 +144,7 @@ export function MediaScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxxl },
   topbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  back: { ...typography.body, color: colors.accent.gold, width: 60 },
+  back: { ...typography.body, color: colors.accent.gold, minWidth: 60 },
   title: { ...typography.subtitle, color: colors.text.primary },
   secTitle: { ...typography.subtitle, fontSize: 16, color: colors.text.primary },
   secSub: { ...typography.small, color: colors.text.secondary, marginBottom: spacing.md },
