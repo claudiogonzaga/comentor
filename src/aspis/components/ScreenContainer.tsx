@@ -16,7 +16,9 @@ interface Props {
 export function ScreenContainer({
   children,
   contentStyle,
-  edges = ['top', 'bottom'],
+  // Sem 'bottom': as telas do Aspis ficam dentro da aba, e a barra de abas já
+  // desconta a barra de navegação do sistema.
+  edges = ['top'],
   meander = true,
 }: Props) {
   return (

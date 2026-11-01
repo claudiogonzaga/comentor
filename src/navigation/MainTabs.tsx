@@ -1,5 +1,6 @@
-import { Image } from 'react-native';
+import { Image, PixelRatio } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GreekIcon } from '../components/GreekIcon';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -19,6 +20,12 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
  * continuam na pilha raiz e cobrem a barra; as do Aspis ficam dentro da aba dele.
  */
 export function MainTabs() {
+  const insets = useSafeAreaInsets();
+  // Margens (10) + ícone (28) + rótulo. A altura padrão da barra (49) não comporta
+  // esse rótulo: com a fonte do Android aumentada, ele entrava por baixo da barra
+  // de navegação do sistema. A altura do rótulo cresce com a fonte; a do ícone, não.
+  const barHeight = 38 + typography.small.lineHeight * PixelRatio.getFontScale() + insets.bottom;
+
   return (
     <Tab.Navigator
       backBehavior="firstRoute"
@@ -28,7 +35,10 @@ export function MainTabs() {
         tabBarActiveTintColor: colors.accent.gold,
         tabBarInactiveTintColor: colors.text.tertiary,
         tabBarLabelStyle: { ...typography.small, fontSize: 12 },
+        // A barra é alta e tomaria o espaço dos campos de texto do Aspis.
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
+          height: barHeight,
           backgroundColor: colors.bg.primary,
           borderTopColor: colors.border,
           borderTopWidth: 1,
