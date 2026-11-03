@@ -16,7 +16,15 @@ import {
   gatedSchedule,
 } from './notifications';
 import { getOwlSpecies } from '../constants/owlSpecies';
-import { syncSpokenMedications } from './spokenNudges';
+import {
+  armSpokenTask,
+  cancelSpokenChain,
+  chainAlarmId,
+  spokenTaskText,
+  syncSpokenMedications,
+  syncSpokenTasks,
+  type SpokenTaskAlarm,
+} from './spokenNudges';
 import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
 import { refreshReviewNotification } from './review';
 import { persuasiveBody, escalationBody } from './persuasion';
@@ -227,6 +235,17 @@ async function scheduleMedSnoozeNotification(
   });
 }
 
+/** O aviso falado do "Me dê mais tempo": mesmo prazo e mesmo id ao reagendar. */
+function medSnoozeSpokenAlarm(med: Medication, fireAt: Date): SpokenTaskAlarm {
+  const { baseBody } = reminderCopy(med);
+  return {
+    id: chainAlarmId(String(med.id), 'snooze', todayISO(), fireAt.getTime()),
+    text: spokenTaskText(med.name, `${baseBody} Ainda pendente.`),
+    atEpochMs: fireAt.getTime(),
+    repeatDaily: false,
+  };
+}
+
 /**
  * Resposta antecipada: por quantas semanas o dia da semana de HOJE fica com
  * gatilhos DATE (os demais dias seguem com SEMANAL). Margem para o app passar
@@ -261,6 +280,15 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
 
   const meds = await listMedications();
   const ids: string[] = [];
+  // As cobranças FALADAS. A notificação insiste até 20 vezes; a voz, no ouvido,
+  // para no teto de "Quantas vezes ela cobra".
+  const spokenChain: SpokenTaskAlarm[] = [];
+  let maxSpokenRepeats = 5;
+  try {
+    maxSpokenRepeats = Math.max(0, Math.min(10, (await getUserConfig()).nudgeMaxInsistences ?? 5));
+  } catch {
+    /* keep default */
+  }
 
   for (const med of meds) {
     if (!med.enabled) continue;
@@ -473,7 +501,10 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
       if (snoozeUntil > Date.now()) {
         try {
           const id = await scheduleMedSnoozeNotification(med, new Date(snoozeUntil), sound, channelId);
-          if (id) ids.push(id);
+          if (id) {
+            ids.push(id);
+            spokenChain.push(medSnoozeSpokenAlarm(med, new Date(snoozeUntil)));
+          }
         } catch (err) {
           console.warn(`failed to re-schedule medication snooze ${med.id}:`, err);
         }
@@ -500,7 +531,17 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
               channelId,
             },
           });
-          if (id) ids.push(id);
+          if (id) {
+            ids.push(id);
+            if (k <= maxSpokenRepeats) {
+              spokenChain.push({
+                id: chainAlarmId(String(med.id), `f${k}`, today, fireAt.getTime()),
+                text: spokenTaskText(med.name, escalatedBody(med, userName, actionLine, k)),
+                atEpochMs: fireAt.getTime(),
+                repeatDaily: false,
+              });
+            }
+          }
         } catch (err) {
           console.warn(`failed to schedule medication follow-up ${med.id}:`, err);
         }
@@ -545,6 +586,8 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
   void syncSpokenMedications(spokenItems).catch(() => {});
+  // Com await, para quem espera esta passada cancelar a voz já com tudo armado.
+  await syncSpokenTasks('medf', spokenChain).catch(() => {});
 
   return ids;
 }
@@ -571,6 +614,8 @@ async function clearMedNotifications(medId: number, day?: string): Promise<void>
       await Notifications.cancelScheduledNotificationAsync(s.identifier);
     }
   }
+  // A voz das cobranças respondidas cala junto com as notificações.
+  await cancelSpokenChain('medf', String(medId), { day }).catch(() => {});
   try {
     const presented = await Notifications.getPresentedNotificationsAsync();
     for (const p of presented) {
@@ -702,7 +747,8 @@ export async function snoozeMedication(medId: number, minutes = 20): Promise<voi
   await clearMedNotifications(medId);
 
   try {
-    await scheduleMedSnoozeNotification(med, fireAt, sound, channelId);
+    const id = await scheduleMedSnoozeNotification(med, fireAt, sound, channelId);
+    if (id) await armSpokenTask('medf', medSnoozeSpokenAlarm(med, fireAt));
   } catch (err) {
     console.warn(`failed to snooze medication ${medId}:`, err);
   }

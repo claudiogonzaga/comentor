@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { GestureResponderEvent, View } from 'react-native';
+import { GestureResponderEvent, Linking, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreenAPI from 'expo-splash-screen';
 import {
@@ -16,6 +16,7 @@ import {
 import { useShareIntent } from 'expo-share-intent';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { startAspis } from './src/aspis/bootstrap';
+import { startKinesis } from './src/kinesis/store';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
 import { useAppStore } from './src/store/useAppStore';
 import {
@@ -85,6 +86,24 @@ export default function App() {
   useEffect(() => {
     if (ready) void startAspis();
   }, [ready]);
+
+  // O Kinesis também: o timer retoma de onde estava, sem segurar o boot.
+  useEffect(() => {
+    if (ready) void startKinesis();
+  }, [ready]);
+
+  // Tocar na notificação do timer abre a aba do Kinesis.
+  useEffect(() => {
+    if (!ready || !navReady) return;
+    const open = (url: string | null) => {
+      if (url?.startsWith('askesis://kinesis') && navigationRef.current?.isReady?.()) {
+        navigationRef.current.navigate('Main', { screen: 'Kinesis' });
+      }
+    };
+    void Linking.getInitialURL().then(open).catch(() => {});
+    const sub = Linking.addEventListener('url', (e) => open(e.url));
+    return () => sub.remove();
+  }, [ready, navReady]);
 
   // Compartilhar → Áskesis (YouTube, navegador): abre a análise do Aspis.
   useEffect(() => {

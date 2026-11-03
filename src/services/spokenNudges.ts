@@ -14,7 +14,13 @@ import { Platform } from 'react-native';
 import { requireNativeModule } from 'expo-modules-core';
 import { getUserConfig } from './database';
 import { getApiKey } from './secureStore';
-import { prepareNudgeAudio, cleanupNudgeAudio, DEFAULT_GEMINI_VOICE } from './geminiTTS';
+import {
+  prepareNudgeAudio,
+  cachedNudgeAudio,
+  cleanupNudgeAudio,
+  nudgeAudioKey,
+  DEFAULT_GEMINI_VOICE,
+} from './geminiTTS';
 import {
   getQuietPeriodsCached,
   getEffectiveQuietPeriods,
@@ -43,6 +49,8 @@ interface SpokenNudgesNative {
   setHeadphonesOnly(enabled: boolean): void;
   setNudgeVolume(volume: number): void;
   setOwlPauseSeconds(seconds: number): void;
+  /** Ausente em builds nativos anteriores (o JS pode chegar antes via OTA). */
+  setForegroundVoice?(enabled: boolean): void;
   getSilencedAt?(): number;
   hasUsageAccess(): boolean;
   openUsageAccessSettings(): void;
@@ -72,6 +80,11 @@ export function spokenNudgesAvailable(): boolean {
 const PREFIX = 'spk_';
 const INSP_PREFIX = `${PREFIX}insp_`;
 const MED_SPOKEN_PREFIX = `${PREFIX}med_`;
+// Avisos falados das TAREFAS: hábitos inteiros e as cobranças dos remédios (a
+// âncora dos remédios segue em MED_SPOKEN_PREFIX). O nativo reconhece estes
+// prefixos: com o app aberto na tela, quem fala é o caminho JS (RootNavigator).
+const NUDGE_SPOKEN_PREFIX = `${PREFIX}nudge_`;
+const MED_CHAIN_SPOKEN_PREFIX = `${PREFIX}medf_`;
 const TEST_ID = `${PREFIX}test`;
 
 // ---- permissões (no-ops seguros se o módulo não existir) ----
@@ -136,6 +149,19 @@ export function setSpokenVolume(volume: number): void {
 export function setSpokenOwlPause(seconds: number): void {
   try {
     native?.setOwlPauseSeconds(Math.max(0, Math.min(120, Math.round(seconds))));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * "Falar as notificações em voz alta" (app aberto) espelhado no nativo. Com o app
+ * na tela e isto ligado, o aviso já é falado pelo JS (com a resposta por voz): o
+ * alarme falado da mesma tarefa fica calado, senão seriam duas vozes por cima.
+ */
+export function setSpokenForegroundVoice(enabled: boolean): void {
+  try {
+    native?.setForegroundVoice?.(enabled);
   } catch {
     /* ignore */
   }
@@ -333,6 +359,11 @@ export async function getVoiceDiagnostics(): Promise<string> {
       if (!isIgnoringBatteryOptimizations()) {
         info.push('• A economia de bateria está ativa — em alguns celulares (Xiaomi, Samsung…) ela impede a voz em background.');
       }
+      const tasks =
+        scheduledWithPrefix(NUDGE_SPOKEN_PREFIX).length +
+        scheduledWithPrefix(MED_SPOKEN_PREFIX).length +
+        scheduledWithPrefix(MED_CHAIN_SPOKEN_PREFIX).length;
+      info.push(`Avisos de voz armados: ${tasks} de tarefas, ${scheduledWithPrefix(INSP_PREFIX).length} de inspiração.`);
     }
   }
 
@@ -768,6 +799,229 @@ async function syncSpokenMedicationsOnce(
     } catch {
       /* best-effort */
     }
+  }
+}
+
+// ---- avisos falados das TAREFAS (hábitos e cobranças dos remédios) ----
+//
+// Antes só a âncora dos remédios e as inspirações tinham alarme falado. O resto
+// (todo hábito da Home, toda cobrança) era só notificação: a voz vinha do caminho
+// JS, que só roda com o app ABERTO NA TELA. Por isso, com o celular no bolso e o
+// fone no ouvido, a inspiração falava e o lembrete da tarefa não.
+
+/** Um aviso falado de tarefa, já com o horário e o texto que a notificação usou. */
+export interface SpokenTaskAlarm {
+  /** Id estável dentro da fonte. Ver chainAlarmId para as cobranças. */
+  id: string;
+  /** O que falar: título + texto, sem emojis nem a instrução do botão. */
+  text: string;
+  atEpochMs: number;
+  repeatDaily: boolean;
+}
+
+type SpokenTaskSource = 'nudge' | 'medf';
+
+const TASK_PREFIXES: Record<SpokenTaskSource, string> = {
+  nudge: NUDGE_SPOKEN_PREFIX,
+  medf: MED_CHAIN_SPOKEN_PREFIX,
+};
+
+/** Só as cobranças da próxima janela ganham a voz do Gemini; depois, voz do sistema. */
+const VOICE_LOOKAHEAD_MS = 3 * 60 * 60_000;
+/** Respiro entre gerações: é pano de fundo e divide o limite por minuto com a leitura. */
+const VOICE_RENDER_GAP_MS = 8000;
+
+/**
+ * Id de uma cobrança: `<dono>~<tipo>~<dia>~<epoch>`. O dono é o hábito ou remédio;
+ * dia e horário ficam no id para responder "Já fiz" ou "Me dê mais tempo" cancelar
+ * só as cobranças certas, sem precisar perguntar nada ao nativo.
+ */
+export function chainAlarmId(owner: string, kind: string, day: string, atEpochMs: number): string {
+  return `${owner}~${kind}~${day}~${atEpochMs}`;
+}
+
+/** Título + texto da notificação como fala: sem emojis, sem instrução de botão. */
+export function spokenTaskText(title: string, body: string): string {
+  return [title, body]
+    .filter(Boolean)
+    .join('. ')
+    .replace(/Toque em "[^"]*" quando[^.]*\./g, '')
+    .replace(/Marque aqui[^.]*\./g, '')
+    .replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\.\s*\./g, '.')
+    .trim();
+}
+
+interface VoiceJob {
+  voiceName: string;
+  items: SpokenTaskAlarm[];
+}
+const voiceJobs = new Map<SpokenTaskSource, VoiceJob>();
+let voiceWorker: Promise<void> | null = null;
+
+function fullTaskId(source: SpokenTaskSource, id: string): string {
+  return `${TASK_PREFIXES[source]}${id}`;
+}
+
+/**
+ * Troca a voz do sistema pela do Gemini nos avisos já armados, um a um e do mais
+ * próximo para o mais distante. Pega sempre a lista mais recente de cada fonte:
+ * uma tarefa respondida no meio do caminho sai da fila, e o alarme só é regravado
+ * se ainda estiver armado (um "Já fiz" nesse meio-tempo já o cancelou).
+ */
+async function runVoiceWorker(): Promise<void> {
+  const done = new Set<string>();
+  for (;;) {
+    const now = Date.now();
+    let pick: { source: SpokenTaskSource; job: VoiceJob; item: SpokenTaskAlarm } | null = null;
+    for (const [source, job] of voiceJobs) {
+      for (const item of job.items) {
+        if (done.has(fullTaskId(source, item.id))) continue;
+        if (item.atEpochMs <= now || item.atEpochMs > now + VOICE_LOOKAHEAD_MS) continue;
+        if (cachedNudgeAudio(item.text, { voiceName: job.voiceName, namespace: source })) continue;
+        if (!pick || item.atEpochMs < pick.item.atEpochMs) pick = { source, job, item };
+      }
+    }
+    if (!pick || !native) return;
+    const full = fullTaskId(pick.source, pick.item.id);
+    done.add(full);
+    try {
+      const { uri } = await prepareNudgeAudio(pick.item.text, {
+        voiceName: pick.job.voiceName,
+        persist: true,
+        namespace: pick.source,
+      });
+      const stillArmed = scheduledWithPrefix(TASK_PREFIXES[pick.source]).includes(full);
+      if (stillArmed && (pick.item.repeatDaily || pick.item.atEpochMs > Date.now() + 1000)) {
+        await native.schedule(full, pick.item.atEpochMs, uri, pick.item.repeatDaily, 'Comentora', pick.item.text);
+      }
+    } catch (err) {
+      const e = err as { dailyQuota?: boolean; message?: string };
+      // Cota do dia esgotada: hoje as próximas ficam na voz do sistema.
+      if (e?.dailyQuota) return;
+      console.warn('[SpokenNudges] voz de tarefa não gerada:', e?.message ?? err);
+    }
+    await new Promise((r) => setTimeout(r, VOICE_RENDER_GAP_MS));
+  }
+}
+
+function kickVoiceWorker(): void {
+  if (voiceWorker) return;
+  voiceWorker = runVoiceWorker()
+    .catch(() => {})
+    .finally(() => {
+      voiceWorker = null;
+    });
+}
+
+/**
+ * Sincroniza os avisos falados de uma fonte com a lista atual. PRIMEIRO arma tudo
+ * (com o WAV se já existir, senão voz do sistema), sem esperar a rede: um
+ * congelamento do JS não deixa nada sem voz. Só depois, em segundo plano, vai
+ * gerando a voz do Gemini para os próximos a tocar.
+ */
+export async function syncSpokenTasks(source: SpokenTaskSource, items: SpokenTaskAlarm[]): Promise<void> {
+  if (!native) return;
+  const n = native;
+  const prefix = TASK_PREFIXES[source];
+  const before = scheduledWithPrefix(prefix);
+  const scheduled = new Set<string>();
+
+  let enabled = false;
+  let useGemini = false;
+  let voiceName = DEFAULT_GEMINI_VOICE;
+  try {
+    const c = await getUserConfig();
+    enabled = !!c.spokenNudgesEnabled && !c.silentMode;
+    useGemini = c.voiceProvider === 'gemini';
+    voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) {
+    voiceJobs.delete(source);
+    await cancelStale(before, scheduled);
+    return;
+  }
+
+  const now = Date.now();
+  const alive = items.filter((it) => it.text.trim() && (it.repeatDaily || it.atEpochMs > now));
+  for (const it of alive) {
+    const full = fullTaskId(source, it.id);
+    const audio = useGemini ? cachedNudgeAudio(it.text, { voiceName, namespace: source }) : null;
+    try {
+      await n.schedule(full, it.atEpochMs, audio ?? '', it.repeatDaily, 'Comentora', it.text);
+      scheduled.add(full);
+    } catch {
+      /* segue para os próximos */
+    }
+  }
+  await cancelStale(before, scheduled);
+
+  let hasKey = false;
+  if (useGemini) {
+    try {
+      hasKey = !!(await getApiKey());
+    } catch {
+      hasKey = false;
+    }
+  }
+  if (!hasKey) {
+    voiceJobs.delete(source);
+    return;
+  }
+  // A lista está completa: o que não está nela (frases de ontem, voz antiga) sai.
+  await cleanupNudgeAudio(source, new Set(alive.map((it) => nudgeAudioKey(it.text, voiceName))));
+  voiceJobs.set(source, { voiceName, items: alive });
+  kickVoiceWorker();
+}
+
+/**
+ * Tira do ar as cobranças faladas de um dono (hábito/remédio) depois de uma
+ * resposta. `day`: só as daquele dia (a resposta ao lembrete de ontem não derruba
+ * a corrente de hoje). `upToMs`: só as que tocariam até esse instante ("Me dê mais
+ * tempo" silencia o intervalo; as de depois seguem).
+ */
+export async function cancelSpokenChain(
+  source: SpokenTaskSource,
+  owner: string,
+  opts: { day?: string; upToMs?: number } = {},
+): Promise<void> {
+  if (!native) return;
+  const head = `${TASK_PREFIXES[source]}${owner}~`;
+  for (const full of scheduledWithPrefix(head)) {
+    const [, kind, day, at] = full.split('~');
+    if (kind === 'anchor') continue;
+    if (opts.day && day && day !== opts.day) continue;
+    if (opts.upToMs !== undefined && Number(at) > opts.upToMs) continue;
+    try {
+      await native.cancel(full);
+    } catch {
+      /* ignore */
+    }
+  }
+  const job = voiceJobs.get(source);
+  if (job) {
+    const armed = new Set(scheduledWithPrefix(TASK_PREFIXES[source]));
+    job.items = job.items.filter((it) => armed.has(fullTaskId(source, it.id)));
+  }
+}
+
+/** Arma um aviso falado avulso de uma fonte (o do "Me dê mais tempo"). */
+export async function armSpokenTask(source: SpokenTaskSource, item: SpokenTaskAlarm): Promise<void> {
+  if (!native) return;
+  try {
+    const c = await getUserConfig();
+    if (!c.spokenNudgesEnabled || c.silentMode) return;
+    const voiceName = c.geminiVoiceName || DEFAULT_GEMINI_VOICE;
+    const audio =
+      c.voiceProvider === 'gemini'
+        ? cachedNudgeAudio(item.text, { voiceName, namespace: source })
+        : null;
+    await native.schedule(fullTaskId(source, item.id), item.atEpochMs, audio ?? '', item.repeatDaily, 'Comentora', item.text);
+  } catch {
+    /* best-effort: a notificação já vai tocar */
   }
 }
 

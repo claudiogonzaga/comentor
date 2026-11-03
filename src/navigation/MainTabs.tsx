@@ -6,19 +6,22 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area
 import { GreekIcon } from '../components/GreekIcon';
 import { HomeScreen } from '../screens/HomeScreen';
 import { AspisNavigator } from '../aspis/navigation/AspisNavigator';
+import { KinesisScreen } from '../kinesis/KinesisScreen';
 import { colors, typography } from '../theme';
 
 export type MainTabParamList = {
   Home: undefined;
   Aspis: { screen: 'Share'; initial: false; params: { sharedText: string } } | undefined;
+  Kinesis: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 /**
- * Os dois espaços do Áskesis: a Comentora (estimula o comportamento) e o Aspis
- * (protege a atenção). Telas que abrem por cima (chat, configurações, respiração…)
- * continuam na pilha raiz e cobrem a barra; as do Aspis ficam dentro da aba dele.
+ * Os três espaços do Áskesis: a Comentora (estimula o comportamento), o Aspis
+ * (protege a atenção) e o Kinesis (tira da cadeira). Telas que abrem por cima (chat,
+ * configurações, respiração…) continuam na pilha raiz e cobrem a barra; as do Aspis
+ * ficam dentro da aba dele.
  */
 export function MainTabs() {
   const insets = useSafeAreaInsets();
@@ -64,6 +67,19 @@ export function MainTabs() {
             <Image
               source={require('../../assets/aspis/logo-mark.png')}
               style={{ width: size, height: size, borderRadius: size / 2, opacity: focused ? 1 : 0.55 }}
+            />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Kinesis"
+        component={KinesisScreen}
+        options={{
+          title: 'Kinesis',
+          tabBarIcon: ({ size, focused }) => (
+            <Image
+              source={require('../../assets/kinesis/icon-mini.png')}
+              style={{ width: size, height: size, borderRadius: size / 5, opacity: focused ? 1 : 0.55 }}
             />
           ),
         }}

@@ -26,6 +26,7 @@ import {
 } from '../services/notifications';
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { scheduleAllMedications } from '../services/medications';
+import { scheduleAllNudges } from '../services/nudges';
 import {
   spokenNudgesAvailable,
   isExactAlarmAllowed,
@@ -417,6 +418,7 @@ export function SoundsVoiceScreen() {
                         await scheduleInspirationNotifications();
                         // re-sincroniza as versões faladas dos lembretes também
                         await scheduleAllMedications();
+                        await scheduleAllNudges();
                         if (!isExactAlarmAllowed()) {
                           Alert.alert(
                             'Permita alarmes exatos',

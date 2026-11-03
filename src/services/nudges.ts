@@ -24,6 +24,14 @@ import {
   gatedSchedule,
 } from './notifications';
 import { getDailyInsistenceLines } from './insistenceLines';
+import {
+  armSpokenTask,
+  cancelSpokenChain,
+  chainAlarmId,
+  spokenTaskText,
+  syncSpokenTasks,
+  type SpokenTaskAlarm,
+} from './spokenNudges';
 import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
 import { refreshReviewNotification } from './review';
 import {
@@ -418,10 +426,24 @@ async function scheduleSnoozeNotification(
   });
 }
 
+/** O aviso falado do "Me dê mais tempo": mesmo prazo e mesmo id ao reagendar. */
+function snoozeSpokenAlarm(n: Nudge, fireAt: Date): SpokenTaskAlarm {
+  return {
+    id: chainAlarmId(n.type, 'snooze', todayISO(), fireAt.getTime()),
+    text: spokenTaskText(n.title, `${n.body}. Ainda pendente.`),
+    atEpochMs: fireAt.getTime(),
+    repeatDaily: false,
+  };
+}
+
 async function scheduleAllNudgesOnce(): Promise<string[]> {
   // Antes de reagendar: fecha o que já venceu, para não re-armar corrente de
   // item que a coruja já desistiu de cobrar hoje.
   await finalizeExpiredNudgeChains();
+
+  // As versões FALADAS de tudo o que for agendado abaixo: a mesma corrente, para
+  // a voz chegar com o celular no bolso e o fone no ouvido.
+  const spoken: SpokenTaskAlarm[] = [];
 
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
@@ -533,7 +555,16 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
             channelId,
           },
         });
-        if (id) ids.push(id);
+        if (id) {
+          ids.push(id);
+          const at = Date.now() + 20_000;
+          spoken.push({
+            id: chainAlarmId(n.type, 'formed', today, at),
+            text: spokenTaskText(n.title, formedAnnouncement(n.title, decision.doneDays)),
+            atEpochMs: at,
+            repeatDaily: false,
+          });
+        }
       } catch (err) {
         console.warn(`failed to schedule formed announcement ${n.type}:`, err);
       }
@@ -560,7 +591,15 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
           },
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt, channelId },
         });
-        if (id) ids.push(id);
+        if (id) {
+          ids.push(id);
+          spoken.push({
+            id: chainAlarmId(n.type, 'sample', today, fireAt.getTime()),
+            text: spokenTaskText('', `Só conferindo: “${n.title}” continua acontecendo?`),
+            atEpochMs: fireAt.getTime(),
+            repeatDaily: false,
+          });
+        }
         logDecision({ date: today, key: n.type, kind: 'sample', k: 0, action: id ? 'send' : 'blocked', at: fireAt });
       } catch (err) {
         console.warn(`failed to schedule sample ${n.type}:`, err);
@@ -640,6 +679,17 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
         });
         if (id) ids.push(id);
       }
+      if (id) {
+        // Mesma regra da notificação: respondido antes da hora, a de hoje não fala.
+        let at = anchorToday.getTime();
+        if (at <= Date.now() || answeredEarly) at += 24 * 60 * 60_000;
+        spoken.push({
+          id: `${n.type}~anchor`,
+          text: spokenTaskText(n.title, anchorBody),
+          atEpochMs: at,
+          repeatDaily: true,
+        });
+      }
       // A âncora é DIÁRIA: toca todo dia no horário (menos no dia em que já foi
       // respondida antes da hora). Registra a de hoje se ela ainda vai tocar,
       // ou se já tocou — o que só é certo quando
@@ -682,7 +732,10 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       if (snoozed) {
         try {
           const id = await scheduleSnoozeNotification(n, new Date(snoozeUntil), sound, channelId);
-          if (id) ids.push(id);
+          if (id) {
+            ids.push(id);
+            spoken.push(snoozeSpokenAlarm(n, new Date(snoozeUntil)));
+          }
         } catch (err) {
           console.warn(`failed to re-schedule snooze ${n.type}:`, err);
         }
@@ -738,7 +791,18 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
               channelId,
             },
           });
-          if (id) ids.push(id);
+          if (id) {
+            ids.push(id);
+            spoken.push({
+              id: chainAlarmId(n.type, `f${k}`, today, fireAt.getTime()),
+              // Sem a instrução do botão, que só faz sentido na tela.
+              text: isLast
+                ? spokenTaskText('', `Não precisa fazer agora. Só me diz: “${n.title}” — fez ou não fez?`)
+                : spokenTaskText(n.title, line.text),
+              atEpochMs: fireAt.getTime(),
+              repeatDaily: false,
+            });
+          }
           logDecision({
             date: today,
             key: n.type,
@@ -758,6 +822,10 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
 
   // "Fechar o dia": só existe se sobrou item sem resposta.
   await refreshReviewNotification();
+
+  // Arma sem esperar a rede (a voz do Gemini vem depois). Com await, para quem
+  // espera esta passada (settleNudgeScheduling) cancelar a voz já com tudo armado.
+  await syncSpokenTasks('nudge', spoken).catch(() => {});
 
   return ids;
 }
@@ -782,6 +850,8 @@ async function closeNudgeChain(nudgeType: string, day: string, scheduledHHMM: st
       await Notifications.cancelScheduledNotificationAsync(s.identifier);
     }
   }
+  // A voz das cobranças respondidas cala junto com as notificações.
+  await cancelSpokenChain('nudge', nudgeType, { day }).catch(() => {});
 
   // Dispensa as notificações deste nudge que já estão na bandeja.
   try {
@@ -933,9 +1003,11 @@ export async function snoozeNudge(nudgeType: string, minutes = 20): Promise<void
   } catch {
     /* best-effort: o aviso do adiamento ainda é agendado abaixo */
   }
+  await cancelSpokenChain('nudge', nudgeType, { upToMs: fireAt.getTime() }).catch(() => {});
 
   try {
-    await scheduleSnoozeNotification(n, fireAt, sound, channelId);
+    const id = await scheduleSnoozeNotification(n, fireAt, sound, channelId);
+    if (id) await armSpokenTask('nudge', snoozeSpokenAlarm(n, fireAt));
   } catch (err) {
     console.warn(`failed to snooze nudge ${nudgeType}:`, err);
   }

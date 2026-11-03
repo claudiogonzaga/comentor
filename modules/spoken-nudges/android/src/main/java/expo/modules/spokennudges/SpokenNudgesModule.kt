@@ -110,6 +110,11 @@ class SpokenNudgesModule : Module() {
       SpokenStore.setOwlPauseSeconds(context, seconds)
     }
 
+    // "Falar as notificações" (app aberto). Com o app na tela, o JS fala a tarefa.
+    Function("setForegroundVoice") { enabled: Boolean ->
+      SpokenStore.setForegroundVoice(context, enabled)
+    }
+
     // Último "Calar agora" (epoch ms) — a fala de primeiro plano confere depois da pausa.
     Function("getSilencedAt") {
       SpokenStore.getSilencedAt(context).toDouble()

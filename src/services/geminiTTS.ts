@@ -748,6 +748,28 @@ export async function prepareNudgeAudio(
   return { uri: file.uri, cached: false, key };
 }
 
+/** A chave do WAV persistente de uma frase (a mesma de prepareNudgeAudio). */
+export function nudgeAudioKey(text: string, voiceName: string = DEFAULT_GEMINI_VOICE): string {
+  return shortHash(`nudge:${activeTtsModel}|${voiceName}:${text.trim()}`);
+}
+
+/**
+ * O WAV persistente desta frase, se já existir — sem rede, sem gastar cota.
+ * Reagendar não pode fazer uma fala já preparada voltar para a voz do sistema.
+ */
+export function cachedNudgeAudio(
+  text: string,
+  opts: { voiceName?: string; namespace?: string } = {},
+): string | null {
+  try {
+    const key = nudgeAudioKey(text, opts.voiceName || DEFAULT_GEMINI_VOICE);
+    const file = new File(Paths.document, `${NUDGE_PREFIX}${opts.namespace || 'gen'}_${key}.wav`);
+    return file.exists ? file.uri : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Remove WAVs de nudge ÓRFÃOS de um `namespace` ('insp', 'med', …) — os que NÃO
  * correspondem a nenhuma das `expectedKeys` (ex.: o usuário trocou a voz Gemini,

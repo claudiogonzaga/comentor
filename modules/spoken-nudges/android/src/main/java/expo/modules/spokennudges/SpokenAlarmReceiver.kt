@@ -1,5 +1,6 @@
 package expo.modules.spokennudges
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -42,6 +43,15 @@ class SpokenAlarmReceiver : BroadcastReceiver() {
     }
     Log.d(SpokenScheduler.TAG, "FIRE id=$id audio=${alarm.audioPath}")
 
+    // Tarefa com o app aberto na tela: a notificação já é falada pelo JS, com a
+    // resposta por voz. Falar aqui também daria duas vozes. O alarme diário já foi
+    // re-armado acima, então só esta ocorrência é pulada.
+    val isTask = id.startsWith("spk_nudge_") || id.startsWith("spk_med_") || id.startsWith("spk_medf_")
+    if (isTask && SpokenStore.getForegroundVoice(context) && appOnScreen()) {
+      Log.d(SpokenScheduler.TAG, "app na tela: a fala de $id fica com o JS")
+      return
+    }
+
     val svc = Intent(context.applicationContext, SpokenSpeechService::class.java).apply {
       putExtra("id", alarm.id)
       putExtra("audioPath", alarm.audioPath)
@@ -57,5 +67,14 @@ class SpokenAlarmReceiver : BroadcastReceiver() {
     } catch (e: Exception) {
       Log.e(SpokenScheduler.TAG, "failed to start service: ${e.message}")
     }
+  }
+
+  /** O app está aberto na tela agora? (Com a tela apagada, não está.) */
+  private fun appOnScreen(): Boolean = try {
+    val info = ActivityManager.RunningAppProcessInfo()
+    ActivityManager.getMyMemoryState(info)
+    info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+  } catch (_: Exception) {
+    false
   }
 }

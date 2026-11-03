@@ -12,6 +12,7 @@ import { migrateAwarenessToInspiration, scheduleSleepAwarenessNotifications } fr
 import { scheduleInspirationNotifications } from '../services/inspiration';
 import { backfillHealthDailyOnce } from '../services/health';
 import {
+  setSpokenForegroundVoice,
   setSpokenHeadphonesOnly,
   mirrorSpokenQuietPeriods,
   setSpokenVolume,
@@ -40,6 +41,7 @@ function syncVoiceFromConfig(config: UserConfig) {
  */
 function mirrorSpokenConfig(config: UserConfig): void {
   setSpokenHeadphonesOnly(config.spokenHeadphonesOnly);
+  setSpokenForegroundVoice(!!config.voiceNudgesEnabled);
   // Os períodos sem som (lista em KV + sono derivado), NÃO o horário silencioso
   // legado do config: espelhar o legado aqui apagava, a cada abertura, o que o
   // card de períodos tinha mandado ao nativo.
@@ -100,6 +102,7 @@ export const useAppStore = create<AppState>((set) => ({
     const updated = await updateUserConfig(patch);
     const apiKey = await getApiKey();
     syncVoiceFromConfig(updated);
+    setSpokenForegroundVoice(!!updated.voiceNudgesEnabled);
     set({ config: { ...updated, hasApiKey: !!apiKey }, hasApiKey: !!apiKey });
   },
   setApiKey: async (key) => {

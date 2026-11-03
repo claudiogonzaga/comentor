@@ -35,6 +35,7 @@ object SpokenStore {
   private const val KEY_NUDGE_VOLUME = "nudge_volume" // 0–1
   private const val KEY_OWL_PAUSE_SEC = "owl_pause_sec" // segundos entre o canto e a fala
   private const val KEY_SILENCED_AT = "silenced_at" // epoch ms do último "Calar agora"
+  private const val KEY_FOREGROUND_VOICE = "foreground_voice" // o JS fala com o app na tela
   // Lista COMPLETA dos períodos sem som (JSON [{start,end,days}], minutos do dia).
   // Substitui a janela única acima quando presente: o app tem vários períodos
   // (trabalho, sono derivado do horário de dormir…) e o serviço precisa de todos.
@@ -91,6 +92,12 @@ object SpokenStore {
   fun getSilencedAt(ctx: Context): Long = prefs(ctx).getLong(KEY_SILENCED_AT, 0L)
   fun setSilencedAt(ctx: Context, at: Long) {
     prefs(ctx).edit().putLong(KEY_SILENCED_AT, at).apply()
+  }
+
+  /** "Falar as notificações" (app aberto): com o app na tela, é o JS quem fala a tarefa. */
+  fun getForegroundVoice(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_FOREGROUND_VOICE, false)
+  fun setForegroundVoice(ctx: Context, value: Boolean) {
+    prefs(ctx).edit().putBoolean(KEY_FOREGROUND_VOICE, value).apply()
   }
 
   fun getNudgeVolume(ctx: Context): Float = prefs(ctx).getFloat(KEY_NUDGE_VOLUME, 1f)
