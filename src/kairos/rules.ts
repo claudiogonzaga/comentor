@@ -200,9 +200,10 @@ export function iaDoLink(url: string): string {
   return host.replace(/^www\./, '') || 'IA';
 }
 
+/** O link copiado, se for de conversa: https://, http:// ou claude://, sem aspas (a mesma regra do Mac). */
 export function linkDeConversa(texto: string): string | null {
   const url = texto.trim().split(/\s+/)[0] ?? '';
-  return /^(https?|claude):\/\/\S+$/i.test(url) ? url : null;
+  return /^(https?|claude):\/\/[^\s"'<>`\\]+$/i.test(url) ? url : null;
 }
 
 /** O pedido que abre a conversa com a IA: a tarefa e como ela acompanha o card. */

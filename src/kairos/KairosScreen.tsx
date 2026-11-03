@@ -99,6 +99,8 @@ export function KairosScreen() {
       Alert.alert('Abre no Mac', `Esta é uma sessão do ${cv.ia} no app do Claude do Mac: abra pelo Kairós de lá.`);
       return;
     }
+    // Só endereço da web: o link veio de uma IA ou de outro aparelho.
+    if (!/^https?:\/\//i.test(cv.url)) return;
     void Linking.openURL(cv.url).catch(() => Alert.alert('Não abriu', cv.url));
   };
 
