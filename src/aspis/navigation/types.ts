@@ -7,4 +7,5 @@ export type RootStackParamList = {
   NoteReader: { fileId: string; name: string };
   Player: { videoId: string; kind: 'audio' | 'video' };
   Media: undefined;
+  XLogin: { logout?: boolean } | undefined;
 };

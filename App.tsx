@@ -16,6 +16,7 @@ import {
 import { useShareIntent } from 'expo-share-intent';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { startAspis } from './src/aspis/bootstrap';
+import { MiniPlayerHost } from './src/aspis/components/MiniPlayer';
 import { startKinesis } from './src/kinesis/store';
 import { startConfigSync } from './src/services/configSync';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
@@ -139,6 +140,7 @@ export default function App() {
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: colors.bg.primary }}>
         <RootNavigator navigationRef={navigationRef} onNavReady={() => setNavReady(true)} />
+        <MiniPlayerHost />
         <StatusBar style="light" />
       </View>
     </SafeAreaProvider>

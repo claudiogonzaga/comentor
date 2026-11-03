@@ -8,6 +8,7 @@ import { getNightGateEnabled, isSleepWindow, setNightGateEnabled } from '../boot
 import { ScreenContainer } from '../components/ScreenContainer';
 import { FeedScreen } from '../screens/FeedScreen';
 import { NotesScreen } from '../screens/NotesScreen';
+import { XLoginScreen } from '../screens/XLoginScreen';
 import { MediaScreen } from '../screens/MediaScreen';
 import { NoteReaderScreen } from '../screens/NoteReaderScreen';
 import { PillarEditScreen } from '../screens/PillarEditScreen';
@@ -88,6 +89,7 @@ export function AspisNavigator() {
       <Stack.Screen name="NoteReader" component={NoteReaderScreen} />
       <Stack.Screen name="Player" component={PlayerScreen} />
       <Stack.Screen name="Media" component={MediaScreen} />
+      <Stack.Screen name="XLogin" component={XLoginScreen} />
     </Stack.Navigator>
   );
 }

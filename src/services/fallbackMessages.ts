@@ -73,19 +73,19 @@ export const SLEEP_FALLBACKS: Bank = {
   },
   5: {
     gentle: [
-      'Última mensagem de hoje. Não vou mais insistir. Mas amanhã a gente conversa sobre isso, ok? Boa noite quando vier.',
+      'Não vou mais insistir agora. Amanhã é outra chance, e ela começa melhor se você dormir logo. Boa noite quando vier.',
       'Tudo bem. A gente recomeça amanhã. Mas lembra: cada noite assim é um voto. Em quem você quer ser?',
       'Eu fico aqui. Quando você decidir dormir, vou estar do seu lado. Sem cobrança, só presença.',
     ],
     firm: [
-      'Eu já disse o que tinha pra dizer. A escolha é sua. Mas amanhã eu vou perguntar — e você vai precisar de uma resposta boa.',
+      'Eu já disse o que tinha pra dizer. A escolha é sua, e ainda dá tempo de fazer dela uma boa manhã.',
       'Cada vez que você ignora isso, está dizendo que o presente vale mais que o futuro. A gente sabe que não é verdade.',
       'Não é briga. É lembrete. Você merece dormir. Tchau até amanhã — espero te encontrar descansado.',
     ],
     brutal: [
-      'Acabou meu trabalho de hoje. Você sabe o que precisa fazer. Faz ou não faz. Mas amanhã não venha reclamar.',
+      'Você sabe o que precisa fazer. É só levantar daí e ir. A manhã de amanhã é sua.',
       'Eu não vou mais insistir hoje. Mas grava isso: você teve a chance e escolheu não pegar. Isso é seu.',
-      'Última. Não falo mais. Mas seu corpo vai falar amanhã, mais alto que eu. Boa sorte.',
+      'Paro por aqui. Se você for agora, ainda sobra noite para o seu corpo trabalhar a seu favor.',
     ],
   },
 };

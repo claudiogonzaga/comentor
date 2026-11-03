@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { Linking, Platform } from 'react-native';
 import type { IntensityLevel, OwlSpeciesId } from '../types';
 import { INTENSITY_LEVELS } from '../constants/intensityLevels';
+import { nightLine } from '../constants/nightLines';
 import { DEFAULT_OWL_SPECIES, getOwlSpecies } from '../constants/owlSpecies';
 import { getKV, getUserConfig } from './database';
 import { getQuietPeriodsCached, anyQuietAt, anyQuietAtMinute } from './quietHours';
@@ -556,11 +557,11 @@ async function scheduleNightRemindersOnce({
       // Corrente já em curso: agenda só as batidas que ainda vão tocar.
       if (fireAt.getTime() <= now) continue;
       const level = (Math.min(5, i + 1) as IntensityLevel);
-      const cfg = INTENSITY_LEVELS[level];
+      const line = nightLine(i, maxReminders);
       const id = await Notifications.scheduleNotificationAsync({
         content: {
-          title: cfg.notificationTitle,
-          body: cfg.notificationBody,
+          title: line.title,
+          body: line.body,
           data: { type: 'sleep-reminder', level, habitId, logId, fireAt: fireAt.toISOString() },
           sound,
           categoryIdentifier: SLEEP_CATEGORY,

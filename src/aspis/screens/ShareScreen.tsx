@@ -20,7 +20,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useTranscribeStore } from '../store/useTranscribeStore';
 import type { RootStackParamList } from '../navigation/types';
 import type { VideoMeta, VideoRecord } from '../types';
-import { alignColor, colors, spacing, typography } from '../theme';
+import { colors, spacing, typography } from '../theme';
 import { extractVideoId, watchUrl } from '../utils/videoId';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Share'>;
@@ -159,7 +159,7 @@ export function ShareScreen({ route, navigation }: Props) {
         <ScrollView contentContainerStyle={styles.scroll}>
           <View style={styles.scoreRow}>
             <Text
-              style={[styles.stars, { color: alignColor(scoreToStars(state.video.score)) }]}
+              style={[styles.stars, { color: colors.text.primary }]}
             >
               {'★'.repeat(scoreToStars(state.video.score)) || '☆'}
             </Text>

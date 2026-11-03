@@ -3,9 +3,9 @@
 //
 // Dois caminhos:
 // - start(): o usuário tocou em Ouvir/Assistir → baixa já.
-// - prefetch(): o usuário abriu um vídeo → áudio e vídeo entram numa FILA de
-//   pré-download (um por vez, o vídeo aberto mais recente na frente), para
-//   já estarem prontos se ele decidir ouvir/assistir.
+// - prefetch(): o usuário abriu um vídeo → o áudio entra numa FILA de pré-download
+//   (um por vez, o vídeo aberto mais recente na frente), para já estar pronto se ele
+//   decidir ouvir.
 import { create } from 'zustand';
 
 import {
@@ -183,7 +183,8 @@ export const useMediaStore = create<MediaState>((set, get) => {
 
     prefetch: (url, videoId) => {
       if (!canPrefetchNow(get().prefetchMode)) return;
-      const jobs: Job[] = (['audio', 'video'] as MediaKind[])
+      // Só o áudio: o vídeo agora toca em miniatura, sem arquivo.
+      const jobs: Job[] = (['audio'] as MediaKind[])
         .filter((kind) => {
           const base = mediaBase(videoId, kind);
           return !get().downloads[base] && !failedPrefetch.has(base) && !findMedia(videoId, kind);

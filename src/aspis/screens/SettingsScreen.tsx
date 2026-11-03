@@ -4,6 +4,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Linking,
   Pressable,
@@ -27,6 +28,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { StarsRuler } from '../components/StarsRuler';
 import { MODEL_PRESETS } from '../constants/defaults';
 import * as db from '../services/db';
+import { neuralStats, resetNeural } from '../services/neural';
+import { useXStore } from '../services/x';
 import type { ChannelPref } from '../services/db';
 import { GEMINI_VOICES } from '../services/geminiTTS';
 import { MEDIA_SUPPORTED } from '../services/media';
@@ -174,6 +177,8 @@ export function SettingsScreen({ navigation }: Props) {
             <Button label="Conectar conta Google" onPress={() => googleSignIn()} />
           )}
         </Section>
+
+        <XAccountSection onConnect={() => navigation.navigate('XLogin')} onDisconnect={() => navigation.navigate('XLogin', { logout: true })} />
 
         <Section
           title="Inteligência"
@@ -414,6 +419,8 @@ export function SettingsScreen({ navigation }: Props) {
           title="Algoritmo & feedback"
           sub="O Aspis aprende com o que você pula (👎) e salva. Quanto mais você usa, melhor o ranqueamento."
         >
+          <NeuralCard feedVersion={feedVersion} />
+
           <Text style={styles.fbStat}>
             {skipCount} vídeo{skipCount === 1 ? '' : 's'} pulado{skipCount === 1 ? '' : 's'} até agora
           </Text>
@@ -462,6 +469,68 @@ export function SettingsScreen({ navigation }: Props) {
 
       </ScrollView>
     </ScreenContainer>
+  );
+}
+
+/** A conta do X: a timeline dela entra no feed como uma segunda fonte. */
+function XAccountSection({ onConnect, onDisconnect }: { onConnect: () => void; onDisconnect: () => void }) {
+  const connected = useXStore((s) => s.connected);
+  useEffect(() => {
+    useXStore.getState().load();
+  }, []);
+  return (
+    <Section
+      title="Conta do X"
+      sub="A sua timeline do X entra no feed, na aba X, ranqueada pelos mesmos pilares. A senha fica na página do X; o app guarda só a sessão, neste aparelho."
+    >
+      <Text style={styles.fbStat}>{connected ? 'Conectado.' : 'Não conectado.'}</Text>
+      <Button
+        label={connected ? 'Desconectar o X' : 'Conectar o X'}
+        onPress={connected ? onDisconnect : onConnect}
+        style={{ marginTop: spacing.md }}
+      />
+    </Section>
+  );
+}
+
+/** A rede local: o que já aprendeu, o quanto pesa na nota e como zerá-la. */
+function NeuralCard({ feedVersion }: { feedVersion: number }) {
+  const [stats, setStats] = useState(neuralStats());
+  useEffect(() => {
+    setStats(neuralStats());
+    const id = setInterval(() => setStats(neuralStats()), 2000);
+    return () => clearInterval(id);
+  }, [feedVersion]);
+  const text =
+    stats.labels === 0
+      ? 'Rede neural local: ainda sem marcações. Dê 👍 ou 👎 nos vídeos do feed: ela treina aqui no aparelho, sem nuvem.'
+      : stats.weightPct === 0
+        ? `Rede neural local: ${stats.labels} marcações. A partir de 5 ela começa a influir no alinhamento.`
+        : `Rede neural local: ${stats.labels} marcações, pesa ${stats.weightPct}% no alinhamento.` +
+          (stats.total > 0 ? ` Acertou ${stats.hits} das últimas ${stats.total} antes de você marcar.` : '');
+  return (
+    <View style={{ marginBottom: spacing.lg }}>
+      <Text style={styles.fbStat}>{stats.training ? `${text} Treinando…` : text}</Text>
+      {stats.labels > 0 && (
+        <Pressable
+          onPress={() =>
+            Alert.alert('Zerar a rede neural?', 'Ela esquece tudo o que aprendeu e as marcações saem daqui.', [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Zerar',
+                style: 'destructive',
+                onPress: () => {
+                  resetNeural();
+                  setStats(neuralStats());
+                },
+              },
+            ])
+          }
+        >
+          <Text style={styles.learnedClear}>zerar a rede</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 

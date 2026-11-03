@@ -28,26 +28,12 @@ export const colors = {
   star: 'rgba(42,26,16,0.50)',
 } as const;
 
-// Espectro de alinhamento — escala Likert de 5 níveis (0–4): 0=vermelho (pior)
-// → 4=azul (melhor), com o centro (2) âmbar. Tons em cerâmica para contraste
-// sobre o fundo terracota.
+// Alinhamento: escala Likert de 5 níveis (0–4), em figura negra (ver StarsRuler).
 export const ALIGN_LEVELS = 5; // 0..4
 export const ALIGN_MAX = ALIGN_LEVELS - 1; // 4
 export const ALIGN_MID = (ALIGN_LEVELS - 1) / 2; // 2 = 50%
 
-export const ALIGN_COLORS = [
-  '#9E3327', // 0 mínimo
-  '#B5611E', // 1 baixo
-  '#A8862A', // 2 médio (centro)
-  '#5E7C46', // 3 alto
-  '#3A6E8C', // 4 máximo
-] as const;
-
 export const ALIGN_LABELS = ['mínimo', 'baixo', 'médio', 'alto', 'máximo'] as const;
-
-export function alignColor(level: number): string {
-  return ALIGN_COLORS[Math.max(0, Math.min(ALIGN_MAX, Math.round(level)))];
-}
 
 // Cores dos pills de pilar — tons de terra/cerâmica, coerentes com o vaso.
 export const PILLAR_PALETTE = [

@@ -1,7 +1,6 @@
-// "🎧 Ouvir áudio" / "🎬 Assistir vídeo". Ao abrir o vídeo, os dois já
-// começam a pré-baixar em segundo plano (conforme a preferência de rede).
-// Tocar num botão abre o player do Aspis — na hora, se o arquivo já está no
-// celular, ou assim que o download terminar.
+// "🎧 Ouvir áudio" / "🎬 Assistir". O vídeo toca em miniatura, sem baixar; só o que o
+// dono não deixa tocar fora do YouTube volta a "Baixar e assistir". O áudio pré-baixa
+// em segundo plano (conforme a preferência de rede), porque toca de tela apagada.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
@@ -16,13 +15,14 @@ import {
   type MediaKind,
 } from '../services/media';
 import { useMediaStore } from '../store/useMediaStore';
+import { useMiniPlayer } from '../store/useMiniPlayer';
 import type { RootStackParamList } from '../navigation/types';
 import type { VideoRecord } from '../types';
 import { colors, radius, spacing, typography } from '../theme';
 
 const LABEL: Record<MediaKind, string> = {
   audio: '🎧 Ouvir áudio',
-  video: '🎬 Assistir vídeo',
+  video: '🎬 Baixar e assistir',
 };
 
 function MediaButton({ video, kind }: { video: VideoRecord; kind: MediaKind }) {
@@ -127,10 +127,39 @@ function MediaButton({ video, kind }: { video: VideoRecord; kind: MediaKind }) {
   );
 }
 
+/** Toca em miniatura, sobre a tela: dá para ler a síntese enquanto o vídeo roda. */
+function WatchButton({ video }: { video: VideoRecord }) {
+  const open = useMiniPlayer((s) => s.open);
+  return (
+    <View style={styles.item}>
+      <Pressable
+        onPress={() => {
+          Haptics.selectionAsync();
+          open({ videoId: video.video_id, title: video.neutral_title || video.original_title });
+        }}
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.btn, pressed && { opacity: 0.7 }]}
+      >
+        <Text style={styles.label} numberOfLines={1} adjustsFontSizeToFit>
+          🎬 Assistir
+        </Text>
+      </Pressable>
+      <View style={styles.subRow}>
+        <Text style={styles.sub} numberOfLines={1}>
+          em miniatura, sem baixar
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export function MediaActions({ video }: { video: VideoRecord }) {
   const prefetch = useMediaStore((s) => s.prefetch);
+  const blocked = useMiniPlayer((s) => s.blocked[video.video_id]);
+  const version = useMediaStore((s) => s.version);
+  const hasVideoFile = useMemo(() => !!findMedia(video.video_id, 'video'), [video.video_id, version]);
 
-  // Abriu o vídeo → pré-baixa áudio e vídeo em segundo plano.
+  // Abriu o vídeo → pré-baixa o áudio em segundo plano.
   useEffect(() => {
     if (MEDIA_SUPPORTED) prefetch(video.url, video.video_id);
   }, [prefetch, video.url, video.video_id]);
@@ -139,7 +168,7 @@ export function MediaActions({ video }: { video: VideoRecord }) {
   return (
     <View style={styles.row}>
       <MediaButton video={video} kind="audio" />
-      <MediaButton video={video} kind="video" />
+      {blocked || hasVideoFile ? <MediaButton video={video} kind="video" /> : <WatchButton video={video} />}
     </View>
   );
 }

@@ -50,7 +50,7 @@ export interface Analysis {
 
 // De onde veio o conteúdo analisado (camadas da Funcionalidade 1).
 // 'transcript' = transcrição feita NO CELULAR (Parakeet) quando não havia legenda.
-export type ContentSource = 'video' | 'captions' | 'metadata' | 'transcript';
+export type ContentSource = 'video' | 'captions' | 'metadata' | 'transcript' | 'post';
 
 // De onde veio a transcrição salva do vídeo.
 export type TranscriptSource = 'youtube' | 'parakeet';
@@ -66,6 +66,25 @@ export interface VideoMeta {
   duration: string; // humanizada ("18 min")
   url: string;
   channel_thumb: string;
+}
+
+// De onde veio o item do feed: um vídeo do YouTube ou um post do X.
+export type FeedSource = 'youtube' | 'x';
+
+// Um 👍/👎: exemplo de treino da rede local, com o que ela precisa ver do vídeo.
+export interface ThumbRecord {
+  video_id: string;
+  value: number; // 1, -1 ou 0 (desfeito)
+  updated_at: number; // epoch ms
+  neutral_title: string;
+  original_title: string;
+  channel: string;
+  channel_id: string;
+  pillar: string;
+  resumo: string;
+  score: number;
+  is_clickbait: number;
+  duration: string;
 }
 
 // Linha da tabela videos (espelha as colunas principais do store.py).
@@ -88,6 +107,7 @@ export interface VideoRecord extends Analysis {
   transcript_segments?: string | null; // JSON [{ts, text}] da transcrição
   transcript_source?: TranscriptSource | null;
   asr_status?: 'done' | 'failed' | 'skipped' | null; // transcrição automática
+  source?: FeedSource | null;
 }
 
 // Fonte externa retornada pelo grounding do Gemini (Google Search) na

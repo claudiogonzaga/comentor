@@ -40,6 +40,8 @@ import { MediaActions } from './MediaActions';
 import { TranscriptBlock } from './TranscriptBlock';
 import { QASection } from './QASection';
 
+const ALL_KEY = '__tudo__';
+
 const VEREDITO_UI: Record<Veredito, { label: string; color: string }> = {
   apoiada: { label: 'apoiada', color: colors.accent.success },
   mista: { label: 'mista', color: colors.accent.warning },
@@ -117,11 +119,10 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
     setClips(db.getClips(video.video_id));
   }, [video.video_id]);
 
-  // Tocar num bloco adiciona/remove ele da seleção e REGRAVA a nota única de
-  // Destaques com todos os trechos marcados (na ordem da análise).
-  const toggleClip = async (block: ClipBlock) => {
+  // Regrava a nota única de Destaques com os trechos marcados (na ordem da análise).
+  const saveSelection = async (nextKeys: Set<string>, busyKey: string) => {
     if (clipBusy) return;
-    setClipBusy(block.key);
+    setClipBusy(busyKey);
     setNote(null);
     try {
       if (!user) {
@@ -129,9 +130,6 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
         if (!u) throw new Error('Conecte uma conta Google para salvar no Drive.');
       }
       const token = await getAccessToken();
-      const nextKeys = new Set(Object.keys(clips));
-      if (nextKeys.has(block.key)) nextKeys.delete(block.key);
-      else nextKeys.add(block.key);
       const selected = blocks.filter((b) => nextKeys.has(b.key));
 
       if (selected.length === 0) {
@@ -161,6 +159,21 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
     }
   };
 
+  // Tocar num bloco adiciona/remove ele da seleção.
+  const toggleClip = (block: ClipBlock) => {
+    const nextKeys = new Set(Object.keys(clips));
+    if (nextKeys.has(block.key)) nextKeys.delete(block.key);
+    else nextKeys.add(block.key);
+    void saveSelection(nextKeys, block.key);
+  };
+
+  // O ＋ grande: guarda todos os trechos de uma vez; com todos guardados, tira todos.
+  const allSaved = blocks.length > 0 && blocks.every((b) => clips[b.key]);
+  const toggleAll = () => {
+    Haptics.selectionAsync();
+    void saveSelection(new Set(allSaved ? [] : blocks.map((b) => b.key)), ALL_KEY);
+  };
+
   // Envolve um bloco da síntese tornando-o clipável (se houver conteúdo).
   const clip = (key: string, children: ReactNode): ReactNode => {
     const block = blockByKey[key];
@@ -173,6 +186,7 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
   };
 
   const read = video.read === 1;
+  const isX = video.source === 'x';
 
   // Renderiza a nota do estado FRESCO do banco (inclui flashcards gerados e
   // perguntas/checagens marcadas para salvar) e grava no Drive. Reusada pelo
@@ -286,10 +300,28 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
 
   return (
     <View style={styles.root}>
-      <Text style={styles.clipHint}>
-        Toque em ＋ nos trechos que quer lembrar — eles vão juntos para uma nota de Destaques
-        {clipCount > 0 ? ` · ${clipCount} selecionado${clipCount === 1 ? '' : 's'}` : ''}
-      </Text>
+      <View style={styles.clipHead}>
+        <Text style={styles.clipHint}>
+          Toque em ＋ nos trechos que quer lembrar, ou no ＋ grande para guardar tudo. Vão juntos para
+          uma nota de Destaques
+          {clipCount > 0 ? ` · ${clipCount} selecionado${clipCount === 1 ? '' : 's'}` : ''}
+        </Text>
+        {blocks.length > 0 && (
+          <Pressable
+            onPress={toggleAll}
+            disabled={!!clipBusy}
+            accessibilityRole="button"
+            accessibilityLabel={allSaved ? 'Tirar tudo dos Destaques' : 'Guardar tudo nos Destaques'}
+            style={({ pressed }) => [styles.bigPlus, pressed && { opacity: 0.75 }]}
+          >
+            {clipBusy === ALL_KEY ? (
+              <ActivityIndicator size="small" color={colors.text.onGold} />
+            ) : (
+              <Text style={styles.bigPlusIcon}>{allSaved ? '✓' : '＋'}</Text>
+            )}
+          </Pressable>
+        )}
+      </View>
 
       {!!video.a_real &&
         clip(
@@ -302,9 +334,9 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
 
       {clip('resumo', <Text style={styles.resumo}>{video.resumo}</Text>)}
 
-      <MediaActions video={video} />
+      {!isX && <MediaActions video={video} />}
 
-      <TranscriptBlock video={video} />
+      {!isX && <TranscriptBlock video={video} />}
 
       {!!narration && (
         <View style={styles.listenWrap}>
@@ -416,7 +448,7 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
           onPress={handleSaveNote}
         />
         <ActionBtn label={copied ? '✓ Copiado' : 'Copiar'} done={copied} onPress={handleCopy} />
-        <ActionBtn label="Abrir no YouTube" onPress={() => Linking.openURL(video.url)} />
+        <ActionBtn label={isX ? 'Abrir no X' : 'Abrir no YouTube'} onPress={() => Linking.openURL(video.url)} />
         {context === 'feed' && (
           <ActionBtn label={read ? '✓ Lido' : 'Marcar lido'} done={read} onPress={handleToggleRead} />
         )}
@@ -447,13 +479,28 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
 
 const styles = StyleSheet.create({
   root: { marginTop: spacing.md },
+  clipHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginBottom: spacing.sm,
+  },
   clipHint: {
     ...typography.label,
+    flex: 1,
     textTransform: 'none',
     letterSpacing: 0,
     color: colors.text.tertiary,
-    marginBottom: spacing.sm,
   },
+  bigPlus: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bigPlusIcon: { color: colors.text.onGold, fontSize: 24, lineHeight: 28, fontFamily: 'Inter_600SemiBold' },
   aReal: {
     marginBottom: spacing.md,
     padding: spacing.md,

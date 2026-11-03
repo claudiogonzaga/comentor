@@ -10,8 +10,9 @@ import {
   starsToThreshold,
 } from '../constants/defaults';
 import type { Period } from '../types';
-import { analyze, type BrainOptions, GeminiError, NoGeminiKeyError } from './brain';
+import { analyze, analyzePost, type BrainOptions, GeminiError, NoGeminiKeyError } from './brain';
 import * as db from './db';
+import { harvestTimeline } from './x';
 import {
   getNewVideoIds,
   getSubscriptions,
@@ -133,4 +134,81 @@ export async function refreshFeed(
 
   db.setMeta('last_run', db.nowIso());
   return { processed, errors, above, skippedCached, capped };
+}
+
+// --- X: a timeline da sua conta, ranqueada como os vídeos ----------------------
+
+const MAX_X_PER_RUN = 25;
+
+export interface XRefreshProgress {
+  stage: 'reading' | 'analyzing';
+  done: number;
+  total: number;
+}
+
+export async function refreshX(
+  brain: BrainOptions,
+  period: Period,
+  minStars: number,
+  onProgress?: (p: XRefreshProgress) => void,
+): Promise<RefreshResult> {
+  const lastRun = Date.parse(db.getMeta('last_run_x') || '');
+  const lookbackMs = Math.min(
+    MAX_LOOKBACK_HOURS * 3600 * 1000,
+    Math.max(PERIODS[period] * 3600 * 1000, Number.isFinite(lastRun) ? Date.now() - lastRun : 0),
+  );
+  const since = Date.now() - lookbackMs;
+  onProgress?.({ stage: 'reading', done: 0, total: 0 });
+  const posts = await harvestTimeline();
+  const muted = new Set(db.mutedChannelIds());
+  const recent = posts.filter((p) => Date.parse(p.createdAt) >= since && !muted.has(p.handle));
+  const fresh = recent.filter((p) => !db.hasVideo(p.id));
+  const toProcess = fresh.slice(0, MAX_X_PER_RUN);
+  const threshold = starsToThreshold(minStars);
+
+  let processed = 0;
+  let errors = 0;
+  let above = 0;
+  let done = 0;
+  let abort: unknown = null;
+  await mapLimit(toProcess, 2, async (post) => {
+    if (abort) return;
+    try {
+      const analysis = await analyzePost(post, brain);
+      db.upsertVideo({
+        ...analysis,
+        video_id: post.id,
+        channel: post.name,
+        channel_id: post.handle,
+        channel_thumb: post.thumb,
+        original_title: post.text,
+        url: post.url,
+        published_at: post.createdAt,
+        duration: '',
+        transcript_available: 0,
+        content_source: 'post',
+        transcript_text: post.text,
+        source: 'x',
+      });
+      processed++;
+      if (analysis.score >= threshold) above++;
+    } catch (e) {
+      if (e instanceof NoGeminiKeyError || (e instanceof GeminiError && e.isKeyError)) {
+        abort = e;
+        return;
+      }
+      errors++;
+    } finally {
+      onProgress?.({ stage: 'analyzing', done: ++done, total: toProcess.length });
+    }
+  });
+  if (abort) throw abort;
+  db.setMeta('last_run_x', db.nowIso());
+  return {
+    processed,
+    errors,
+    above,
+    skippedCached: recent.length - fresh.length,
+    capped: fresh.length - toProcess.length,
+  };
 }

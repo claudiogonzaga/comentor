@@ -4,12 +4,13 @@
 import { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { scoreToStars } from '../constants/defaults';
+import { alignedStars } from '../services/neural';
 import type { Pillar, VideoRecord } from '../types';
 import { colors, spacing, typography } from '../theme';
 import { AlignDot } from './AlignDot';
 import { ChannelAvatar } from './ChannelAvatar';
 import { PillarPill } from './PillarPill';
+import { ThumbButtons } from './ThumbButtons';
 
 interface Props {
   video: VideoRecord;
@@ -20,7 +21,7 @@ interface Props {
 }
 
 export function VideoRow({ video, pillars, onPress, expanded, children }: Props) {
-  const stars = scoreToStars(video.score);
+  const stars = alignedStars(video);
   const pillarIndex = pillars.findIndex((p) => p.id === video.pillar);
   const pillarLabel =
     pillarIndex >= 0 ? pillars[pillarIndex].mocName || pillars[pillarIndex].nome : '—';
@@ -45,6 +46,7 @@ export function VideoRow({ video, pillars, onPress, expanded, children }: Props)
           <View style={styles.subline}>
             <Text style={styles.subText} numberOfLines={1}>
               {video.channel}
+              {video.source === 'x' && video.channel_id ? `  ·  @${video.channel_id}` : ''}
               {video.duration ? `  ·  ${video.duration}` : ''}
             </Text>
             <PillarPill label={pillarLabel} pillarIndex={pillarIndex} />
@@ -57,6 +59,7 @@ export function VideoRow({ video, pillars, onPress, expanded, children }: Props)
           </View>
           {expanded && children}
         </View>
+        <ThumbButtons video={video} />
       </View>
     </Pressable>
   );

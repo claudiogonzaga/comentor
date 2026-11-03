@@ -391,6 +391,75 @@ async function analyzeOnce(
   throw new GeminiError(`brain.analyze falhou após ${MAX_RETRIES + 1} tentativas: ${lastErr}`);
 }
 
+// --- análise de UM post do X -------------------------------------------------
+
+const POST_SYSTEM_RULES = `Você é um curador a serviço dos objetivos de vida do usuário (os "pilares" descritos abaixo). Sua tarefa é avaliar UM post do X (Twitter), que pode ser um tweet isolado ou uma thread, e devolver um JSON estrito com a análise.
+
+{idioma}
+
+Regras:
+- Classifique o post no pilar mais alinhado, ou "nenhum" se não servir a nenhum.
+- Dê um score 0–100 de alinhamento aos objetivos do usuário (quanto realmente entrega de valor para os pilares, não quão viral ou popular é). Parta do valor do CONTEÚDO; penalidades são descontos GRADUAIS sobre essa base, nunca uma sentença.
+{regras_usuario}
+- O X premia indignação e isca de engajamento: rage bait, dunks, takes vazios, "thread 🧵" de coach, FOMO, autopromoção, polêmica fabricada. Marque is_clickbait e desconte aos poucos, conforme a intensidade: a embalagem não decide a nota. Opinião qualificada (bem argumentada ou baseada em evidências) vale como conteúdo. Um post curto PODE ter score alto se for denso e útil (um dado, um princípio, um link de valor).
+- neutral_title: uma linha neutra e informativa (o que o post realmente diz), SEM CAPS, SEM emoji, SEM isca. Sentence case.
+- resumo: 1 a 3 frases. Para posts triviais, seja breve.
+- pontos_chave: pontos acionáveis (lista vazia se não houver, o normal num tweet).
+- fatos_para_memorizar: SÓ conhecimento atômico e testável (fato, definição, princípio). Quase sempre VAZIO num tweet.
+- citacoes: o trecho central do post entre aspas, SEM timestamp (use "" no campo timestamp). Lista vazia se não fizer sentido.
+
+Responda APENAS com o JSON, sem texto antes ou depois, neste formato exato:
+{
+  "pillar": "{pilares} | nenhum",
+  "score": 0,
+  "is_clickbait": false,
+  "neutral_title": "",
+  "resumo": "",
+  "pontos_chave": [],
+  "fatos_para_memorizar": [],
+  "citacoes": [{"texto": "", "timestamp": ""}]
+}`;
+
+export interface PostInput {
+  text: string;
+  name: string;
+  handle: string;
+  likes: number;
+  retweets: number;
+}
+
+/** Ranqueia um post do X pelos mesmos pilares e regras dos vídeos. */
+export async function analyzePost(post: PostInput, opts: BrainOptions): Promise<Analysis> {
+  const regras = (opts.rules || '')
+    .split('\n')
+    .map((ln) => ln.trim())
+    .filter(Boolean)
+    .map((ln) => '- ' + ln)
+    .join('\n');
+  const idioma =
+    opts.noteLang === 'pt-BR'
+      ? 'IDIOMA: escreva neutral_title, resumo, pontos_chave, fatos e citacoes SEMPRE em português do Brasil. As CHAVES do JSON permanecem como abaixo.'
+      : 'IDIOMA: escreva neutral_title, resumo, pontos_chave, fatos e citacoes SEMPRE no MESMO IDIOMA ORIGINAL do post. NÃO traduza. As CHAVES do JSON permanecem como abaixo.';
+  let system =
+    POST_SYSTEM_RULES.replace('{idioma}', idioma)
+      .replace('{regras_usuario}', regras)
+      .replace('{pilares}', opts.pillars.map((p) => p.id).join(' | ')) +
+    '\n\n' +
+    pillarsBlock(opts.pillars);
+  if (opts.learnedPrefs?.trim()) {
+    system += `\n\nPERFIL APRENDIDO DO USUÁRIO (ajuste o score de forma MODERADA, no máximo ~15 pontos):\n${opts.learnedPrefs.trim()}`;
+  }
+  const user = [
+    `Autor: ${post.name} (@${post.handle})`,
+    `Curtidas: ${post.likes} · Reposts: ${post.retweets}`,
+    '',
+    'Texto do post:',
+    post.text.trim(),
+  ].join('\n');
+  const meta = { title: post.text.slice(0, 120) } as VideoMeta;
+  return analyzeOnce(meta, [{ text: user }], opts, 'aspisFeed');
+}
+
 export interface AnalyzeResult {
   analysis: Analysis;
   source: ContentSource;

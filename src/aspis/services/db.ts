@@ -11,6 +11,8 @@ import type {
   Source,
   Transcript,
   TranscriptSource,
+  FeedSource,
+  ThumbRecord,
   VideoRecord,
 } from '../types';
 
@@ -36,7 +38,8 @@ CREATE TABLE IF NOT EXISTS videos (
     transcript_segments TEXT,
     transcript_source TEXT,
     asr_status TEXT,
-    asr_error TEXT
+    asr_error TEXT,
+    source TEXT DEFAULT 'youtube'
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS qa (
@@ -65,6 +68,14 @@ CREATE TABLE IF NOT EXISTS channel_prefs (
     state TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS thumbs (
+    video_id TEXT PRIMARY KEY,
+    value INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    neutral_title TEXT, original_title TEXT,
+    channel TEXT, channel_id TEXT, pillar TEXT,
+    resumo TEXT, score INTEGER, is_clickbait INTEGER, duration TEXT
+);
 `;
 
 // Colunas adicionadas depois do schema original — aplicadas com ALTER TABLE em
@@ -81,6 +92,7 @@ const MIGRATIONS: { table: string; column: string; ddl: string }[] = [
   { table: 'videos', column: 'transcript_source', ddl: 'ALTER TABLE videos ADD COLUMN transcript_source TEXT' },
   { table: 'videos', column: 'asr_status', ddl: 'ALTER TABLE videos ADD COLUMN asr_status TEXT' },
   { table: 'videos', column: 'asr_error', ddl: 'ALTER TABLE videos ADD COLUMN asr_error TEXT' },
+  { table: 'videos', column: 'source', ddl: "ALTER TABLE videos ADD COLUMN source TEXT DEFAULT 'youtube'" },
 ];
 
 const JSON_FIELDS = ['pontos_chave', 'fatos', 'citacoes', 'evidencias'] as const;
@@ -169,6 +181,7 @@ export interface UpsertInput extends Analysis {
   content_source: ContentSource;
   transcript_text?: string | null;
   channel_thumb?: string;
+  source?: FeedSource;
 }
 
 export function upsertVideo(v: UpsertInput): void {
@@ -177,7 +190,7 @@ export function upsertVideo(v: UpsertInput): void {
     'url', 'published_at', 'duration', 'pillar', 'score', 'is_clickbait',
     'a_real', 'resumo', 'pontos_chave', 'fatos', 'citacoes', 'evidencias',
     'transcript_available', 'content_source', 'fetched_at', 'transcript_text',
-    'channel_thumb',
+    'channel_thumb', 'source',
   ];
   const record: Record<string, unknown> = {
     ...v,
@@ -188,6 +201,7 @@ export function upsertVideo(v: UpsertInput): void {
     fetched_at: nowIso(),
     transcript_text: v.transcript_text ?? null,
     channel_thumb: v.channel_thumb ?? '',
+    source: v.source ?? 'youtube',
   };
   const placeholders = cols.map(() => '?').join(', ');
   const updates = cols
@@ -206,6 +220,7 @@ export interface VideoQuery {
   minScore?: number;
   sinceIso?: string | null;
   includeRead?: boolean;
+  source?: FeedSource;
 }
 
 // Nota provisória: triado só por título/descrição (sem legenda nem
@@ -230,6 +245,10 @@ export function getVideos(q: VideoQuery = {}): VideoRecord[] {
   if (q.sinceIso) {
     sql += ' AND published_at >= ?';
     args.push(q.sinceIso);
+  }
+  if (q.source) {
+    sql += " AND COALESCE(source, 'youtube') = ?";
+    args.push(q.source);
   }
   sql += ' ORDER BY score DESC, published_at DESC';
   return conn()
@@ -317,6 +336,64 @@ export function replaceClips(
 
 export function clearClips(videoId: string): void {
   conn().runSync('DELETE FROM clips WHERE video_id = ?', [videoId]);
+}
+
+// --- 👍/👎: os exemplos de treino da rede neural local (neural.ts) -----------
+// Cada marcação guarda o que a rede precisa ver, mesmo que o vídeo saia do banco ou
+// tenha sido marcado no outro aparelho.
+
+export function getThumbs(): ThumbRecord[] {
+  return conn().getAllSync<ThumbRecord>('SELECT * FROM thumbs ORDER BY updated_at');
+}
+
+export function getThumbValue(videoId: string): number {
+  return (
+    conn().getFirstSync<{ value: number }>('SELECT value FROM thumbs WHERE video_id = ?', [videoId])
+      ?.value ?? 0
+  );
+}
+
+export function setThumb(v: VideoRecord, value: number): void {
+  upsertThumb({
+    video_id: v.video_id,
+    value,
+    updated_at: Date.now(),
+    neutral_title: v.neutral_title,
+    original_title: v.original_title,
+    channel: v.channel,
+    channel_id: v.channel_id,
+    pillar: v.pillar,
+    resumo: (v.resumo || '').slice(0, 300),
+    score: v.score,
+    is_clickbait: v.is_clickbait ? 1 : 0,
+    duration: v.duration,
+  });
+}
+
+export function upsertThumb(t: ThumbRecord): void {
+  conn().runSync(
+    `INSERT OR REPLACE INTO thumbs
+       (video_id, value, updated_at, neutral_title, original_title, channel, channel_id, pillar, resumo, score, is_clickbait, duration)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      t.video_id,
+      t.value,
+      t.updated_at,
+      t.neutral_title ?? '',
+      t.original_title ?? '',
+      t.channel ?? '',
+      t.channel_id ?? '',
+      t.pillar ?? '',
+      t.resumo ?? '',
+      t.score ?? 0,
+      t.is_clickbait ? 1 : 0,
+      t.duration ?? '',
+    ],
+  );
+}
+
+export function clearThumbs(): void {
+  conn().runSync('DELETE FROM thumbs');
 }
 
 // --- Pular / 👎 + canais silenciados (L1) + dataset de feedback (L2) ---------
@@ -488,6 +565,7 @@ export function autoTranscribeCandidates(limit = 50): VideoRecord[] {
       `SELECT * FROM videos
         WHERE content_source = 'metadata' AND COALESCE(transcript_text, '') = ''
           AND asr_status IS NULL AND COALESCE(skipped, 0) = 0 AND COALESCE(read, 0) = 0
+          AND COALESCE(source, 'youtube') = 'youtube'
           AND fetched_at >= ?
           AND COALESCE(channel_id, '') NOT IN
               (SELECT channel_id FROM channel_prefs WHERE state = 'muted')

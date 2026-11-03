@@ -24,7 +24,10 @@ import {
   updateJsonFile,
 } from '../aspis/services/drive';
 import { DEFAULT_PILLARS, DEFAULT_RULES, DEFAULT_MIN_STARS, DEFAULT_PERIOD } from '../aspis/constants/defaults';
+import * as aspisDb from '../aspis/services/db';
+import { thumbsChanged } from '../aspis/services/neural';
 import { useAppStore as useAspisStore } from '../aspis/store/useAppStore';
+import type { ThumbRecord } from '../aspis/types';
 import { DEFAULT_CONFIG } from '../kinesis/timer';
 import { SEED_EXERCISES, useKinesis } from '../kinesis/store';
 import { useAppStore } from '../store/useAppStore';
@@ -248,6 +251,8 @@ async function collect(state: SyncState): Promise<Record<string, unknown>> {
     for (const [key, value] of Object.entries(aspis)) {
       if (state.hash[key] !== undefined || !isAspisDefault(key, value)) local[key] = value;
     }
+    const thumbs = aspisDb.getThumbs();
+    if (thumbs.length || state.hash['aspis.thumbs'] !== undefined) local['aspis.thumbs'] = thumbs;
   }
 
   const config = await getUserConfig();
@@ -408,6 +413,25 @@ function mergeHistory(a: unknown, b: unknown): { ts: number }[] {
   return Array.from(seen.values()).sort((x, y) => (x.ts || 0) - (y.ts || 0));
 }
 
+function mergeThumbs(a: unknown, b: unknown): ThumbRecord[] {
+  const seen = new Map<string, ThumbRecord>();
+  for (const t of [...((a as ThumbRecord[]) ?? []), ...((b as ThumbRecord[]) ?? [])]) {
+    const cur = seen.get(t.video_id);
+    if (!cur || t.updated_at > cur.updated_at) seen.set(t.video_id, t);
+  }
+  return Array.from(seen.values()).sort((x, y) => x.updated_at - y.updated_at);
+}
+
+/** Grava o que veio do outro aparelho e manda a rede rever o que sabe. */
+function applyThumbs(list: ThumbRecord[]): void {
+  for (const t of list) {
+    aspisDb.upsertThumb(t);
+    if (t.value === -1) aspisDb.skipVideo(t.video_id);
+    else if (aspisDb.hasVideo(t.video_id)) aspisDb.unskipVideo(t.video_id);
+  }
+  thumbsChanged();
+}
+
 async function loadState(): Promise<SyncState> {
   try {
     const raw = await getKV(STATE_KEY);
@@ -459,6 +483,22 @@ async function runOnce(): Promise<void> {
     const haveLocal = key in local;
     const lh = haveLocal ? hashOf(local[key]) : null;
     const changed = haveLocal && lh !== state.hash[key];
+
+    // Os 👍/👎 treinam a rede dos dois lados: vale a marcação mais recente de cada vídeo.
+    if (key === 'aspis.thumbs') {
+      const merged = mergeThumbs(local[key], remote?.v);
+      if (hashOf(merged) !== lh) {
+        applyThumbs(merged);
+        // Muda o que a rede vê: o próximo collect já traz a união.
+      }
+      if (!remote || hashOf(remote.v) !== hashOf(merged)) {
+        items[key] = { t: now, by: DEVICE, v: merged };
+        dirty = true;
+      }
+      state.hash[key] = hashOf(merged);
+      state.t[key] = now;
+      continue;
+    }
 
     if (key === 'kinesis.history') {
       const merged = mergeHistory(local[key], remote?.v);

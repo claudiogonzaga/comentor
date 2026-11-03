@@ -1,26 +1,27 @@
 import { StyleSheet, View } from 'react-native';
 
-import { alignColor, colors } from '../theme';
+import { colors } from '../theme';
 
-// Indicador de alinhamento por cor (port do .align-dot do desktop):
-// vermelho (0) → violeta (5).
+// Indicador de alinhamento em figura negra: um xadrez de 4 casas, como os dos vasos
+// áticos. Quantas casas pretas, tanto mais alinhado (0 a 4).
 export function AlignDot({ stars }: { stars: number }) {
-  const color = alignColor(stars);
+  const filled = Math.max(0, Math.min(4, Math.round(stars)));
   return (
-    <View style={[styles.halo, { backgroundColor: `${color}33` }]}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
+    <View style={styles.grid} accessibilityLabel={`Alinhamento ${filled} de 4`}>
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} style={[styles.cell, i < filled && styles.on]} />
+      ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  halo: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.bg.surface,
+  grid: { width: 15, height: 15, flexDirection: 'row', flexWrap: 'wrap', gap: 1 },
+  cell: {
+    width: 7,
+    height: 7,
+    borderWidth: 1,
+    borderColor: colors.text.tertiary,
   },
-  dot: { width: 9, height: 9, borderRadius: 4.5 },
+  on: { backgroundColor: colors.text.primary, borderColor: colors.text.primary },
 });

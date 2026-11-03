@@ -13,6 +13,7 @@ import { useAppStore as useRootStore } from '../store/useAppStore';
 import { getApiKey } from '../services/secureStore';
 import { useAppStore } from './store/useAppStore';
 import * as db from './services/db';
+import { initNeural } from './services/neural';
 import { deleteAllMedia } from './services/media';
 import { useMediaStore } from './store/useMediaStore';
 import { useTranscribeStore } from './store/useTranscribeStore';
@@ -27,6 +28,7 @@ export async function startAspis(): Promise<void> {
   started = true;
   try {
     await useAppStore.getState().init();
+    initNeural();
     useMediaStore.getState().init();
     useTranscribeStore.getState().init();
     AppState.addEventListener('change', (s) => {

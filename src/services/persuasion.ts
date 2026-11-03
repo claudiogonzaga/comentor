@@ -22,26 +22,26 @@ export const FALLBACK_LINES: FallbackLine[] = [
   // 1 — pergunta pessoal, com o nome
   {
     technique: 'pergunta-pessoal',
-    line: (n, u) => `${u?.trim() ? `${u.trim()}, ` : ''}você já fez “${n}”? Marque aqui, por favor: já fez ou precisa de mais tempo.`,
+    line: (n, u) => `${u?.trim() ? `${u.trim()}, ` : ''}“${n}” já foi? Me diz: já fez ou precisa de mais tempo.`,
   },
   // 2 — compromisso/consistência
-  { technique: 'compromisso', line: (n) => `Você colocou “${n}” na sua rotina por um bom motivo — vale honrar isso agora.` },
+  { technique: 'compromisso', line: (n) => `Você escolheu “${n}” por um motivo. Esse motivo continua valendo agora.` },
   // 3 — passo pequeno (reduz a barreira)
-  { technique: 'passo-pequeno', line: (n) => `É rapidinho: “${n}” leva menos tempo do que parece.` },
+  { technique: 'passo-pequeno', line: (n) => `Só o primeiro passo de “${n}”. Começar é a parte difícil, e cabe em dois minutos.` },
   // 4 — muda o registro: pergunta curta
-  { technique: 'curto-e-seco', line: (n) => `E aí — “${n}” já foi?` },
+  { technique: 'curto-e-seco', line: (n) => `E “${n}”, foi?` },
   // 5 — eu-futuro, curto
-  { technique: 'eu-futuro', line: (n) => `Seu eu de amanhã agradece por “${n}” hoje.` },
+  { technique: 'eu-futuro', line: (n) => `Daqui a uma hora você vai gostar de ter feito “${n}”.` },
   // 6 — aversão à perda
-  { technique: 'aversao-perda', line: (n) => `Não deixe o dia passar em branco — “${n}” ainda dá tempo.` },
+  { technique: 'aversao-perda', line: (n) => `Ainda dá para salvar “${n}” hoje. Mais tarde, talvez não.` },
   // 7 — identidade
-  { technique: 'identidade', line: (n) => `Quem cuida de si não pula “${n}”. E você é dessas pessoas.` },
+  { technique: 'identidade', line: (n) => `Cada vez que você faz “${n}”, vota em quem quer ser. Hoje ainda tem voto.` },
   // 8 — ritmo/consistência
-  { technique: 'ritmo', line: (n) => `Você vem indo tão bem… não quebra o ritmo bem no “${n}”.` },
+  { technique: 'ritmo', line: (n) => `O que muda a vida é repetir, não o dia perfeito. “${n}”, nem que seja a versão curta.` },
   // 9 — reenquadre do esforço (alívio pós-tarefa)
-  { technique: 'alivio', line: (n) => `Depois de feito, “${n}” sai da sua cabeça e você relaxa.` },
+  { technique: 'alivio', line: (n) => `Feito “${n}”, isso sai da sua cabeça. Vale o alívio.` },
   // 10 — apelo direto e afetuoso
-  { technique: 'humor', line: (n) => `Vou insistir com carinho 🙏 — “${n}” continua te chamando. Me responde?` },
+  { technique: 'humor', line: (n) => `Sou uma coruja teimosa: “${n}” fica na minha lista até você me responder.` },
 ];
 
 /** Compatibilidade: as frases sem o rótulo. */
@@ -68,10 +68,9 @@ export interface EscalationOpts {
 /**
  * ESCALADA da cobrança (muda o texto a cada repetição):
  *  aviso inicial (k=0, fora daqui) — direto: "Hora de tomar vitaminas";
- *  k=1 — pergunta pessoal: "Helena, você já tomou as vitaminas? Marque aqui,
- *        por favor: já fez ou precisa de mais tempo.";
- *  k=2 — pede explicação: "Para evitar repetições desnecessárias, me diga o
- *        que aconteceu com este lembrete. Você já tomou as vitaminas?";
+ *  k=1 — pergunta pessoal: "Helena, você já tomou as vitaminas? Me diz: já fez ou
+ *        precisa de mais tempo.";
+ *  k=2 — procura o que travou: "Travou em alguma coisa? Você já tomou as vitaminas?";
  *  k≥3 — argumentos persuasivos variados (persuasiveBody).
  */
 export function escalationBody(opts: EscalationOpts): string {
@@ -80,10 +79,10 @@ export function escalationBody(opts: EscalationOpts): string {
   const qCap = q.charAt(0).toUpperCase() + q.slice(1);
   if (k <= 1) {
     const prefix = userName?.trim() ? `${userName.trim()}, ` : '';
-    return `${prefix}${prefix ? q : qCap} Marque aqui, por favor: já fez ou precisa de mais tempo.`;
+    return `${prefix}${prefix ? q : qCap} Me diz: já fez ou precisa de mais tempo.`;
   }
   if (k === 2) {
-    return `Para evitar repetições desnecessárias, gostaria que me dissesse o que aconteceu com este lembrete. ${qCap}`;
+    return `Travou em alguma coisa? ${qCap} Se o dia apertou, me diga, que eu ajusto.`;
   }
   return '';
 }

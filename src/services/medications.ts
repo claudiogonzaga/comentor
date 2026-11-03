@@ -108,12 +108,6 @@ function escalatedBody(
  * corrente de insistências DATE para o dia atual).
  */
 
-/** Quantas vezes a coruja re-insiste no mesmo dia, além do lembrete inicial.
- * Alto de propósito: um bom coach insiste até a tarefa ser resolvida. A corrente
- * é cancelada assim que o usuário marca Já fiz / Não vou fazer / Me dê mais tempo,
- * e é re-armada ao abrir o app — então insiste "até resolver" (respeitando os
- * períodos sem som). */
-const MED_MAX_REPEATS = 20;
 /** Espaçamento mínimo (min) entre as insistências. */
 const MIN_MED_INTERVAL_MIN = 5;
 
@@ -162,8 +156,8 @@ export async function cancelAllMedications(): Promise<void> {
 /**
  * Cancela os lembretes de medicamento e re-agenda tudo. Para cada lembrete
  * habilitado registra uma âncora DIÁRIA no horário; para os ainda NÃO tomados
- * hoje, agenda também uma corrente de insistências de hoje (a cada
- * `intervalMinutes`, até `MED_MAX_REPEATS` vezes), com os botões
+ * hoje, agenda também uma corrente de insistências de hoje, com o espaço dobrando a
+ * cada uma e o teto de "Quantas vezes ela cobra", com os botões
  * "Já tomei 💊" / "Lembrar depois". Idempotente — seguro chamar a cada save /
  * ao abrir o app (re-arma a corrente do dia).
  */
@@ -281,15 +275,14 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
 
   const meds = await listMedications();
   const ids: string[] = [];
-  // As cobranças FALADAS. A notificação insiste até 20 vezes; a voz, no ouvido,
-  // para no teto de "Quantas vezes ela cobra".
-  const spokenChain: SpokenTaskAlarm[] = [];
-  let maxSpokenRepeats = 5;
+  // "Quantas vezes ela cobra" vale aqui como nos hábitos, para o aviso e para a voz.
+  let maxRepeats = 5;
   try {
-    maxSpokenRepeats = Math.max(0, Math.min(10, (await getUserConfig()).nudgeMaxInsistences ?? 5));
+    maxRepeats = Math.max(0, Math.min(10, (await getUserConfig()).nudgeMaxInsistences ?? 5));
   } catch {
     /* keep default */
   }
+  const spokenChain: SpokenTaskAlarm[] = [];
 
   for (const med of meds) {
     if (!med.enabled) continue;
@@ -511,8 +504,13 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
         }
         if (snoozeUntil > anchor) anchor = snoozeUntil;
       }
-      for (let k = 1; k <= MED_MAX_REPEATS; k++) {
-        const fireAt = new Date(anchor + k * intervalMin * 60_000);
+      let gap = intervalMin;
+      let elapsed = 0;
+      for (let k = 1; k <= maxRepeats; k++) {
+        // O espaço dobra: cobra de perto logo depois do horário e vai afrouxando.
+        elapsed += gap;
+        gap *= 2;
+        const fireAt = new Date(anchor + elapsed * 60_000);
         if (fireAt.getTime() <= Date.now()) continue;
         try {
           const id = await gatedSchedule({
@@ -534,14 +532,12 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
           });
           if (id) {
             ids.push(id);
-            if (k <= maxSpokenRepeats) {
-              spokenChain.push({
-                id: chainAlarmId(String(med.id), `f${k}`, today, fireAt.getTime()),
-                text: spokenTaskText(med.name, escalatedBody(med, userName, actionLine, k)),
-                atEpochMs: fireAt.getTime(),
-                repeatDaily: false,
-              });
-            }
+            spokenChain.push({
+              id: chainAlarmId(String(med.id), `f${k}`, today, fireAt.getTime()),
+              text: spokenTaskText(med.name, escalatedBody(med, userName, actionLine, k)),
+              atEpochMs: fireAt.getTime(),
+              repeatDaily: false,
+            });
           }
         } catch (err) {
           console.warn(`failed to schedule medication follow-up ${med.id}:`, err);
