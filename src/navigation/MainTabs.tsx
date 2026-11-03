@@ -56,7 +56,9 @@ export function MainTabs() {
         tabBarLabelPosition: 'beside-icon',
         tabBarActiveTintColor: colors.accent.gold,
         tabBarInactiveTintColor: colors.text.tertiary,
-        tabBarLabelStyle: { ...typography.small, fontSize: 13 },
+        // Com quatro abas, os 12 pontos que a barra deixa depois do texto cortavam o
+        // "Comentora" (cerca de 108 pontos por aba no Motorola).
+        tabBarLabelStyle: { ...typography.small, fontSize: 13, marginEnd: 0 },
         tabBarStyle: {
           backgroundColor: colors.bg.primary,
           borderBottomColor: colors.border,
