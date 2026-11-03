@@ -8,14 +8,17 @@
 
 import { create } from 'zustand';
 
+import { chromeUserAgent } from '../../../modules/x-login-view';
 import * as db from './db';
 
 export const X_LOGIN_URL = 'https://x.com/i/flow/login';
 export const X_LOGOUT_URL = 'https://x.com/logout';
 export const X_HOME_URL = 'https://x.com/home';
-// O X recusa o WebView "puro": a página se apresenta como o Chrome do celular.
+// O X recusa o WebView "puro": a página se apresenta como o Chrome do celular, o mesmo
+// da tela de login nativa (a leitura usa a sessão que ela abriu).
 export const X_USER_AGENT =
-  'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+  chromeUserAgent() ??
+  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 
 const META_CONNECTED = 'x_connected';
 const HARVEST_TIMEOUT_MS = 45_000;
