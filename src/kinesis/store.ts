@@ -89,7 +89,7 @@ export const REGION_LETTER: Record<Region, string> = { lower: 'L', core: 'C', up
 export const WD_LETTER = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 export const WD_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
-const SEED_EXERCISES: { name: string; region: Region }[] = [
+export const SEED_EXERCISES: { name: string; region: Region }[] = [
   { name: 'Flexões', region: 'upper' },
   { name: 'Agachamento', region: 'lower' },
   { name: 'Prancha', region: 'full' },
@@ -201,17 +201,6 @@ function syncNative(timer: TimerState | null): void {
   }
 }
 
-export interface ImportedData {
-  config?: Partial<KinesisConfig>;
-  presets?: Preset[];
-  exercises?: Exercise[];
-  circuits?: Circuit[];
-  history?: HistoryEntry[];
-  snooze?: SnoozeBudget;
-  volume?: number;
-  minutesOnly?: boolean;
-}
-
 interface KinesisStore {
   loaded: boolean;
   config: KinesisConfig;
@@ -255,8 +244,8 @@ interface KinesisStore {
   loadPreset(preset: Preset): void;
   deletePreset(id: string): void;
 
-  exportData(): ImportedData;
-  importData(data: ImportedData): void;
+  /** Um valor que chegou do Mac pela sincronização (chave do arquivo). */
+  applySynced(key: string, value: unknown): void;
 }
 
 export const useKinesis = create<KinesisStore>((set, get) => {
@@ -512,35 +501,38 @@ export const useKinesis = create<KinesisStore>((set, get) => {
       save(KEYS.presets, presets);
     },
 
-    exportData: () => {
-      const { config, presets, exercises, circuits, history, budget, volume, minutesOnly } = get();
-      return { config, presets, exercises, circuits, history, snooze: budget, volume, minutesOnly };
-    },
-    importData: (data) => {
-      const s = get();
-      const next = {
-        config: { ...s.config, ...data.config },
-        presets: Array.isArray(data.presets) ? data.presets : s.presets,
-        exercises: Array.isArray(data.exercises) ? data.exercises : s.exercises,
-        circuits: Array.isArray(data.circuits) ? data.circuits : s.circuits,
-        history: Array.isArray(data.history) ? data.history : s.history,
-        budget: data.snooze ?? s.budget,
-        volume: typeof data.volume === 'number' ? data.volume : s.volume,
-        minutesOnly: typeof data.minutesOnly === 'boolean' ? data.minutesOnly : s.minutesOnly,
-      };
-      set(next);
-      save(KEYS.config, next.config);
-      save(KEYS.presets, next.presets);
-      save(KEYS.exercises, next.exercises);
-      save(KEYS.circuits, next.circuits);
-      save(KEYS.history, next.history);
-      save(KEYS.snooze, next.budget);
-      save(KEYS.volume, next.volume);
-      save(KEYS.minutesOnly, next.minutesOnly);
-      try {
-        KinesisTimer?.setVolume(next.volume);
-      } catch {
-        /* sem módulo nativo */
+    applySynced: (key, value) => {
+      switch (key) {
+        case 'kinesis.config': {
+          const config = { ...DEFAULT_CONFIG, ...(value as Partial<KinesisConfig>) };
+          set({ config });
+          save(KEYS.config, config);
+          break;
+        }
+        case 'kinesis.presets':
+          set({ presets: value as Preset[] });
+          save(KEYS.presets, value);
+          break;
+        case 'kinesis.exercises':
+          set({ exercises: value as Exercise[] });
+          save(KEYS.exercises, value);
+          break;
+        case 'kinesis.circuits':
+          set({ circuits: value as Circuit[] });
+          save(KEYS.circuits, value);
+          break;
+        case 'kinesis.history':
+          set({ history: value as HistoryEntry[] });
+          save(KEYS.history, value);
+          break;
+        case 'kinesis.snooze':
+          set({ budget: value as SnoozeBudget });
+          save(KEYS.snooze, value);
+          break;
+        case 'kinesis.minutesOnly':
+          set({ minutesOnly: value === true });
+          save(KEYS.minutesOnly, value === true);
+          break;
       }
     },
   };

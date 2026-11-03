@@ -24,6 +24,7 @@ import {
   gatedSchedule,
 } from './notifications';
 import { getDailyInsistenceLines } from './insistenceLines';
+import { notifyLocalChange } from './syncBus';
 import {
   armSpokenTask,
   cancelSpokenChain,
@@ -826,6 +827,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
   // Arma sem esperar a rede (a voz do Gemini vem depois). Com await, para quem
   // espera esta passada (settleNudgeScheduling) cancelar a voz já com tudo armado.
   await syncSpokenTasks('nudge', spoken).catch(() => {});
+  notifyLocalChange();
 
   return ids;
 }
@@ -852,6 +854,7 @@ async function closeNudgeChain(nudgeType: string, day: string, scheduledHHMM: st
   }
   // A voz das cobranças respondidas cala junto com as notificações.
   await cancelSpokenChain('nudge', nudgeType, { day }).catch(() => {});
+  notifyLocalChange();
 
   // Dispensa as notificações deste nudge que já estão na bandeja.
   try {

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Image,
   Modal,
   Pressable,
@@ -13,9 +12,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CircuitsSection } from './CircuitsSection';
@@ -31,7 +27,6 @@ import {
   useKinesis,
   WD_LETTER,
   WD_SHORT,
-  type ImportedData,
   type Preset,
 } from './store';
 import {
@@ -213,9 +208,6 @@ function ConfigView() {
 
       <SectionTitle>SEUS PRESETS</SectionTitle>
       <Presets />
-
-      <SectionTitle>DADOS</SectionTitle>
-      <DataSection />
 
       <PresetDialog visible={savingPreset} onClose={() => setSavingPreset(false)} />
     </ScrollView>
@@ -452,57 +444,6 @@ function PresetDialog({ visible, onClose }: { visible: boolean; onClose: () => v
         </View>
       </View>
     </Modal>
-  );
-}
-
-function DataSection() {
-  const actions = useKinesis.getState();
-
-  const importFile = async () => {
-    const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/json', 'text/plain', '*/*'],
-      copyToCacheDirectory: true,
-    });
-    const asset = res.canceled ? null : res.assets?.[0];
-    if (!asset) return;
-    let data: ImportedData;
-    try {
-      data = JSON.parse(await FileSystem.readAsStringAsync(asset.uri)) as ImportedData;
-      if (!data || typeof data !== 'object' || !Array.isArray(data.exercises)) throw new Error('formato');
-    } catch {
-      Alert.alert('Arquivo inválido', 'Este arquivo não veio do Kinesis.');
-      return;
-    }
-    const n = data.exercises.length;
-    const c = Array.isArray(data.circuits) ? data.circuits.length : 0;
-    const h = Array.isArray(data.history) ? data.history.length : 0;
-    Alert.alert(
-      'Importar dados do Kinesis',
-      `${n} exercícios, ${c} circuitos e ${h} registros de histórico vão SUBSTITUIR os que estão aqui.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Importar', onPress: () => actions.importData(data) },
-      ],
-    );
-  };
-
-  const exportFile = async () => {
-    const uri = `${FileSystem.cacheDirectory}kinesis-dados.json`;
-    await FileSystem.writeAsStringAsync(uri, JSON.stringify(actions.exportData()));
-    await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Dados do Kinesis' });
-  };
-
-  return (
-    <View>
-      <Text style={[textStyles.hint, { marginBottom: 8 }]}>
-        Exercícios, circuitos e histórico do Kinesis do Mac entram por um arquivo. Os dois não sincronizam
-        sozinhos.
-      </Text>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <SmallButton label="IMPORTAR" onPress={() => void importFile().catch(() => {})} />
-        <SmallButton label="EXPORTAR" onPress={() => void exportFile().catch(() => {})} />
-      </View>
-    </View>
   );
 }
 

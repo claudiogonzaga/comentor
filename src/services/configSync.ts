@@ -1,0 +1,629 @@
+// As configurações do Áskesis entre o telefone e o Mac.
+//
+// Um único arquivo JSON na pasta Askesis do Google Drive. O telefone o lê e grava
+// pela API (escopo drive.file) e é sempre ele quem o CRIA: com esse escopo, só
+// enxerga o que ele mesmo criou. O Mac o regrava no espelho local do Google Drive
+// para Desktop, sem trocar o arquivo, o que mantém o id.
+//
+// Cada chave vale por si: { t: epoch ms, by: aparelho, v: valor }, e ganha a
+// alteração mais recente. O que mudou aqui é detectado comparando com o hash do
+// que foi visto na última passada, sem gancho em cada tela. As regras são as mesmas
+// de sync.py, no projeto do Mac. As chaves de API NÃO passam por aqui.
+//
+// Limite conhecido: com o app fechado o JS não roda. Uma tarefa marcada no Mac só
+// cala as cobranças do telefone quando o Áskesis volta a abrir aqui.
+
+import { AppState } from 'react-native';
+
+import { getAccessToken, NotSignedInError } from '../aspis/services/auth';
+import {
+  createJsonFile,
+  ensureFolder,
+  findFile,
+  readJsonFile,
+  updateJsonFile,
+} from '../aspis/services/drive';
+import { DEFAULT_PILLARS, DEFAULT_RULES, DEFAULT_MIN_STARS, DEFAULT_PERIOD } from '../aspis/constants/defaults';
+import { useAppStore as useAspisStore } from '../aspis/store/useAppStore';
+import { DEFAULT_CONFIG } from '../kinesis/timer';
+import { SEED_EXERCISES, useKinesis } from '../kinesis/store';
+import { useAppStore } from '../store/useAppStore';
+import type { Medication, UserConfig } from '../types';
+import { rescheduleAllNotifications } from './coach';
+import {
+  createMedication,
+  deleteMedication,
+  getAllHabitStates,
+  getDoneNudgeTypes,
+  getKV,
+  getUserConfig,
+  listMedications,
+  listNudges,
+  setKV,
+  updateMedication,
+  updateNudge,
+  updateUserConfig,
+} from './database';
+import { confirmMedication, resetMedicationToday, skipMedicationToday } from './medications';
+import { confirmNudge, resetNudgeToday, skipNudgeToday } from './nudges';
+import { getEffectiveQuietPeriods } from './quietHours';
+import { onLocalChange } from './syncBus';
+
+const FOLDER_NAME = 'Askesis';
+const FILE_NAME = 'askesis-sync.json';
+const STATE_KEY = 'config_sync_state_v1';
+const DEVICE = 'phone';
+const DONE_PREFIX = 'done:';
+const CONFIG_PREFIX = 'comentora.config.';
+const DONE_KEEP_DAYS = 3;
+const POLL_MS = 60_000;
+const DEBOUNCE_MS = 4000;
+
+/** Volume, modo silencioso e afins são de cada aparelho: ficam de fora. */
+const CONFIG_FIELDS: (keyof UserConfig)[] = [
+  'name',
+  'bedtime',
+  'reminderIntervalMinutes',
+  'snoozeMinutes',
+  'maxReminders',
+  'tone',
+  'systemPrompt',
+  'geminiModel',
+  'aiProvider',
+  'claudeModel',
+  'claudeEffort',
+  'voiceProvider',
+  'geminiVoiceName',
+  'geminiTtsModel',
+  'owlSpecies',
+  'owlPauseSeconds',
+  'nudgeMaxInsistences',
+  'inspirationModeEnabled',
+  'inspirationPerDay',
+  'notificationsPerDay',
+  'sleepAwarenessEnabled',
+  'voiceModeEnabled',
+  'voiceNudgesEnabled',
+  'spokenNudgesEnabled',
+  'spokenHeadphonesOnly',
+];
+
+interface SyncItem {
+  t: number;
+  by: string;
+  v: unknown;
+}
+
+interface SyncDoc {
+  v: number;
+  updated?: number;
+  by?: string;
+  items: Record<string, SyncItem>;
+}
+
+interface SyncState {
+  fileId: string | null;
+  hash: Record<string, string>;
+  t: Record<string, number>;
+  firstDone: boolean;
+}
+
+export interface ConfigSyncStatus {
+  state: 'idle' | 'ok' | 'signed-out' | 'error';
+  last: number;
+  message: string;
+}
+
+let status: ConfigSyncStatus = { state: 'idle', last: 0, message: '' };
+
+export function getConfigSyncStatus(): ConfigSyncStatus {
+  return status;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
+}
+
+function hashOf(value: unknown): string {
+  const text = stableStringify(value);
+  let a = 2166136261;
+  let b = 5381;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = Math.imul(b, 33) + c;
+  }
+  return `${(a >>> 0).toString(36)}${(b >>> 0).toString(36)}:${text.length}`;
+}
+
+function same(a: unknown, b: unknown): boolean {
+  return stableStringify(a) === stableStringify(b);
+}
+
+function dayKeyOf(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function recentDays(): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < DONE_KEEP_DAYS; i += 1) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    out.push(dayKeyOf(d));
+  }
+  return out;
+}
+
+/** As marcas de um dia em nudge_completions, no formato do arquivo: tarefa → estado. */
+function marksOf(keys: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of keys) {
+    if (raw.endsWith(':missed')) {
+      const base = raw.slice(0, -':missed'.length);
+      if (!out[base]) out[base] = 'missed';
+    } else if (raw.endsWith(':skip')) {
+      const base = raw.slice(0, -':skip'.length);
+      if (out[base] !== 'done') out[base] = 'skip';
+    } else {
+      out[raw] = 'done';
+    }
+  }
+  return out;
+}
+
+/** Valor ainda de fábrica não vale como escolha: não pode passar por cima do que o Mac tem. */
+function isKinesisDefault(key: string, value: unknown): boolean {
+  switch (key) {
+    case 'kinesis.config':
+      return same(value, DEFAULT_CONFIG);
+    case 'kinesis.exercises': {
+      const list = value as { name: string; region: string }[];
+      return same(
+        list.map((e) => [e.name, e.region]),
+        SEED_EXERCISES.map((e) => [e.name, e.region]),
+      );
+    }
+    case 'kinesis.presets':
+    case 'kinesis.circuits':
+    case 'kinesis.history':
+      return (value as unknown[]).length === 0;
+    case 'kinesis.snooze': {
+      const b = value as { used: number; clean: number };
+      return b.used === 0 && b.clean === 0;
+    }
+    case 'kinesis.minutesOnly':
+      return value === true;
+    default:
+      return false;
+  }
+}
+
+function isAspisDefault(key: string, value: unknown): boolean {
+  switch (key) {
+    case 'aspis.pillars':
+      return same(value, DEFAULT_PILLARS);
+    case 'aspis.rules':
+      return value === DEFAULT_RULES;
+    case 'aspis.minStars':
+      return value === DEFAULT_MIN_STARS;
+    case 'aspis.period':
+      return value === DEFAULT_PERIOD;
+    default:
+      return false;
+  }
+}
+
+/** O que este telefone tem agora, por chave do arquivo. */
+async function collect(state: SyncState): Promise<Record<string, unknown>> {
+  const local: Record<string, unknown> = {};
+
+  const k = useKinesis.getState();
+  if (k.loaded) {
+    const kin: Record<string, unknown> = {
+      'kinesis.config': k.config,
+      'kinesis.presets': k.presets,
+      'kinesis.exercises': k.exercises,
+      'kinesis.circuits': k.circuits,
+      'kinesis.history': k.history,
+      'kinesis.snooze': k.budget,
+      'kinesis.minutesOnly': k.minutesOnly,
+    };
+    for (const [key, value] of Object.entries(kin)) {
+      if (state.hash[key] !== undefined || !isKinesisDefault(key, value)) local[key] = value;
+    }
+  }
+
+  const a = useAspisStore.getState();
+  if (a.ready) {
+    const aspis: Record<string, unknown> = {
+      'aspis.pillars': a.pillars,
+      'aspis.rules': a.rules,
+      'aspis.minStars': a.minStars,
+      'aspis.period': a.period,
+    };
+    for (const [key, value] of Object.entries(aspis)) {
+      if (state.hash[key] !== undefined || !isAspisDefault(key, value)) local[key] = value;
+    }
+  }
+
+  const config = await getUserConfig();
+  // Campo a campo: mudar o tom lá não desfaz uma mudança de horário aqui.
+  for (const field of CONFIG_FIELDS) {
+    const value = config[field];
+    if (value !== undefined) local[`${CONFIG_PREFIX}${field}`] = value;
+  }
+
+  const hidden = new Set(
+    (await getAllHabitStates().catch(() => []))
+      .filter((s) => s.state !== 'forming')
+      .map((s) => s.nudgeType),
+  );
+  local['comentora.nudges'] = (await listNudges()).map((n) => ({
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    emoji: n.emoji,
+    enabled: n.enabled,
+    scheduleTime: n.scheduleTime,
+    orderIndex: n.orderIndex,
+    // Hábito já formado sai da lista do dia e não é cobrado.
+    ...(hidden.has(n.type) ? { hidden: true } : {}),
+  }));
+  local['comentora.meds'] = (await listMedications()).map((m) => ({
+    id: m.id,
+    name: m.name,
+    dosage: m.dosage,
+    time: m.time,
+    emoji: m.emoji,
+    enabled: m.enabled,
+    daysOfWeek: m.daysOfWeek,
+    fastingHours: m.fastingHours ?? null,
+  }));
+  // Inclui o sono derivado do horário de dormir. No Mac é só leitura.
+  local['comentora.quiet'] = await getEffectiveQuietPeriods().catch(() => []);
+
+  // Uma chave por tarefa. Marca desfeita vira null, senão a do Mac voltaria.
+  for (const day of recentDays()) {
+    const marks = marksOf(await getDoneNudgeTypes(day).catch(() => []));
+    for (const [task, value] of Object.entries(marks)) {
+      local[`${DONE_PREFIX}${day}:${task}`] = value;
+    }
+  }
+  for (const key of Object.keys(state.hash)) {
+    if (key.startsWith(DONE_PREFIX) && !(key in local)) local[key] = null;
+  }
+  return local;
+}
+
+async function applyMeds(remote: (Partial<Medication> & { id?: number | null })[]): Promise<void> {
+  const current = await listMedications();
+  const byId = new Map(current.map((m) => [m.id, m]));
+  const keep = new Set<number>();
+  for (const r of remote) {
+    const fields = {
+      name: r.name ?? '',
+      dosage: r.dosage ?? null,
+      time: r.time ?? '08:00',
+      emoji: r.emoji ?? null,
+      enabled: r.enabled !== false,
+      daysOfWeek: r.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6],
+      fastingHours: r.fastingHours ?? null,
+    };
+    if (typeof r.id === 'number' && byId.has(r.id)) {
+      keep.add(r.id);
+      await updateMedication(r.id, fields);
+    } else {
+      // Criado no Mac: quem numera é o telefone.
+      const created = await createMedication(fields);
+      keep.add(created.id);
+    }
+  }
+  for (const m of current) {
+    if (!keep.has(m.id)) await deleteMedication(m.id);
+  }
+}
+
+async function applyDone(key: string, value: unknown): Promise<void> {
+  const rest = key.slice(DONE_PREFIX.length);
+  const cut = rest.indexOf(':');
+  const day = rest.slice(0, cut);
+  const task = rest.slice(cut + 1);
+  const today = dayKeyOf(new Date());
+  const meta = { via: 'mac' as const, day };
+  if (task.startsWith('med:')) {
+    const id = Number(task.slice(4));
+    if (!Number.isFinite(id)) return;
+    if (value === 'done') await confirmMedication(id, meta);
+    else if (value === 'skip') await skipMedicationToday(id, meta);
+    else if (value === null && day === today) await resetMedicationToday(id);
+  } else if (value === 'done') {
+    await confirmNudge(task, meta);
+  } else if (value === 'skip') {
+    await skipNudgeToday(task, meta);
+  } else if (value === null && day === today) {
+    await resetNudgeToday(task);
+  }
+}
+
+interface Effects {
+  reschedule: boolean;
+  refreshConfig: boolean;
+}
+
+async function applyItem(key: string, value: unknown, fx: Effects): Promise<void> {
+  if (key.startsWith(DONE_PREFIX)) {
+    await applyDone(key, value);
+  } else if (key.startsWith(CONFIG_PREFIX)) {
+    await updateUserConfig({ [key.slice(CONFIG_PREFIX.length)]: value } as Partial<UserConfig>);
+    fx.refreshConfig = true;
+    fx.reschedule = true;
+  } else if (key === 'comentora.nudges') {
+    const current = await listNudges();
+    for (const r of value as { type: string; enabled: boolean; scheduleTime: string; title: string; body: string }[]) {
+      const n = current.find((x) => x.type === r.type);
+      if (!n) continue;
+      if (
+        n.enabled !== r.enabled ||
+        n.scheduleTime !== r.scheduleTime ||
+        n.title !== r.title ||
+        n.body !== r.body
+      ) {
+        await updateNudge(n.id, {
+          enabled: r.enabled,
+          scheduleTime: r.scheduleTime,
+          title: r.title,
+          body: r.body,
+        });
+        fx.reschedule = true;
+      }
+    }
+  } else if (key === 'comentora.meds') {
+    await applyMeds(value as Medication[]);
+    fx.reschedule = true;
+  } else if (key.startsWith('kinesis.')) {
+    useKinesis.getState().applySynced(key, value);
+  } else if (key === 'aspis.pillars') {
+    await useAspisStore.getState().setPillars(value as never);
+  } else if (key === 'aspis.rules') {
+    await useAspisStore.getState().setRules(String(value ?? ''));
+  } else if (key === 'aspis.minStars') {
+    await useAspisStore.getState().setMinStars(Number(value));
+  } else if (key === 'aspis.period') {
+    await useAspisStore.getState().setPeriod(value as never);
+  }
+  // comentora.quiet é publicado daqui; o Mac não o altera.
+}
+
+/** O histórico de exercícios só cresce: a união dos dois lados, sem repetir. */
+function mergeHistory(a: unknown, b: unknown): { ts: number }[] {
+  const seen = new Map<number, { ts: number }>();
+  for (const entry of [...((a as { ts: number }[]) ?? []), ...((b as { ts: number }[]) ?? [])]) {
+    seen.set(entry.ts, entry);
+  }
+  return Array.from(seen.values()).sort((x, y) => (x.ts || 0) - (y.ts || 0));
+}
+
+async function loadState(): Promise<SyncState> {
+  try {
+    const raw = await getKV(STATE_KEY);
+    if (raw) return { fileId: null, hash: {}, t: {}, firstDone: false, ...JSON.parse(raw) };
+  } catch {
+    /* recomeça */
+  }
+  return { fileId: null, hash: {}, t: {}, firstDone: false };
+}
+
+async function runOnce(): Promise<void> {
+  const token = await getAccessToken();
+  const state = await loadState();
+  const now = Date.now();
+
+  let doc: SyncDoc | null = null;
+  if (state.fileId) doc = await readJsonFile<SyncDoc>(token, state.fileId);
+  let folderId: string | null = null;
+  if (!doc) {
+    folderId = await ensureFolder(token, FOLDER_NAME);
+    const found = await findFile(token, folderId, FILE_NAME);
+    if (found) {
+      state.fileId = found;
+      doc = await readJsonFile<SyncDoc>(token, found);
+    } else {
+      state.fileId = null;
+    }
+  }
+
+  const items: Record<string, SyncItem> = { ...(doc?.items ?? {}) };
+  const first = !state.firstDone;
+  const local = await collect(state);
+  const fx: Effects = { reschedule: false, refreshConfig: false };
+  const applied: string[] = [];
+  const oldestDay = recentDays()[DONE_KEEP_DAYS - 1];
+  let dirty = !doc;
+
+  for (const key of Array.from(new Set([...Object.keys(local), ...Object.keys(items)])).sort()) {
+    if (key.startsWith(DONE_PREFIX) && key.slice(DONE_PREFIX.length, DONE_PREFIX.length + 10) < oldestDay) {
+      if (items[key]) {
+        delete items[key];
+        dirty = true;
+      }
+      delete state.hash[key];
+      delete state.t[key];
+      continue;
+    }
+    const remote = items[key];
+    const haveLocal = key in local;
+    const lh = haveLocal ? hashOf(local[key]) : null;
+    const changed = haveLocal && lh !== state.hash[key];
+
+    if (key === 'kinesis.history') {
+      const merged = mergeHistory(local[key], remote?.v);
+      if (!haveLocal || hashOf(merged) !== lh) await applyItem(key, merged, fx);
+      if (!remote || hashOf(remote.v) !== hashOf(merged)) {
+        items[key] = { t: now, by: DEVICE, v: merged };
+        dirty = true;
+      }
+      state.hash[key] = hashOf(merged);
+      state.t[key] = now;
+      continue;
+    }
+
+    // O instante da versão daqui: agora, se acabou de mudar. No primeiro contato
+    // do aparelho (reinstalação), o que está no arquivo manda.
+    const rt = remote?.t ?? 0;
+    let lt = changed ? now : (state.t[key] ?? 0);
+    if (first && remote) lt = 0;
+
+    if (!remote) {
+      if (haveLocal) {
+        items[key] = { t: lt || now, by: DEVICE, v: local[key] };
+        dirty = true;
+        state.t[key] = lt || now;
+        state.hash[key] = lh as string;
+      }
+    } else if (!haveLocal || rt > lt) {
+      if (!haveLocal || hashOf(remote.v) !== lh) {
+        await applyItem(key, remote.v, fx);
+        applied.push(key);
+      }
+      state.t[key] = rt;
+    } else {
+      // A daqui é a mais nova. Também cura o caso de a gravação do outro lado ter
+      // passado por cima desta: ela volta para o arquivo.
+      if (lt > rt && hashOf(remote.v) !== lh) {
+        items[key] = { t: lt, by: DEVICE, v: local[key] };
+        dirty = true;
+      }
+      state.t[key] = lt;
+      state.hash[key] = lh as string;
+    }
+  }
+
+  if (fx.refreshConfig) await useAppStore.getState().refreshConfig();
+  if (fx.reschedule) await rescheduleAllNotifications().catch(() => {});
+
+  // O que acabou de ser aplicado é o novo "visto": a forma daqui, já normalizada.
+  if (applied.length) {
+    const fresh = await collect(state);
+    for (const key of applied) {
+      if (!(key in fresh)) {
+        delete state.hash[key];
+        continue;
+      }
+      state.hash[key] = hashOf(fresh[key]);
+      // Lembrete criado no Mac ganhou id aqui: o Mac precisa saber qual é.
+      if (key === 'comentora.meds' && !same(fresh[key], items[key]?.v)) {
+        items[key] = { t: Date.now(), by: DEVICE, v: fresh[key] };
+        state.t[key] = items[key].t;
+        dirty = true;
+      }
+    }
+  }
+
+  if (dirty) {
+    const body = JSON.stringify({ v: 1, updated: Date.now(), by: DEVICE, items });
+    if (state.fileId) {
+      await updateJsonFile(token, state.fileId, body);
+    } else {
+      state.fileId = await createJsonFile(
+        token,
+        folderId ?? (await ensureFolder(token, FOLDER_NAME)),
+        FILE_NAME,
+        body,
+      );
+    }
+  }
+  state.firstDone = true;
+  await setKV(STATE_KEY, JSON.stringify(state));
+  status = { state: 'ok', last: Date.now(), message: '' };
+}
+
+let running: Promise<void> | null = null;
+let again = false;
+
+/** Uma passada. Nunca lança. Quem chega no meio garante mais uma, logo depois. */
+export function syncConfigNow(): Promise<void> {
+  if (running) {
+    again = true;
+    return running;
+  }
+  running = (async () => {
+    try {
+      await runOnce();
+    } catch (err) {
+      if (err instanceof NotSignedInError) {
+        status = { ...status, state: 'signed-out', message: '' };
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn('[configSync]', message);
+        status = { ...status, state: 'error', message };
+      }
+    }
+  })().finally(() => {
+    running = null;
+    if (again) {
+      again = false;
+      void syncConfigNow();
+    }
+  });
+  return running;
+}
+
+let started = false;
+
+/** Sincroniza ao abrir, ao voltar para o app, a cada minuto e depois de cada mudança. */
+export function startConfigSync(): void {
+  if (started) return;
+  started = true;
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const soon = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      if (AppState.currentState === 'active') void syncConfigNow();
+    }, DEBOUNCE_MS);
+  };
+
+  onLocalChange(soon);
+  useAppStore.subscribe((now, before) => {
+    if (now.config !== before.config) soon();
+  });
+  useKinesis.subscribe((now, before) => {
+    if (
+      now.loaded !== before.loaded ||
+      now.config !== before.config ||
+      now.presets !== before.presets ||
+      now.exercises !== before.exercises ||
+      now.circuits !== before.circuits ||
+      now.history !== before.history ||
+      now.budget !== before.budget ||
+      now.minutesOnly !== before.minutesOnly
+    ) {
+      soon();
+    }
+  });
+  useAspisStore.subscribe((now, before) => {
+    if (
+      now.ready !== before.ready ||
+      now.user !== before.user ||
+      now.pillars !== before.pillars ||
+      now.rules !== before.rules ||
+      now.minStars !== before.minStars ||
+      now.period !== before.period
+    ) {
+      soon();
+    }
+  });
+  AppState.addEventListener('change', (s) => {
+    if (s === 'active') void syncConfigNow();
+  });
+  setInterval(() => {
+    if (AppState.currentState === 'active') void syncConfigNow();
+  }, POLL_MS);
+  soon();
+}

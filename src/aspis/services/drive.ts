@@ -80,6 +80,64 @@ async function findFileByName(token: string, folderId: string, name: string): Pr
   return found?.files?.[0]?.id ?? null;
 }
 
+// ---- Sincronização de configurações (ver services/configSync.ts) ----
+
+/** Acha ou cria uma pasta na raiz do Drive. */
+export async function ensureFolder(token: string, name: string): Promise<string> {
+  const q = `name = '${escapeQuery(name)}' and mimeType = '${FOLDER_MIME}' and 'root' in parents and trashed = false`;
+  const found = await driveFetch(
+    `${FILES}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1`,
+    token,
+  );
+  const id: string | undefined = found?.files?.[0]?.id;
+  if (id) return id;
+  const created = await driveFetch(`${FILES}?fields=id`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: ['root'] }),
+  });
+  return created.id as string;
+}
+
+export function findFile(token: string, folderId: string, name: string): Promise<string | null> {
+  return findFileByName(token, folderId, name);
+}
+
+/** O conteúdo JSON de um arquivo; null se ele sumiu (apagado, na lixeira). */
+export async function readJsonFile<T>(token: string, id: string): Promise<T | null> {
+  try {
+    const meta = await driveFetch(`${FILES}/${id}?fields=id,trashed`, token);
+    if (meta?.trashed) return null;
+    return (await driveFetch(`${FILES}/${id}?alt=media`, token)) as T;
+  } catch (err) {
+    if (err instanceof DriveError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export async function createJsonFile(
+  token: string,
+  folderId: string,
+  name: string,
+  content: string,
+): Promise<string> {
+  const created = await driveFetch(`${FILES}?fields=id`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parents: [folderId], mimeType: 'application/json' }),
+  });
+  await updateJsonFile(token, created.id as string, content);
+  return created.id as string;
+}
+
+export async function updateJsonFile(token: string, id: string, content: string): Promise<void> {
+  await driveFetch(`${UPLOAD}/${id}?uploadType=media`, token, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+    body: content,
+  });
+}
+
 // Cria ou ATUALIZA (idempotente) um arquivo Markdown na pasta Aspis.
 export async function saveMarkdown(
   token: string,

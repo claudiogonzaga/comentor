@@ -18,7 +18,7 @@ import { addHabitEvent, type HabitEventStatus } from './database';
  * gravado no relógio, respiração/Ioga Nidra feita no app). São coisas opostas e
  * a exportação as separa.
  */
-export type ConfirmVia = 'notification' | 'home' | 'voice' | 'review' | 'auto' | 'sensor';
+export type ConfirmVia = 'notification' | 'home' | 'voice' | 'review' | 'auto' | 'sensor' | 'mac';
 
 export interface ConfirmMeta {
   via?: ConfirmVia;

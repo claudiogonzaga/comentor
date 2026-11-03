@@ -27,6 +27,7 @@ import {
 } from './spokenNudges';
 import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
 import { refreshReviewNotification } from './review';
+import { notifyLocalChange } from './syncBus';
 import { persuasiveBody, escalationBody } from './persuasion';
 import type { Medication } from '../types';
 
@@ -588,6 +589,7 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
   void syncSpokenMedications(spokenItems).catch(() => {});
   // Com await, para quem espera esta passada cancelar a voz já com tudo armado.
   await syncSpokenTasks('medf', spokenChain).catch(() => {});
+  notifyLocalChange();
 
   return ids;
 }
@@ -616,6 +618,7 @@ async function clearMedNotifications(medId: number, day?: string): Promise<void>
   }
   // A voz das cobranças respondidas cala junto com as notificações.
   await cancelSpokenChain('medf', String(medId), { day }).catch(() => {});
+  notifyLocalChange();
   try {
     const presented = await Notifications.getPresentedNotificationsAsync();
     for (const p of presented) {

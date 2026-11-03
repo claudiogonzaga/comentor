@@ -17,6 +17,7 @@ import { useShareIntent } from 'expo-share-intent';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { startAspis } from './src/aspis/bootstrap';
 import { startKinesis } from './src/kinesis/store';
+import { startConfigSync } from './src/services/configSync';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
 import { useAppStore } from './src/store/useAppStore';
 import {
@@ -90,6 +91,11 @@ export default function App() {
   // O Kinesis também: o timer retoma de onde estava, sem segurar o boot.
   useEffect(() => {
     if (ready) void startKinesis();
+  }, [ready]);
+
+  // Configurações em dia com o Áskesis do Mac.
+  useEffect(() => {
+    if (ready) startConfigSync();
   }, [ready]);
 
   // Tocar na notificação do timer abre a aba do Kinesis.

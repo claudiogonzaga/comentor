@@ -37,6 +37,7 @@ import { cancelAllReminders } from '../services/notifications';
 import { scheduleAllNudges } from '../services/nudges';
 import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
+import { ConfigSyncRow } from '../components/ConfigSyncRow';
 import type { Tone } from '../types';
 
 const TONES: { value: Tone; label: string }[] = [
@@ -342,6 +343,11 @@ export function SettingsScreen() {
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.sm }]}>
             Atualizações vêm do GitHub Releases. O download é um APK que substitui o app atual.
           </Text>
+        </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Sincronização com o Mac</Text>
+          <ConfigSyncRow />
         </Card>
 
         <Card style={styles.card}>
