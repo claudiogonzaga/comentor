@@ -5,6 +5,23 @@
 export type Status = 'A fazer' | 'Feito';
 export type Prioridade = 'Alta' | 'Média' | 'Baixa';
 
+/** Conversa ou sessão de IA ligada à tarefa: o card abre exatamente ela. */
+export interface Conversa {
+  url: string;
+  ia: string;
+  titulo?: string;
+  em: string;
+  /** Tirada do card. Fica marcada, não apagada, para não voltar pela sincronização. */
+  oculta?: boolean;
+}
+
+/** Um avanço da execução, quase sempre registrado pela IA (pelo MCP do Mac). */
+export interface Andamento {
+  em: string;
+  por: string;
+  texto: string;
+}
+
 export interface Tarefa {
   id: string;
   area: string;
@@ -24,6 +41,8 @@ export interface Tarefa {
   criadoEm: string;
   concluidoEm: string;
   atualizadoEm: string;
+  conversas?: Conversa[];
+  andamento?: Andamento[];
 }
 
 export interface Badge {
@@ -145,6 +164,144 @@ export function areasDe(tarefas: Tarefa[]): string[] {
 export function fmtData(iso: string): string {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y.slice(2)}`;
+}
+
+// ---- IA na tarefa ------------------------------------------------------------
+// Muitas tarefas são executadas por uma IA agêntica. O card guarda os links das
+// conversas, para abrir exatamente a conversa, e o andamento que a IA registra.
+
+const IAS: [string, string][] = [
+  ['claude://code', 'Claude Code'],
+  ['claude://claude.ai/epitaxy', 'Claude Code'],
+  ['claude.ai/code', 'Claude Code'],
+  ['claude://', 'Claude'],
+  ['claude.ai', 'Claude'],
+  ['gemini.google.com', 'Gemini'],
+  ['g.co/gemini', 'Gemini'],
+  ['grok.com', 'Grok'],
+  ['x.com/i/grok', 'Grok'],
+  ['chatgpt.com', 'ChatGPT'],
+  ['chat.openai.com', 'ChatGPT'],
+];
+
+export const IA_COR: Record<string, string> = {
+  'Claude Code': '#D97757',
+  Claude: '#D97757',
+  Gemini: '#4285F4',
+  Grok: '#1D1D1F',
+  ChatGPT: '#10A37F',
+};
+
+/** De que IA é a conversa, pelo endereço (a mesma regra de kairos_store.ia_do_link). */
+export function iaDoLink(url: string): string {
+  const u = url.toLowerCase();
+  for (const [trecho, nome] of IAS) if (u.includes(trecho)) return nome;
+  const host = u.split('://').pop()?.split('/')[0] ?? '';
+  return host.replace(/^www\./, '') || 'IA';
+}
+
+export function linkDeConversa(texto: string): string | null {
+  const url = texto.trim().split(/\s+/)[0] ?? '';
+  return /^(https?|claude):\/\/\S+$/i.test(url) ? url : null;
+}
+
+/** O pedido que abre a conversa com a IA: a tarefa e como ela acompanha o card. */
+export function promptDelegacao(t: Tarefa): string {
+  const meta = [`Área: ${t.area}`, `Prioridade: ${t.prioridade}`];
+  if (t.prazo) {
+    const [y, m, d] = t.prazo.split('-');
+    meta.push(`Prazo: ${d}/${m}/${y}${t.hora ? ` ${t.hora}` : ''}`);
+  }
+  const linhas = [`Tarefa do Kairós (Áskesis), id ${t.id}:`, `"${t.titulo}"`, meta.join(' · ')];
+  if (t.notas) linhas.push(`Notas: ${t.notas}`);
+  linhas.push(
+    '',
+    'Quero que você me ajude a executar esta tarefa.',
+    `- Com o MCP "askesis": leia o card com ver_tarefa("${t.id}"), vincule esta conversa com ` +
+      'vincular_conversa (no Claude Code do app do Claude, o link da sessão vem de ' +
+      'get_session("self")), registre cada avanço com registrar_andamento e me pergunte antes de concluir.',
+    '- Sem o MCP, trabalhe com o que está aqui e me diga o que fazer a cada passo.',
+  );
+  return linhas.join('\n');
+}
+
+/** JSON com as chaves em ordem: o desempate igual nos dois aparelhos (json.dumps sort_keys). */
+export function ordemJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(ordemJson).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${ordemJson(obj[k])}`).join(',')}}`;
+}
+
+function porUrl(lista: Conversa[]): Conversa[] {
+  const out = new Map<string, Conversa>();
+  for (const c of lista) {
+    if (!c?.url) continue;
+    const cur = out.get(c.url);
+    const novo = [c.em || '', ordemJson(c)] as const;
+    if (!cur || novo[0] > (cur.em || '') || (novo[0] === (cur.em || '') && novo[1] > ordemJson(cur))) out.set(c.url, c);
+  }
+  // Por (em, url), como a tupla do Python.
+  return [...out.values()].sort((a, b) =>
+    (a.em || '') !== (b.em || '') ? ((a.em || '') < (b.em || '') ? -1 : 1) : a.url < b.url ? -1 : a.url > b.url ? 1 : 0,
+  );
+}
+
+/**
+ * Duas versões da mesma tarefa, mudadas cada uma de um lado desde a última que os dois
+ * viram (base). Cada campo fica com o lado que o mudou; se os dois mudaram o mesmo
+ * campo, com o mais recente. O andamento e as conversas se somam. É a mesma regra de
+ * kairos_store.mesclar, no Mac: os dois lados chegam ao mesmo resultado.
+ */
+export function mergeTarefa(
+  base: Tarefa | null | undefined,
+  local: Tarefa,
+  remote: Tarefa,
+  localMaisNovo: boolean,
+): Tarefa {
+  const L = local as unknown as Record<string, unknown>;
+  const R = remote as unknown as Record<string, unknown>;
+  const B = (base ?? null) as unknown as Record<string, unknown> | null;
+  const vencedora = localMaisNovo ? L : R;
+  const out: Record<string, unknown> = {};
+  for (const k of [...new Set([...Object.keys(L), ...Object.keys(R)])].sort()) {
+    if (k === 'andamento' || k === 'conversas') continue;
+    const temL = k in L;
+    const temR = k in R;
+    if (temL && temR && ordemJson(L[k]) === ordemJson(R[k])) {
+      out[k] = L[k];
+      continue;
+    }
+    if (B) {
+      const temB = k in B;
+      const localIgual = temL === temB && ordemJson(L[k]) === ordemJson(B[k]);
+      const remotoIgual = temR === temB && ordemJson(R[k]) === ordemJson(B[k]);
+      if (localIgual !== remotoIgual) {
+        const [lado, tem] = localIgual ? [R, temR] : [L, temL];
+        if (tem) out[k] = lado[k];
+        continue;
+      }
+    }
+    if (k in vencedora) out[k] = vencedora[k];
+  }
+  const andamento = new Map<string, Andamento>();
+  for (const e of [...(local.andamento ?? []), ...(remote.andamento ?? [])]) {
+    const chave = JSON.stringify([e.em || '', e.texto || '']);
+    const cur = andamento.get(chave);
+    if (!cur || ordemJson(e) > ordemJson(cur)) andamento.set(chave, e);
+  }
+  if (andamento.size || 'andamento' in L || 'andamento' in R) {
+    // Por (em, texto), como a tupla do Python.
+    const em = (e: Andamento) => e.em || '';
+    const tx = (e: Andamento) => e.texto || '';
+    out.andamento = [...andamento.values()].sort((a, b) =>
+      em(a) !== em(b) ? (em(a) < em(b) ? -1 : 1) : tx(a) < tx(b) ? -1 : tx(a) > tx(b) ? 1 : 0,
+    );
+  }
+  const conversas = porUrl([...(local.conversas ?? []), ...(remote.conversas ?? [])]);
+  if (conversas.length || 'conversas' in L || 'conversas' in R) out.conversas = conversas;
+  return out as unknown as Tarefa;
 }
 
 /**

@@ -29,7 +29,7 @@ import * as aspisDb from '../aspis/services/db';
 import { thumbsChanged } from '../aspis/services/neural';
 import { useAppStore as useAspisStore } from '../aspis/store/useAppStore';
 import type { ThumbRecord } from '../aspis/types';
-import type { Tarefa } from '../kairos/rules';
+import { mergeTarefa, type Tarefa } from '../kairos/rules';
 import { useKairos } from '../kairos/store';
 import { DEFAULT_CONFIG } from '../kinesis/timer';
 import { SEED_EXERCISES, useKinesis } from '../kinesis/store';
@@ -114,6 +114,8 @@ interface SyncState {
   hash: Record<string, string>;
   t: Record<string, number>;
   firstDone: boolean;
+  /** Tarefas do Kairós: a última versão que os dois lados viram, para juntar em três vias. */
+  base?: Record<string, unknown>;
 }
 
 export interface ConfigSyncStatus {
@@ -449,6 +451,100 @@ function applyThumbs(list: ThumbRecord[]): void {
   thumbsChanged();
 }
 
+/**
+ * Uma tarefa do Kairós, de ponta a ponta (a mesma regra de _sync_task, no Mac).
+ * Devolve true se o arquivo mudou. Apagada vira null por 30 dias. Mudada dos dois
+ * lados, junta em três vias contra a última versão que os dois viram: cada campo fica
+ * com o lado que o mudou, e o andamento e as conversas se somam.
+ */
+async function syncTask(
+  key: string,
+  local: Record<string, unknown>,
+  items: Record<string, SyncItem>,
+  remote: SyncItem | undefined,
+  state: SyncState,
+  first: boolean,
+  now: number,
+  fx: Effects,
+  applied: string[],
+): Promise<boolean> {
+  const bases = (state.base ??= {});
+  const inLocal = key in local;
+  const lv = (local[key] ?? null) as Tarefa | null;
+  const rv = (remote?.v ?? null) as Tarefa | null;
+  const rt = remote?.t ?? 0;
+  const lh = inLocal ? hashOf(local[key]) : null;
+  const changed = inLocal && lh !== state.hash[key];
+  const lt = first ? 0 : changed ? now : (state.t[key] ?? 0);
+
+  if (lv === null && rv === null) {
+    let dirty = false;
+    if (remote && now - rt > TOMBSTONE_KEEP_MS) {
+      delete items[key];
+      dirty = true;
+    }
+    delete state.hash[key];
+    delete state.t[key];
+    delete bases[key];
+    return dirty;
+  }
+  if (rv === null && (!remote || lt > rt)) {
+    // Só daqui, ou mudada aqui depois de ser apagada lá: vai para o arquivo.
+    items[key] = { t: lt || now, by: DEVICE, v: lv };
+    state.t[key] = lt || now;
+    state.hash[key] = lh as string;
+    bases[key] = lv;
+    return true;
+  }
+  if (rv === null) {
+    // Apagada lá depois da última mudança daqui.
+    await applyItem(key, null, fx);
+    applied.push(key);
+    delete state.hash[key];
+    delete bases[key];
+    state.t[key] = rt;
+    return false;
+  }
+  if (lv === null) {
+    if (inLocal && lt > rt) {
+      // Apagada aqui depois da última mudança de lá.
+      items[key] = { t: lt, by: DEVICE, v: null };
+      state.t[key] = lt;
+      state.hash[key] = lh as string;
+      delete bases[key];
+      return true;
+    }
+    await applyItem(key, rv, fx);
+    applied.push(key);
+    state.t[key] = rt;
+    bases[key] = rv;
+    return false;
+  }
+  if (lh === hashOf(rv)) {
+    state.t[key] = Math.max(lt, rt);
+    state.hash[key] = lh as string;
+    bases[key] = rv;
+    return false;
+  }
+  const merged = mergeTarefa(bases[key] as Tarefa | undefined, lv, rv, lt > rt);
+  let dirty = false;
+  if (hashOf(merged) !== lh) {
+    await applyItem(key, merged, fx);
+    applied.push(key);
+  } else {
+    state.hash[key] = lh as string;
+  }
+  if (hashOf(merged) !== hashOf(rv)) {
+    items[key] = { t: now, by: DEVICE, v: merged };
+    state.t[key] = now;
+    dirty = true;
+  } else {
+    state.t[key] = rt;
+  }
+  bases[key] = merged;
+  return dirty;
+}
+
 async function loadState(): Promise<SyncState> {
   try {
     const raw = await getKV(STATE_KEY);
@@ -499,20 +595,10 @@ async function runOnce(): Promise<void> {
     const remote = items[key];
 
     if (key.startsWith(KAIROS_PREFIX)) {
+      // Sem conseguir ler as tarefas daqui, a família fica de fora desta passada.
       if (!kairosOk) continue;
-      const goneHere = (local[key] ?? null) === null;
-      const goneThere = !remote || remote.v === null;
-      if (goneHere && goneThere) {
-        // Apagada dos dois lados. A marca fica 30 dias no arquivo, para um aparelho
-        // que estava fora saber que deve apagar; depois sai.
-        if (remote && now - (remote.t ?? 0) > TOMBSTONE_KEEP_MS) {
-          delete items[key];
-          dirty = true;
-        }
-        delete state.hash[key];
-        delete state.t[key];
-        continue;
-      }
+      if (await syncTask(key, local, items, remote, state, first, now, fx, applied)) dirty = true;
+      continue;
     }
 
     const haveLocal = key in local;

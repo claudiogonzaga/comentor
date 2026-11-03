@@ -41,7 +41,9 @@ Coach de vida com IA. A Comentora, a coruja do Áskesis, é uma coruja sábia qu
   no card e a avaliação ao concluir (estrelas, badges e comentário) que vira dossiê de
   coaching. As tarefas sincronizam com o Áskesis do Mac, uma chave por tarefa no arquivo
   do Drive; lá, uma IA também as lê e edita pelo MCP do app (`kairos_mcp.py`, no
-  repositório `aspis`)
+  repositório `aspis`). O card guarda os links das conversas de IA que executam a
+  tarefa (um toque abre a conversa exata) e o último andamento que a IA registrou; o 🤖
+  abre uma conversa nova no Claude, Gemini, Grok ou ChatGPT já com a tarefa
 
 ## Estrutura
 

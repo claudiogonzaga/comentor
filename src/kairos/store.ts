@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 
 import { getKV, setKV } from '../services/database';
-import { limitesDaNota, type Tarefa } from './rules';
+import { iaDoLink, limitesDaNota, type Tarefa } from './rules';
 
 const KEY = 'kairos:tasks';
 /** Quanto tempo a recém-concluída fica no lugar, desbotada, com o ↩️ Desfazer. */
@@ -27,6 +27,10 @@ interface KairosState {
   reabrir: (id: string) => void;
   excluir: (id: string) => void;
   pular: (id: string) => void;
+  /** Liga uma conversa de IA à tarefa (o mesmo link de novo só se atualiza). */
+  vincularConversa: (id: string, url: string) => void;
+  ocultarConversa: (id: string, url: string) => void;
+  registrarAndamento: (id: string, texto: string, por: string) => void;
   /** O que veio do Mac: a tarefa inteira, ou null quando ela foi apagada lá. */
   applySynced: (id: string, value: Tarefa | null) => void;
 }
@@ -128,6 +132,21 @@ export const useKairos = create<KairosState>((set, get) => {
     },
 
     pular: (id) => set({ pulados: { ...get().pulados, [id]: true } }),
+
+    vincularConversa: (id, url) =>
+      mudar(id, (t) => ({
+        ...t,
+        conversas: [...(t.conversas ?? []).filter((c) => c.url !== url), { url, ia: iaDoLink(url), titulo: '', em: agora() }],
+      })),
+
+    ocultarConversa: (id, url) =>
+      mudar(id, (t) => ({
+        ...t,
+        conversas: (t.conversas ?? []).map((c) => (c.url === url ? { ...c, oculta: true, em: agora() } : c)),
+      })),
+
+    registrarAndamento: (id, texto, por) =>
+      mudar(id, (t) => ({ ...t, andamento: [...(t.andamento ?? []), { em: agora(), por, texto }] })),
 
     applySynced: (id, value) => {
       const atual = get().tarefas;

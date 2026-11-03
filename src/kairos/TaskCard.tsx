@@ -8,7 +8,18 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { BADGES, ROTULO_ESTRELA, badgeDe, ehAtrasada, ehUrgente, fmtData, limitesDaNota, type Tarefa } from './rules';
+import {
+  BADGES,
+  IA_COR,
+  ROTULO_ESTRELA,
+  badgeDe,
+  ehAtrasada,
+  ehUrgente,
+  fmtData,
+  limitesDaNota,
+  type Conversa,
+  type Tarefa,
+} from './rules';
 import { AREA_COR, AREA_ICONE, PRIO_COR, fixas, type Tema } from './theme';
 
 interface Props {
@@ -23,10 +34,21 @@ interface Props {
   onNotas: (notas: string) => void;
   onEditar: () => void;
   onExcluir: () => void;
+  /** 🤖: abrir uma conversa com uma IA já com a tarefa, ou ligar uma que existe. */
+  onDelegar: () => void;
+  onAbrirConversa: (c: Conversa) => void;
+  onOcultarConversa: (c: Conversa) => void;
 }
 
 function estrelasStr(n: number) {
   return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
+}
+
+function quando(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const z = (n: number) => String(n).padStart(2, '0');
+  return `${z(d.getDate())}/${z(d.getMonth() + 1)} ${z(d.getHours())}:${z(d.getMinutes())}`;
 }
 
 export function TaskCard(props: Props) {
@@ -66,6 +88,9 @@ export function TaskCard(props: Props) {
 
   const textoPadrao = BADGES.filter((b) => sel.includes(b.e)).map((b) => b.txt).join(' ');
   const corArea = AREA_COR[t.area] || fixas.roxo;
+  // A conversa mais recente primeiro; o andamento mostra só o último passo.
+  const conversas = (t.conversas ?? []).filter((c) => !c.oculta).reverse();
+  const ultimo = t.andamento?.length ? t.andamento[t.andamento.length - 1] : null;
 
   if (lapide) {
     return (
@@ -135,6 +160,29 @@ export function TaskCard(props: Props) {
             </Text>
           </Pressable>
         ))}
+
+      {conversas.length > 0 && (
+        <View style={s.iaLinha}>
+          {conversas.map((cv) => (
+            <Pressable
+              key={cv.url}
+              onPress={() => props.onAbrirConversa(cv)}
+              onLongPress={() => props.onOcultarConversa(cv)}
+              style={s.iaChip}
+              accessibilityLabel={`Abrir a conversa no ${cv.ia}`}
+              accessibilityHint="Toque longo tira do card"
+            >
+              <View style={[s.iaPonto, { backgroundColor: IA_COR[cv.ia] || '#7d7387' }]} />
+              <Text style={s.iaChipTxt}>{cv.ia}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {ultimo && (
+        <Text style={s.andamento} numberOfLines={3}>
+          🤖 <Text style={s.andamentoPor}>{ultimo.por}</Text> · {quando(ultimo.em)} — {ultimo.texto}
+        </Text>
+      )}
 
       {feito && (t.estrelas > 0 || (t.badges ?? []).length > 0 || !!t.comentario) && (
         <View style={s.fb}>
@@ -251,6 +299,14 @@ export function TaskCard(props: Props) {
               <Pressable onPress={props.onPular} style={[s.btn, s.btnPular]}>
                 <Text style={s.btnTxt}>⏭️ Pular</Text>
               </Pressable>
+              <Pressable
+                onPress={props.onDelegar}
+                style={[s.btn, s.btnIa]}
+                accessibilityLabel="Fazer com IA"
+                accessibilityHint="Abre uma conversa já com a tarefa, ou liga uma conversa que existe"
+              >
+                <Text style={s.btnTxt}>🤖</Text>
+              </Pressable>
               <Pressable onPress={props.onEditar} style={s.btnGhost} accessibilityLabel="Editar tarefa">
                 <Text style={s.ghostTxt}>✏️</Text>
               </Pressable>
@@ -311,6 +367,23 @@ const estilos = (c: Tema) =>
       minHeight: 72,
       textAlignVertical: 'top',
     },
+    iaLinha: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+    iaChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: c.linha,
+      backgroundColor: c.card,
+    },
+    iaPonto: { width: 7, height: 7, borderRadius: 4 },
+    iaChipTxt: { fontSize: 11.5, color: c.txt },
+    andamento: { marginTop: 6, fontSize: 11.5, color: c.suave, lineHeight: 16 },
+    andamentoPor: { color: c.txt, fontWeight: '600' },
+    btnIa: { backgroundColor: fixas.roxo2 },
     fb: { marginTop: 8, padding: 8, backgroundColor: c.bg, borderRadius: 8 },
     fbEstrelas: { color: fixas.estrela, fontSize: 15 },
     fbComent: { fontSize: 12, color: c.suave, fontStyle: 'italic', marginTop: 3 },

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -19,9 +20,31 @@ import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 
 import { syncConfigNow } from '../services/configSync';
 import { TaskCard } from './TaskCard';
-import { PRIORIDADES, TIPOS_SAUDE, areasDe, dossieCoaching, ehUrgente, fmtData, ordenar, type Prioridade, type Tarefa } from './rules';
+import {
+  PRIORIDADES,
+  TIPOS_SAUDE,
+  areasDe,
+  dossieCoaching,
+  ehUrgente,
+  fmtData,
+  linkDeConversa,
+  ordenar,
+  promptDelegacao,
+  type Conversa,
+  type Prioridade,
+  type Tarefa,
+} from './rules';
 import { LAPIDE_MS, useKairos, type Campos } from './store';
 import { AREA_ICONE, dark, fixas, light, type Tema } from './theme';
+
+// Onde cada IA abre uma conversa nova já com o pedido. O Gemini não aceita o pedido
+// no endereço: ele vai para a área de transferência. O Claude Code fica no Mac.
+const DESTINOS = [
+  { ia: 'Claude', sub: 'conversa nova, já com a tarefa', url: (q: string) => `https://claude.ai/new?q=${q}` },
+  { ia: 'Gemini', sub: 'o pedido vai para a área de transferência: é só colar', url: () => 'https://gemini.google.com/app', copia: true },
+  { ia: 'Grok', sub: 'conversa nova, já com a tarefa', url: (q: string) => `https://grok.com/?q=${q}` },
+  { ia: 'ChatGPT', sub: 'conversa nova, já com a tarefa', url: (q: string) => `https://chatgpt.com/?q=${q}` },
+];
 
 export function KairosScreen() {
   const c = useColorScheme() === 'dark' ? dark : light;
@@ -33,6 +56,7 @@ export function KairosScreen() {
   const [verFeitas, setVerFeitas] = useState(false);
   const [form, setForm] = useState<Tarefa | 'nova' | null>(null);
   const [dossie, setDossie] = useState<string | null>(null);
+  const [delegando, setDelegando] = useState<Tarefa | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
   const [, setRelogio] = useState(0);
 
@@ -70,6 +94,43 @@ export function KairosScreen() {
       ],
     );
 
+  const abrirConversa = (cv: Conversa) => {
+    if (cv.url.startsWith('claude://')) {
+      Alert.alert('Abre no Mac', `Esta é uma sessão do ${cv.ia} no app do Claude do Mac: abra pelo Kairós de lá.`);
+      return;
+    }
+    void Linking.openURL(cv.url).catch(() => Alert.alert('Não abriu', cv.url));
+  };
+
+  const ocultarConversa = (t: Tarefa, cv: Conversa) =>
+    Alert.alert('Tirar do card?', `A conversa no ${cv.ia} deixa de aparecer nesta tarefa.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Tirar', onPress: () => k.ocultarConversa(t.id, cv.url) },
+    ]);
+
+  const delegar = async (t: Tarefa, destino: (typeof DESTINOS)[number]) => {
+    setDelegando(null);
+    const pedido = promptDelegacao(t);
+    if (destino.copia) await Clipboard.setStringAsync(pedido);
+    try {
+      await Linking.openURL(destino.url(encodeURIComponent(pedido)));
+      k.registrarAndamento(t.id, `Conversa aberta no ${destino.ia}.`, 'Áskesis');
+      if (destino.copia) Alert.alert('Pedido copiado', `Cole na conversa do ${destino.ia}.`);
+    } catch {
+      Alert.alert('Não abriu', `Não consegui abrir o ${destino.ia}.`);
+    }
+  };
+
+  const colarConversa = async (t: Tarefa) => {
+    setDelegando(null);
+    const url = linkDeConversa(await Clipboard.getStringAsync());
+    if (!url) {
+      Alert.alert('Nada para ligar', 'Copie primeiro o link da conversa e toque de novo.');
+      return;
+    }
+    k.vincularConversa(t.id, url);
+  };
+
   const card = (t: Tarefa) => (
     <TaskCard
       key={`${t.id}:${t.atualizadoEm}`}
@@ -83,6 +144,9 @@ export function KairosScreen() {
       onNotas={(notas) => k.atualizar(t.id, { notas })}
       onEditar={() => setForm(tarefas.find((x) => x.id === t.id) ?? null)}
       onExcluir={() => excluir(t)}
+      onDelegar={() => setDelegando(tarefas.find((x) => x.id === t.id) ?? null)}
+      onAbrirConversa={abrirConversa}
+      onOcultarConversa={(cv) => ocultarConversa(t, cv)}
     />
   );
 
@@ -175,6 +239,33 @@ export function KairosScreen() {
             }}
           />
         )}
+      </Modal>
+
+      <Modal visible={delegando !== null} transparent animationType="fade" onRequestClose={() => setDelegando(null)}>
+        <Pressable style={s.veu} onPress={() => setDelegando(null)}>
+          <Pressable style={s.folha} onPress={() => {}}>
+            <Text style={s.formTit}>🤖 Fazer com IA</Text>
+            {!!delegando && (
+              <Text style={s.ajuda} numberOfLines={2}>
+                "{delegando.titulo}"
+              </Text>
+            )}
+            {DESTINOS.map((d) => (
+              <Pressable key={d.ia} style={s.opcaoIa} onPress={() => delegando && void delegar(delegando, d)}>
+                <Text style={s.opcaoIaTit}>{d.ia}</Text>
+                <Text style={s.opcaoIaSub}>{d.sub}</Text>
+              </Pressable>
+            ))}
+            <Pressable style={s.opcaoIa} onPress={() => delegando && void colarConversa(delegando)}>
+              <Text style={s.opcaoIaTit}>📋 Ligar a conversa copiada</Text>
+              <Text style={s.opcaoIaSub}>copie o link da conversa e toque aqui</Text>
+            </Pressable>
+            <Text style={s.ajuda}>No Mac, o 🤖 abre também uma sessão do Claude Code, que se liga ao card sozinha.</Text>
+            <Pressable style={s.cancelarBtn} onPress={() => setDelegando(null)}>
+              <Text style={s.cancelarTxt}>Cancelar</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <Modal visible={dossie !== null} animationType="slide" onRequestClose={() => setDossie(null)}>
@@ -467,5 +558,18 @@ const estilos = (c: Tema) =>
     },
     salvarTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
     cancelarBtn: { paddingVertical: 14, alignItems: 'center' },
+    veu: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+    folha: { backgroundColor: c.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
+    opcaoIa: {
+      borderWidth: 1,
+      borderColor: c.linha,
+      borderRadius: 10,
+      backgroundColor: c.card,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginTop: 8,
+    },
+    opcaoIaTit: { fontSize: 15, color: c.txt, fontWeight: '600' },
+    opcaoIaSub: { fontSize: 11.5, color: c.suave, marginTop: 2 },
     cancelarTxt: { color: c.suave, fontSize: 14 },
   });
