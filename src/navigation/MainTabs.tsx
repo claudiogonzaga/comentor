@@ -2,10 +2,12 @@ import { useMemo } from 'react';
 import { Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path, Rect } from 'react-native-svg';
 
 import { GreekIcon } from '../components/GreekIcon';
 import { HomeScreen } from '../screens/HomeScreen';
 import { AspisNavigator } from '../aspis/navigation/AspisNavigator';
+import { KairosScreen } from '../kairos/KairosScreen';
 import { KinesisScreen } from '../kinesis/KinesisScreen';
 import { colors, typography } from '../theme';
 
@@ -13,15 +15,27 @@ export type MainTabParamList = {
   Home: undefined;
   Aspis: { screen: 'Share'; initial: false; params: { sharedText: string } } | undefined;
   Kinesis: undefined;
+  Kairos: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
+/** A prancheta com o ✓, o mesmo desenho da aba no Mac (ui/img/kairos.svg). */
+function KairosIcon({ size, color }: { size: number; color: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Rect x={4} y={3.5} width={16} height={17} rx={2.5} />
+      <Path d="M8 9l2 2 4-4" />
+      <Path d="M8 15.5h8" />
+    </Svg>
+  );
+}
+
 /**
- * Os três espaços do Áskesis: a Comentora (estimula o comportamento), o Aspis
- * (protege a atenção) e o Kinesis (tira da cadeira). Telas que abrem por cima (chat,
- * configurações, respiração…) continuam na pilha raiz e cobrem a barra; as do Aspis
- * ficam dentro da aba dele.
+ * Os quatro espaços do Áskesis: a Comentora (estimula o comportamento), o Aspis
+ * (protege a atenção), o Kinesis (tira da cadeira) e o Kairós (as tarefas). Telas que
+ * abrem por cima (chat, configurações, respiração…) continuam na pilha raiz e cobrem
+ * a barra; as do Aspis ficam dentro da aba dele.
  */
 export function MainTabs() {
   const insets = useSafeAreaInsets();
@@ -82,6 +96,14 @@ export function MainTabs() {
               style={{ width: size, height: size, borderRadius: size / 5, opacity: focused ? 1 : 0.55 }}
             />
           ),
+        }}
+      />
+      <Tab.Screen
+        name="Kairos"
+        component={KairosScreen}
+        options={{
+          title: 'Kairós',
+          tabBarIcon: ({ color, size }) => <KairosIcon size={size} color={color} />,
         }}
       />
     </Tab.Navigator>

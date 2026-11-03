@@ -17,6 +17,7 @@ import { useShareIntent } from 'expo-share-intent';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { startAspis } from './src/aspis/bootstrap';
 import { MiniPlayerHost } from './src/aspis/components/MiniPlayer';
+import { startKairos } from './src/kairos/store';
 import { startKinesis } from './src/kinesis/store';
 import { startConfigSync } from './src/services/configSync';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
@@ -92,6 +93,11 @@ export default function App() {
   // O Kinesis também: o timer retoma de onde estava, sem segurar o boot.
   useEffect(() => {
     if (ready) void startKinesis();
+  }, [ready]);
+
+  // As tarefas do Kairós, que a sincronização leva e traz do Mac.
+  useEffect(() => {
+    if (ready) startKairos();
   }, [ready]);
 
   // Configurações em dia com o Áskesis do Mac.

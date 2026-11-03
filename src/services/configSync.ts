@@ -8,7 +8,8 @@
 // Cada chave vale por si: { t: epoch ms, by: aparelho, v: valor }, e ganha a
 // alteração mais recente. O que mudou aqui é detectado comparando com o hash do
 // que foi visto na última passada, sem gancho em cada tela. As regras são as mesmas
-// de sync.py, no projeto do Mac. As chaves de API NÃO passam por aqui.
+// de sync.py, no projeto do Mac. As chaves de API NÃO passam por aqui. Cada tarefa
+// do Kairós é uma chave; apagada, vira null por 30 dias, para o outro lado apagar.
 //
 // Limite conhecido: com o app fechado o JS não roda. Uma tarefa marcada no Mac só
 // cala as cobranças do telefone quando o Áskesis volta a abrir aqui.
@@ -28,6 +29,8 @@ import * as aspisDb from '../aspis/services/db';
 import { thumbsChanged } from '../aspis/services/neural';
 import { useAppStore as useAspisStore } from '../aspis/store/useAppStore';
 import type { ThumbRecord } from '../aspis/types';
+import type { Tarefa } from '../kairos/rules';
+import { useKairos } from '../kairos/store';
 import { DEFAULT_CONFIG } from '../kinesis/timer';
 import { SEED_EXERCISES, useKinesis } from '../kinesis/store';
 import { useAppStore } from '../store/useAppStore';
@@ -58,7 +61,9 @@ const STATE_KEY = 'config_sync_state_v1';
 const DEVICE = 'phone';
 const DONE_PREFIX = 'done:';
 const CONFIG_PREFIX = 'comentora.config.';
+const KAIROS_PREFIX = 'kairos.task.';
 const DONE_KEEP_DAYS = 3;
+const TOMBSTONE_KEEP_MS = 30 * 24 * 3600 * 1000;
 const POLL_MS = 60_000;
 const DEBOUNCE_MS = 4000;
 
@@ -220,8 +225,8 @@ function isAspisDefault(key: string, value: unknown): boolean {
   }
 }
 
-/** O que este telefone tem agora, por chave do arquivo. */
-async function collect(state: SyncState): Promise<Record<string, unknown>> {
+/** O que este telefone tem agora, por chave do arquivo, e se as tarefas puderam ser lidas. */
+async function collect(state: SyncState): Promise<{ local: Record<string, unknown>; kairosOk: boolean }> {
   const local: Record<string, unknown> = {};
 
   const k = useKinesis.getState();
@@ -302,7 +307,17 @@ async function collect(state: SyncState): Promise<Record<string, unknown>> {
   for (const key of Object.keys(state.hash)) {
     if (key.startsWith(DONE_PREFIX) && !(key in local)) local[key] = null;
   }
-  return local;
+
+  // Uma chave por tarefa. A que sumiu daqui vira null, para sumir no Mac também.
+  // Sem conseguir ler as tarefas, a família fica de fora: o vazio apagaria tudo.
+  await useKairos.getState().load();
+  const kairos = useKairos.getState();
+  if (!kairos.loaded) return { local, kairosOk: false };
+  for (const t of kairos.tarefas) local[`${KAIROS_PREFIX}${t.id}`] = t;
+  for (const key of Object.keys(state.hash)) {
+    if (key.startsWith(KAIROS_PREFIX) && !(key in local)) local[key] = null;
+  }
+  return { local, kairosOk: true };
 }
 
 async function applyMeds(remote: (Partial<Medication> & { id?: number | null })[]): Promise<void> {
@@ -390,6 +405,8 @@ async function applyItem(key: string, value: unknown, fx: Effects): Promise<void
   } else if (key === 'comentora.meds') {
     await applyMeds(value as Medication[]);
     fx.reschedule = true;
+  } else if (key.startsWith(KAIROS_PREFIX)) {
+    useKairos.getState().applySynced(key.slice(KAIROS_PREFIX.length), (value ?? null) as Tarefa | null);
   } else if (key.startsWith('kinesis.')) {
     useKinesis.getState().applySynced(key, value);
   } else if (key === 'aspis.pillars') {
@@ -463,7 +480,7 @@ async function runOnce(): Promise<void> {
 
   const items: Record<string, SyncItem> = { ...(doc?.items ?? {}) };
   const first = !state.firstDone;
-  const local = await collect(state);
+  const { local, kairosOk } = await collect(state);
   const fx: Effects = { reschedule: false, refreshConfig: false };
   const applied: string[] = [];
   const oldestDay = recentDays()[DONE_KEEP_DAYS - 1];
@@ -480,6 +497,24 @@ async function runOnce(): Promise<void> {
       continue;
     }
     const remote = items[key];
+
+    if (key.startsWith(KAIROS_PREFIX)) {
+      if (!kairosOk) continue;
+      const goneHere = (local[key] ?? null) === null;
+      const goneThere = !remote || remote.v === null;
+      if (goneHere && goneThere) {
+        // Apagada dos dois lados. A marca fica 30 dias no arquivo, para um aparelho
+        // que estava fora saber que deve apagar; depois sai.
+        if (remote && now - (remote.t ?? 0) > TOMBSTONE_KEEP_MS) {
+          delete items[key];
+          dirty = true;
+        }
+        delete state.hash[key];
+        delete state.t[key];
+        continue;
+      }
+    }
+
     const haveLocal = key in local;
     const lh = haveLocal ? hashOf(local[key]) : null;
     const changed = haveLocal && lh !== state.hash[key];
@@ -548,7 +583,7 @@ async function runOnce(): Promise<void> {
 
   // O que acabou de ser aplicado é o novo "visto": a forma daqui, já normalizada.
   if (applied.length) {
-    const fresh = await collect(state);
+    const { local: fresh } = await collect(state);
     for (const key of applied) {
       if (!(key in fresh)) {
         delete state.hash[key];
@@ -646,6 +681,9 @@ export function startConfigSync(): void {
     ) {
       soon();
     }
+  });
+  useKairos.subscribe((now, before) => {
+    if (now.loaded !== before.loaded || now.tarefas !== before.tarefas) soon();
   });
   useAspisStore.subscribe((now, before) => {
     if (

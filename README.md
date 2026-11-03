@@ -36,6 +36,12 @@ Coach de vida com IA. A Comentora, a coruja do Áskesis, é uma coruja sábia qu
 - **Lembrete de preparação** (default ON): X minutos antes da hora marcada, lembra de uma respiração 2-2-4 e abre uma tela com animação guiada
 - **Prompt editável**: usuário customiza personalidade/regras da IA em Configurações
 - **Update in-app**: tela inicial mostra banner se houver versão nova no GitHub Releases
+- **Kairós** (aba própria, `src/kairos/`): as tarefas por área da vida, com as urgentes
+  (marcadas ou com prazo até amanhã) numa seção vermelha no topo, observações editáveis
+  no card e a avaliação ao concluir (estrelas, badges e comentário) que vira dossiê de
+  coaching. As tarefas sincronizam com o Áskesis do Mac, uma chave por tarefa no arquivo
+  do Drive; lá, uma IA também as lê e edita pelo MCP do app (`kairos_mcp.py`, no
+  repositório `aspis`)
 
 ## Estrutura
 
