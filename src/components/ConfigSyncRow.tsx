@@ -1,4 +1,4 @@
-// Estado da sincronização com o Áskesis do Mac, nos ajustes.
+// Estado da sincronização com a Noosfera do Mac, nos ajustes.
 
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';

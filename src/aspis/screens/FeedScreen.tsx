@@ -368,7 +368,7 @@ export function FeedScreen({ navigation }: Props) {
         style={{ marginTop: spacing.xl, alignSelf: 'center' }}
       />
       <Text style={styles.emptyHint}>
-        Dica: você já pode usar o Compartilhar → Áskesis no YouTube, mesmo sem conectar.
+        Dica: você já pode usar o Compartilhar → Noosfera no YouTube, mesmo sem conectar.
       </Text>
     </View>
   ) : (

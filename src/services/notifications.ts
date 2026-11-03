@@ -261,7 +261,7 @@ export async function ensureChannel(
   // (importância alta = texto visível), mas sem piado. "Só texto".
   if (silent) {
     await Notifications.setNotificationChannelAsync(id, {
-      name: 'Áskesis — silencioso',
+      name: 'Noosfera — silencioso',
       description: 'Notificações sem som nem vibração (modo silencioso).',
       importance: Notifications.AndroidImportance.HIGH,
       sound: null,
@@ -276,8 +276,8 @@ export async function ensureChannel(
   const spec = getOwlSpecies(sp);
   await Notifications.setNotificationChannelAsync(id, {
     name: dnd
-      ? `Áskesis — ${spec.name} (Não Perturbe)`
-      : `Áskesis — ${spec.name}`,
+      ? `Noosfera — ${spec.name} (Não Perturbe)`
+      : `Noosfera — ${spec.name}`,
     description: dnd
       ? 'Atravessa o Não Perturbe e ainda toca o canto da coruja.'
       : 'Lembretes de sono e nudges, com som de coruja',
@@ -356,7 +356,7 @@ export async function ensureSilentChannel(): Promise<string> {
   const id = `comentor-silent-v${CHANNEL_VERSION}`;
   if (Platform.OS !== 'android') return id;
   await Notifications.setNotificationChannelAsync(id, {
-    name: 'Áskesis — sem som (não perturbe)',
+    name: 'Noosfera — sem som (não perturbe)',
     description: 'Notificações sem som nem vibração durante os períodos de não-perturbe.',
     importance: Notifications.AndroidImportance.HIGH,
     sound: null,

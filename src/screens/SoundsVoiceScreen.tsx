@@ -92,7 +92,7 @@ export function SoundsVoiceScreen() {
       if (!granted) {
         Alert.alert(
           'Notificações desligadas',
-          'O Android está bloqueando as notificações da Comentora. Vá em Configurações do Android → Apps → Áskesis → Notificações e ative tudo.',
+          'O Android está bloqueando as notificações da Comentora. Vá em Configurações do Android → Apps → Noosfera → Notificações e ative tudo.',
         );
         return;
       }

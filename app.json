@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Áskesis",
+    "name": "Noosfera",
     "slug": "comentor",
-    "version": "1.122.0",
+    "version": "1.123.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -63,7 +63,7 @@
         {
           "color": "#C2683B",
           "androidMode": "default",
-          "androidCollapsedTitle": "Áskesis",
+          "androidCollapsedTitle": "Noosfera",
           "sounds": [
             "./assets/sounds/owl_buraqueira.mp3",
             "./assets/sounds/owl_corujinha_mato.mp3",

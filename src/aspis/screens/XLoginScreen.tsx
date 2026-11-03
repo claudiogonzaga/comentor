@@ -41,7 +41,7 @@ export function XLoginScreen({ navigation, route }: Props) {
         <Text style={styles.hint}>
           {logout
             ? 'Confirme a saída na página do X.'
-            : 'Entre na sua conta na página do X, com o Google ou com usuário e senha. A senha fica no X ou no Google: o Áskesis guarda só a sessão, neste aparelho.'}
+            : 'Entre na sua conta na página do X, com o Google ou com usuário e senha. A senha fica no X ou no Google: a Noosfera guarda só a sessão, neste aparelho.'}
         </Text>
       </View>
       {XLoginView ? (

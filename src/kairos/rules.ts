@@ -213,12 +213,12 @@ export function promptDelegacao(t: Tarefa): string {
     const [y, m, d] = t.prazo.split('-');
     meta.push(`Prazo: ${d}/${m}/${y}${t.hora ? ` ${t.hora}` : ''}`);
   }
-  const linhas = [`Tarefa do Kairós (Áskesis), id ${t.id}:`, `"${t.titulo}"`, meta.join(' · ')];
+  const linhas = [`Tarefa do Kairós (Noosfera), id ${t.id}:`, `"${t.titulo}"`, meta.join(' · ')];
   if (t.notas) linhas.push(`Notas: ${t.notas}`);
   linhas.push(
     '',
     'Quero que você me ajude a executar esta tarefa.',
-    `- Com o MCP "askesis": leia o card com ver_tarefa("${t.id}"), vincule esta conversa com ` +
+    `- Com o MCP "noosfera": leia o card com ver_tarefa("${t.id}"), vincule esta conversa com ` +
       'vincular_conversa (no Claude Code do app do Claude, o link da sessão vem de ' +
       'get_session("self")), registre cada avanço com registrar_andamento e me pergunte antes de concluir.',
     '- Sem o MCP, trabalhe com o que está aqui e me diga o que fazer a cada passo.',

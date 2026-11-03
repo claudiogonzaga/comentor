@@ -1,4 +1,6 @@
-# Áskesis 🦉
+# Noosfera 🦉
+
+**Plataforma de apps mentais.** Até a v1.122 se chamava Áskesis; os identificadores internos (pacote, pasta `Askesis` do Drive, link `askesis://`) continuam os mesmos.
 
 Coach de vida com IA. A Comentora, a coruja do Áskesis, é uma coruja sábia que usa argumentação persuasiva, ciências comportamentais e escalonamento emocional para te ajudar a manter hábitos saudáveis. **v1 foca em sono.**
 

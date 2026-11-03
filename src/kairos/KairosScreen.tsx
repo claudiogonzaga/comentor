@@ -116,7 +116,7 @@ export function KairosScreen() {
     if (destino.copia) await Clipboard.setStringAsync(pedido);
     try {
       await Linking.openURL(destino.url(encodeURIComponent(pedido)));
-      k.registrarAndamento(t.id, `Conversa aberta no ${destino.ia}.`, 'Áskesis');
+      k.registrarAndamento(t.id, `Conversa aberta no ${destino.ia}.`, 'Noosfera');
       if (destino.copia) Alert.alert('Pedido copiado', `Cole na conversa do ${destino.ia}.`);
     } catch {
       Alert.alert('Não abriu', `Não consegui abrir o ${destino.ia}.`);
@@ -214,7 +214,7 @@ export function KairosScreen() {
           {resto.length === 0 && urgentes.length === 0 ? (
             <Text style={s.vazio}>
               Nada por aqui ✨{'\n'}Toque no + para adicionar.{'\n'}No Mac, uma IA também cria e edita tarefas
-              pelo Áskesis.
+              pela Noosfera.
             </Text>
           ) : (
             resto.map(card)
@@ -275,7 +275,7 @@ export function KairosScreen() {
           <Text style={s.formTit}>📊 Dossiê para coaching por IA</Text>
           <Text style={s.ajuda}>
             Copie e cole numa IA (Claude, Gemini…): ele junta estrelas, badges e comentários para ela analisar
-            seus padrões e aconselhar. No Mac, a IA também o lê direto pelo Áskesis.
+            seus padrões e aconselhar. No Mac, a IA também o lê direto pela Noosfera.
           </Text>
           <ScrollView style={s.dossie}>
             <Text style={s.dossieTxt} selectable>
