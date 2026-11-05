@@ -1,5 +1,5 @@
 // O tema da Noosfera: terracota grego (o de sempre), espacial (o céu do Diángelos) ou
-// ecológico (folha e musgo, claro).
+// Gaia, o ecológico (folha e musgo, claro; o id continua 'ecologico').
 //
 // As cores são constantes lidas na importação pelos StyleSheet de cada tela, então a
 // escolha é lida aqui, de um arquivo, de forma síncrona, antes de qualquer tela, e
