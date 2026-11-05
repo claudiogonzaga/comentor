@@ -7,6 +7,7 @@
 //  - X: a leitura usa uma página aberta com a sua sessão (XHarvester), que não
 //    existe com o app fechado. Roda com o app em uso, em qualquer aba: ao abrir,
 //    ao voltar para ele e de hora em hora.
+//  - Transcrições do Mac (desktopTranscripts.ts): a cada tique, nos dois casos.
 //
 // Uma trava só, a mesma do botão Atualizar: duas rodadas nunca se cruzam.
 
@@ -18,6 +19,7 @@ import { create } from 'zustand';
 import { claudeForTask } from '../../services/aiTasks';
 import { getAccessToken } from './auth';
 import * as db from './db';
+import { syncDesktopTranscripts } from './desktopTranscripts';
 import { refreshFeed, refreshX, type RefreshResult } from './pipeline';
 import { useXStore } from './x';
 import { useAppStore } from '../store/useAppStore';
@@ -105,6 +107,7 @@ function stale(metaKey: 'last_run' | 'last_run_x'): boolean {
 
 /** As fontes vencidas (mais de 1 h) e prontas para rodar sozinhas, sem abrir login nem erro. */
 async function autoTick(withX: boolean): Promise<void> {
+  await syncDesktopTranscripts(); // o que o Mac transcreveu (Drive), antes dos vídeos novos
   if (useRefreshStore.getState().busy || !(await hasBrain())) return;
   if (useAppStore.getState().user && stale('last_run')) {
     await runYouTube().catch((e) => console.warn('[aspis] atualização do YouTube:', e));

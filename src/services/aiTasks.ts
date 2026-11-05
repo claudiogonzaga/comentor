@@ -24,11 +24,11 @@ export const AI_TASKS: AiTaskInfo[] = [
   { id: 'chat', label: 'Comentora · conversa', sub: 'o chat com ela', model: null, effort: null },
   { id: 'interview', label: 'Comentora · entrevista', sub: 'a entrevista inicial e a extração do que você respondeu', model: null, effort: null },
   // A triagem roda em dezenas de vídeos a cada busca: o Haiku custa um vigésimo do Sonnet.
-  { id: 'aspisFeed', label: 'Aspis · triagem do feed', sub: 'nota e síntese de cada vídeo novo', model: 'claude-haiku-5-5', effort: 'medium' },
-  { id: 'aspisVideo', label: 'Aspis · vídeo compartilhado', sub: 'a análise do vídeo que você manda ao app', model: 'claude-sonnet-5-5', effort: 'medium' },
-  { id: 'aspisAsk', label: 'Aspis · perguntas sobre o vídeo', sub: 'a caixa de perguntas da síntese', model: 'claude-sonnet-5-5', effort: 'medium' },
-  { id: 'aspisCheck', label: 'Aspis · checagem externa', sub: 'busca na web para confirmar o que o vídeo diz', model: 'claude-sonnet-5-5', effort: 'medium' },
-  { id: 'aspisSimple', label: 'Aspis · cartões e perfil', sub: 'flashcards e o que ele aprende com o que você pula', model: 'claude-haiku-5-5', effort: 'low' },
+  { id: 'aspisFeed', label: 'Escudo · triagem do feed', sub: 'nota e síntese de cada vídeo novo', model: 'claude-haiku-5-5', effort: 'medium' },
+  { id: 'aspisVideo', label: 'Escudo · vídeo compartilhado', sub: 'a análise do vídeo que você manda ao app', model: 'claude-sonnet-5-5', effort: 'medium' },
+  { id: 'aspisAsk', label: 'Escudo · perguntas sobre o vídeo', sub: 'a caixa de perguntas da síntese', model: 'claude-sonnet-5-5', effort: 'medium' },
+  { id: 'aspisCheck', label: 'Escudo · checagem externa', sub: 'busca na web para confirmar o que o vídeo diz', model: 'claude-sonnet-5-5', effort: 'medium' },
+  { id: 'aspisSimple', label: 'Escudo · cartões e perfil', sub: 'flashcards e o que ele aprende com o que você pula', model: 'claude-haiku-5-5', effort: 'low' },
 ];
 
 export interface AiTaskChoice {

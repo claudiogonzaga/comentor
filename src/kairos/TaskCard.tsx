@@ -1,10 +1,11 @@
-// O card do Kairós, com a anatomia do painel do Graphé:
-//   [🚨 urgente] [ÁREA]  ← pílula colorida no topo
+// O card do Kairós, com a anatomia do painel do Graphé, mais enxuta:
+//   • ÁREA · urgente          ← ponto de cor e texto pequeno no topo
 //   Título
-//   prazo · prioridade
+//   data · prioridade · tipo
 //   observações (editáveis no próprio card)
-//   ações: ✓ · 🎖️ Avaliar e concluir · ⏭️ Pular
-// Avaliar abre a avaliação no próprio card: estrelas, badges e comentário.
+//   ações: ○ concluir · Avaliar · Pular · IA            editar · excluir
+// Avaliar abre a avaliação no próprio card: estrelas, badges e comentário. As badges
+// continuam guardadas como emoji (é a chave delas); aqui aparecem só pelo nome.
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -20,12 +21,13 @@ import {
   type Conversa,
   type Tarefa,
 } from './rules';
-import { AREA_COR, AREA_ICONE, PRIO_COR, fixas, type Tema } from './theme';
+import { Estrela, Icone } from './icones';
+import { corDaArea, corDaPrioridade, corVisivel, fonte, semEmoji, type Tema } from './theme';
 
 interface Props {
   tarefa: Tarefa;
   c: Tema;
-  /** Recém-concluída: fica no lugar, desbotada, com o ↩️ Desfazer. */
+  /** Recém-concluída: fica no lugar, desbotada, com o Desfazer. */
   lapide?: boolean;
   onConcluir: (estrelas: number, badges: string[], comentario: string) => void;
   onConcluirRapido: () => void;
@@ -34,14 +36,10 @@ interface Props {
   onNotas: (notas: string) => void;
   onEditar: () => void;
   onExcluir: () => void;
-  /** 🤖: abrir uma conversa com uma IA já com a tarefa, ou ligar uma que existe. */
+  /** Fazer com IA: abrir uma conversa já com a tarefa, ou ligar uma que existe. */
   onDelegar: () => void;
   onAbrirConversa: (c: Conversa) => void;
   onOcultarConversa: (c: Conversa) => void;
-}
-
-function estrelasStr(n: number) {
-  return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
 }
 
 function quando(iso: string): string {
@@ -49,6 +47,19 @@ function quando(iso: string): string {
   if (Number.isNaN(d.getTime())) return '';
   const z = (n: number) => String(n).padStart(2, '0');
   return `${z(d.getDate())}/${z(d.getMonth() + 1)} ${z(d.getHours())}:${z(d.getMinutes())}`;
+}
+
+const estrelasTxt = (n: number) => `${n} ${n === 1 ? 'estrela' : 'estrelas'}`;
+
+/** A fileira de estrelas da nota já dada (só leitura). */
+function Nota({ n, c }: { n: number; c: Tema }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 2 }} accessibilityLabel={estrelasTxt(n)}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Estrela key={i} cheia={i <= n} size={14} cor={c.estrela} />
+      ))}
+    </View>
+  );
 }
 
 export function TaskCard(props: Props) {
@@ -86,20 +97,28 @@ export function TaskCard(props: Props) {
     }
   }
 
-  const textoPadrao = BADGES.filter((b) => sel.includes(b.e)).map((b) => b.txt).join(' ');
-  const corArea = AREA_COR[t.area] || fixas.roxo;
+  const textoPadrao = semEmoji(BADGES.filter((b) => sel.includes(b.e)).map((b) => b.txt).join(' '));
   // A conversa mais recente primeiro; o andamento mostra só o último passo.
-  const conversas = (t.conversas ?? []).filter((c) => !c.oculta).reverse();
+  const conversas = (t.conversas ?? []).filter((cv) => !cv.oculta).reverse();
   const ultimo = t.andamento?.length ? t.andamento[t.andamento.length - 1] : null;
+  const avisoNota =
+    cap < 5
+      ? `Com sinal negativo, no máximo ${estrelasTxt(cap)}`
+      : piso >= 5
+        ? 'Nota travada em 5 estrelas'
+        : piso > 1
+          ? `Não pode ser menor que ${estrelasTxt(piso)}`
+          : '';
 
   if (lapide) {
     return (
       <View style={[s.card, s.lapide]}>
         <Text style={[s.titulo, s.tituloFeito]}>{t.titulo}</Text>
         <View style={s.acoes}>
-          <Text style={s.metaTxt}>✓ concluída</Text>
-          <Pressable onPress={props.onReabrir} style={s.btnGhost} hitSlop={6}>
-            <Text style={s.desfazer}>↩️ Desfazer</Text>
+          <Text style={s.metaTxt}>Concluída</Text>
+          <Pressable onPress={props.onReabrir} style={s.linkBtn} hitSlop={8} accessibilityRole="button">
+            <Icone nome="desfazer" size={15} cor={c.acento} />
+            <Text style={s.linkTxt}>Desfazer</Text>
           </Pressable>
         </View>
       </View>
@@ -107,32 +126,28 @@ export function TaskCard(props: Props) {
   }
 
   return (
-    <View style={[s.card, urgente && { borderColor: c.urgBd }]}>
+    <View style={[s.card, urgente && s.cardUrg]}>
       <View style={s.topo}>
-        {urgente && (
-          <View style={[s.pilula, { backgroundColor: c.urgBd }]}>
-            <Text style={s.pilulaTxt}>🚨 urgente</Text>
-          </View>
-        )}
-        <View style={[s.pilula, { backgroundColor: corArea }]}>
-          <Text style={s.pilulaTxt}>
-            {AREA_ICONE[t.area] || ''} {t.area}
-          </Text>
-        </View>
+        <View style={[s.ponto, { backgroundColor: corDaArea(t.area, c) }]} />
+        <Text style={s.area}>{semEmoji(t.area)}</Text>
+        {t.urgente && !feito && <Text style={[s.area, { color: c.urg }]}>· urgente</Text>}
       </View>
 
       <Text style={[s.titulo, feito && s.tituloFeito]}>{t.titulo}</Text>
 
       <View style={s.meta}>
         {!!t.prazo && (
-          <Text style={[s.metaTxt, atrasada && s.prazoAtrasado]}>
-            📅 {fmtData(t.prazo)}
-            {t.hora ? ` ${t.hora}` : ''}
-            {atrasada ? ' · atrasada' : ''}
-          </Text>
+          <View style={s.metaItem}>
+            <Icone nome="data" size={13} cor={atrasada ? c.urg : c.suave} />
+            <Text style={[s.metaTxt, atrasada && s.atrasada]}>
+              {fmtData(t.prazo)}
+              {t.hora ? ` ${t.hora}` : ''}
+              {atrasada ? ' · atrasada' : ''}
+            </Text>
+          </View>
         )}
-        <View style={s.prioWrap}>
-          <View style={[s.ponto, { backgroundColor: PRIO_COR[t.prioridade] || fixas.cinza }]} />
+        <View style={s.metaItem}>
+          <View style={[s.pontoP, { backgroundColor: corDaPrioridade(t.prioridade, c) }]} />
           <Text style={s.metaTxt}>{t.prioridade}</Text>
         </View>
         {!!t.tipo && <Text style={s.metaTxt}>{t.tipo}</Text>}
@@ -154,9 +169,9 @@ export function TaskCard(props: Props) {
             }}
           />
         ) : (
-          <Pressable onPress={() => setEditandoNotas(true)}>
+          <Pressable onPress={() => setEditandoNotas(true)} hitSlop={4}>
             <Text style={[s.obs, !t.notas && s.obsVazia]} numberOfLines={6}>
-              {t.notas || '➕ observações e detalhes…'}
+              {t.notas || '+ observações e detalhes'}
             </Text>
           </Pressable>
         ))}
@@ -172,89 +187,86 @@ export function TaskCard(props: Props) {
               accessibilityLabel={`Abrir a conversa no ${cv.ia}`}
               accessibilityHint="Toque longo tira do card"
             >
-              <View style={[s.iaPonto, { backgroundColor: IA_COR[cv.ia] || '#7d7387' }]} />
+              <View style={[s.pontoP, { backgroundColor: corVisivel(IA_COR[cv.ia], c) }]} />
               <Text style={s.iaChipTxt}>{cv.ia}</Text>
             </Pressable>
           ))}
         </View>
       )}
       {ultimo && (
-        <Text style={s.andamento} numberOfLines={3}>
-          🤖 <Text style={s.andamentoPor}>{ultimo.por}</Text> · {quando(ultimo.em)} — {ultimo.texto}
-        </Text>
+        <View style={s.andamento}>
+          <Icone nome="ia" size={13} cor={c.suave} />
+          <Text style={s.andamentoTxt} numberOfLines={3}>
+            <Text style={s.andamentoPor}>{semEmoji(ultimo.por)}</Text> · {quando(ultimo.em)} — {semEmoji(ultimo.texto)}
+          </Text>
+        </View>
       )}
 
       {feito && (t.estrelas > 0 || (t.badges ?? []).length > 0 || !!t.comentario) && (
         <View style={s.fb}>
           {t.estrelas > 0 && (
-            <Text style={s.fbEstrelas}>
-              {estrelasStr(t.estrelas)} <Text style={s.metaTxt}>{ROTULO_ESTRELA[t.estrelas]}</Text>
-            </Text>
+            <View style={s.fbLinha}>
+              <Nota n={t.estrelas} c={c} />
+              <Text style={s.metaTxt}>{ROTULO_ESTRELA[t.estrelas]}</Text>
+            </View>
           )}
           {(t.badges ?? []).length > 0 && (
             <Text style={s.metaTxt}>
-              {(t.badges ?? []).map((e) => `${e} ${badgeDe(e)?.nome ?? ''}`).join(' · ')}
+              {(t.badges ?? []).map((e) => badgeDe(e)?.nome ?? semEmoji(e)).filter(Boolean).join(' · ')}
             </Text>
           )}
-          {!!t.comentario && <Text style={s.fbComent}>"{t.comentario}"</Text>}
+          {!!t.comentario && <Text style={s.fbComent}>“{t.comentario}”</Text>}
         </View>
       )}
 
       {avaliando ? (
         <View style={s.avalBox}>
-          <Text style={s.avalHint}>Como você fez esta tarefa? (vira insumo do coaching)</Text>
+          <Text style={s.avalHint}>Como você fez esta tarefa? A avaliação vira insumo do dossiê.</Text>
           <View style={s.estrelasLinha}>
             {[1, 2, 3, 4, 5].map((n) => (
               <Pressable
                 key={n}
                 onPress={() => setEstrelas(Math.max(piso, Math.min(n, cap)))}
                 hitSlop={6}
-                accessibilityLabel={`${n} estrela${n > 1 ? 's' : ''}`}
+                accessibilityLabel={estrelasTxt(n)}
+                style={n > cap && s.estrelaBloq}
               >
-                <Text style={[s.estrela, n <= estrelas && { color: fixas.estrela }, n > cap && s.estrelaBloq]}>
-                  {n <= estrelas ? '★' : '☆'}
-                </Text>
+                <Estrela cheia={n <= estrelas} size={28} cor={n <= estrelas ? c.estrela : c.suave} />
               </Pressable>
             ))}
             {estrelas >= 1 && <Text style={s.rotulo}>{ROTULO_ESTRELA[estrelas]}</Text>}
           </View>
-          <Text style={s.avalCap}>
-            {cap < 5
-              ? `⚠ Badge negativa: máximo ${cap}⭐`
-              : piso >= 5
-                ? '🏆 nota travada em 5⭐'
-                : piso > 1
-                  ? `não pode ser menor que ${piso}⭐`
-                  : ''}
-          </Text>
+          <Text style={s.avalCap}>{avisoNota}</Text>
           <View style={s.badgesWrap}>
             {BADGES.map((b) => {
               const ativa = sel.includes(b.e);
+              const cor = b.tipo === 'pos' ? c.ok : c.urg;
               return (
                 <Pressable
                   key={b.e}
                   onPress={() => alternarBadge(b.e)}
-                  style={[s.badge, ativa && (b.tipo === 'pos' ? s.badgePos : s.badgeNeg)]}
+                  style={[s.badge, ativa && { backgroundColor: `${cor}22`, borderColor: cor }]}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: ativa }}
                 >
-                  <Text style={[s.badgeTxt, ativa && s.badgeTxtAtiva]}>
-                    {b.e} {b.nome}
-                  </Text>
+                  <View style={[s.pontoP, { backgroundColor: cor, opacity: ativa ? 1 : 0.55 }]} />
+                  <Text style={[s.badgeTxt, ativa && s.badgeTxtAtiva]}>{b.nome}</Text>
                 </Pressable>
               );
             })}
           </View>
-          {!!textoPadrao && <Text style={s.padrao}>Padrão: {textoPadrao}</Text>}
+          {!!textoPadrao && <Text style={s.padrao}>{textoPadrao}</Text>}
           <TextInput
             style={s.comentario}
             value={comentario}
             onChangeText={setComentario}
             multiline
-            placeholder="Comentário (opcional) — o que ajudou ou atrapalhou?"
+            placeholder="Comentário (opcional): o que ajudou ou atrapalhou?"
             placeholderTextColor={c.suave}
           />
           <View style={s.avalAcoes}>
             <Pressable onPress={() => setAvaliando(false)} hitSlop={8}>
-              <Text style={s.cancelar}>cancelar</Text>
+              <Text style={s.cancelar}>Cancelar</Text>
             </Pressable>
             <Pressable
               disabled={estrelas < 1}
@@ -262,9 +274,9 @@ export function TaskCard(props: Props) {
                 props.onConcluir(estrelas, sel, comentario.trim());
                 setAvaliando(false);
               }}
-              style={[s.btnSalvar, estrelas < 1 && { backgroundColor: fixas.cinza }]}
+              style={[s.btnSalvar, estrelas < 1 && s.btnSalvarOff]}
             >
-              <Text style={s.btnSalvarTxt}>Salvar (concluída)</Text>
+              <Text style={[s.btnSalvarTxt, estrelas < 1 && { color: c.suave }]}>Concluir</Text>
             </Pressable>
           </View>
         </View>
@@ -275,15 +287,17 @@ export function TaskCard(props: Props) {
               <Pressable
                 onPress={props.onReabrir}
                 style={[s.check, s.checkFeito]}
+                hitSlop={6}
                 accessibilityLabel="Reabrir tarefa"
               >
-                <Text style={s.checkTxt}>✓</Text>
+                <Icone nome="check" size={15} cor={c.escuro ? c.bg : '#FFFFFF'} espessura={2.4} />
               </Pressable>
-              <Pressable onPress={() => setAvaliando(true)} style={[s.btn, s.btnAval]}>
-                <Text style={s.btnTxt}>🎖️ reavaliar</Text>
+              <Pressable onPress={() => setAvaliando(true)} style={s.btnTexto} hitSlop={6}>
+                <Text style={s.btnTextoTxt}>Reavaliar</Text>
               </Pressable>
-              <Pressable onPress={props.onExcluir} style={s.btnGhost} accessibilityLabel="Excluir tarefa">
-                <Text style={s.ghostTxt}>🗑️</Text>
+              <View style={{ flex: 1 }} />
+              <Pressable onPress={props.onExcluir} style={s.btnIcone} hitSlop={6} accessibilityLabel="Excluir tarefa">
+                <Icone nome="excluir" size={18} cor={c.suave} />
               </Pressable>
             </>
           ) : (
@@ -291,27 +305,35 @@ export function TaskCard(props: Props) {
               <Pressable
                 onPress={props.onConcluirRapido}
                 style={s.check}
+                hitSlop={6}
                 accessibilityLabel="Concluir sem avaliar"
               />
-              <Pressable onPress={() => setAvaliando(true)} style={[s.btn, s.btnAval]}>
-                <Text style={s.btnTxt}>🎖️ Avaliar e concluir</Text>
+              <Pressable
+                onPress={() => setAvaliando(true)}
+                style={s.btnPrim}
+                accessibilityLabel="Avaliar e concluir"
+              >
+                <Text style={s.btnPrimTxt}>Avaliar</Text>
               </Pressable>
-              <Pressable onPress={props.onPular} style={[s.btn, s.btnPular]}>
-                <Text style={s.btnTxt}>⏭️ Pular</Text>
+              <Pressable onPress={props.onPular} style={s.btnTexto} hitSlop={4} accessibilityLabel="Pular por enquanto">
+                <Text style={s.btnTextoTxt}>Pular</Text>
               </Pressable>
               <Pressable
                 onPress={props.onDelegar}
-                style={[s.btn, s.btnIa]}
+                style={[s.btnTexto, s.btnIa]}
+                hitSlop={4}
                 accessibilityLabel="Fazer com IA"
                 accessibilityHint="Abre uma conversa já com a tarefa, ou liga uma conversa que existe"
               >
-                <Text style={s.btnTxt}>🤖</Text>
+                <Icone nome="ia" size={15} cor={c.suave} />
+                <Text style={s.btnTextoTxt}>IA</Text>
               </Pressable>
-              <Pressable onPress={props.onEditar} style={s.btnGhost} accessibilityLabel="Editar tarefa">
-                <Text style={s.ghostTxt}>✏️</Text>
+              <View style={{ flex: 1 }} />
+              <Pressable onPress={props.onEditar} style={s.btnIcone} hitSlop={4} accessibilityLabel="Editar tarefa">
+                <Icone nome="editar" size={18} cor={c.suave} />
               </Pressable>
-              <Pressable onPress={props.onExcluir} style={s.btnGhost} accessibilityLabel="Excluir tarefa">
-                <Text style={s.ghostTxt}>🗑️</Text>
+              <Pressable onPress={props.onExcluir} style={s.btnIcone} hitSlop={4} accessibilityLabel="Excluir tarefa">
+                <Icone nome="excluir" size={18} cor={c.suave} />
               </Pressable>
             </>
           )}
@@ -325,121 +347,110 @@ const estilos = (c: Tema) =>
   StyleSheet.create({
     card: {
       backgroundColor: c.card,
-      borderWidth: 1,
-      borderColor: c.linha,
-      borderRadius: 12,
-      padding: 12,
+      borderRadius: 14,
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 10,
       marginVertical: 5,
     },
-    lapide: { opacity: 0.55 },
-    topo: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
-    pilula: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-    pilulaTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
-    titulo: { fontSize: 15, fontWeight: '600', color: c.txt, marginTop: 5 },
+    // Urgente: só um traço à esquerda, na cor da urgência.
+    cardUrg: { borderLeftWidth: 3, borderLeftColor: c.urg, paddingLeft: 13 },
+    lapide: { opacity: 0.55, paddingBottom: 12 },
+    topo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    ponto: { width: 7, height: 7, borderRadius: 4 },
+    area: { fontFamily: fonte.medio, fontSize: 11.5, letterSpacing: 0.3, color: c.suave },
+    titulo: { fontFamily: fonte.medio, fontSize: 16, lineHeight: 22, color: c.txt, marginTop: 6 },
     tituloFeito: { textDecorationLine: 'line-through', color: c.suave },
-    meta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4, flexWrap: 'wrap' },
-    metaTxt: { fontSize: 11, color: c.suave },
-    prazoAtrasado: { color: fixas.vermelho, fontWeight: '700' },
-    prioWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    ponto: { width: 8, height: 8, borderRadius: 4 },
-    obs: {
-      marginTop: 8,
-      padding: 8,
-      backgroundColor: c.bg,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: c.linha,
-      borderStyle: 'dashed',
-      fontSize: 12.5,
-      color: c.txt,
-      lineHeight: 18,
-    },
-    obsVazia: { color: c.suave, fontStyle: 'italic' },
+    meta: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 6, flexWrap: 'wrap' },
+    metaItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    metaTxt: { fontFamily: fonte.texto, fontSize: 12.5, color: c.suave },
+    atrasada: { color: c.urg, fontFamily: fonte.forte },
+    pontoP: { width: 6, height: 6, borderRadius: 3 },
+    obs: { marginTop: 10, fontFamily: fonte.texto, fontSize: 13.5, lineHeight: 20, color: c.txt },
+    obsVazia: { color: c.suave },
     obsEdit: {
-      marginTop: 8,
-      padding: 8,
-      backgroundColor: c.card,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: fixas.roxo2,
-      fontSize: 12.5,
+      marginTop: 10,
+      padding: 10,
+      backgroundColor: c.bg,
+      borderRadius: 10,
+      fontFamily: fonte.texto,
+      fontSize: 13.5,
+      lineHeight: 20,
       color: c.txt,
       minHeight: 72,
       textAlignVertical: 'top',
     },
-    iaLinha: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+    iaLinha: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     iaChip: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 9,
-      paddingVertical: 4,
-      borderRadius: 11,
-      borderWidth: 1,
-      borderColor: c.linha,
-      backgroundColor: c.card,
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 12,
+      backgroundColor: c.bg,
     },
-    iaPonto: { width: 7, height: 7, borderRadius: 4 },
-    iaChipTxt: { fontSize: 11.5, color: c.txt },
-    andamento: { marginTop: 6, fontSize: 11.5, color: c.suave, lineHeight: 16 },
-    andamentoPor: { color: c.txt, fontWeight: '600' },
-    btnIa: { backgroundColor: fixas.roxo2 },
-    fb: { marginTop: 8, padding: 8, backgroundColor: c.bg, borderRadius: 8 },
-    fbEstrelas: { color: fixas.estrela, fontSize: 15 },
-    fbComent: { fontSize: 12, color: c.suave, fontStyle: 'italic', marginTop: 3 },
-    acoes: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 10 },
+    iaChipTxt: { fontFamily: fonte.medio, fontSize: 12, color: c.txt },
+    andamento: { flexDirection: 'row', gap: 6, marginTop: 8, alignItems: 'flex-start' },
+    andamentoTxt: { flex: 1, fontFamily: fonte.texto, fontSize: 12, lineHeight: 17, color: c.suave },
+    andamentoPor: { fontFamily: fonte.forte, color: c.txt },
+    fb: { marginTop: 10, gap: 4 },
+    fbLinha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    fbComent: { fontFamily: fonte.texto, fontSize: 12.5, color: c.suave, fontStyle: 'italic' },
+    acoes: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
     check: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      borderWidth: 2,
-      borderColor: fixas.cinza,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: c.suave,
       alignItems: 'center',
       justifyContent: 'center',
+      marginRight: 2,
     },
-    checkFeito: { backgroundColor: fixas.verde, borderColor: fixas.verde },
-    checkTxt: { color: '#fff', fontSize: 15 },
-    btn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 5 },
-    btnAval: { backgroundColor: fixas.verde },
-    btnPular: { backgroundColor: '#7d7387' },
-    btnTxt: { color: '#fff', fontSize: 12, fontWeight: '600' },
-    btnGhost: { paddingHorizontal: 6, paddingVertical: 6 },
-    ghostTxt: { fontSize: 14, color: c.suave },
-    desfazer: { fontSize: 12.5, color: fixas.roxo2, fontWeight: '700' },
-    avalBox: { marginTop: 10, borderTopWidth: 1, borderTopColor: c.linha, paddingTop: 8 },
-    avalHint: { fontSize: 11, color: c.suave, marginBottom: 4 },
-    estrelasLinha: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-    estrela: { fontSize: 28, color: '#ccc' },
-    estrelaBloq: { opacity: 0.32 },
-    rotulo: { fontSize: 11, color: fixas.laranja, fontWeight: '700', fontStyle: 'italic', marginLeft: 8 },
-    avalCap: { fontSize: 10, color: fixas.vermelho, minHeight: 13, marginVertical: 3 },
-    badgesWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 6 },
+    checkFeito: { backgroundColor: c.ok, borderColor: c.ok },
+    btnPrim: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: c.acentoFundo },
+    btnPrimTxt: { fontFamily: fonte.forte, fontSize: 13, color: c.acento },
+    btnTexto: { paddingHorizontal: 6, paddingVertical: 6 },
+    btnTextoTxt: { fontFamily: fonte.medio, fontSize: 13, color: c.suave },
+    btnIa: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    btnIcone: { padding: 6 },
+    linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
+    linkTxt: { fontFamily: fonte.forte, fontSize: 13, color: c.acento },
+    avalBox: { marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.linha, paddingTop: 12 },
+    avalHint: { fontFamily: fonte.texto, fontSize: 12, color: c.suave, marginBottom: 8 },
+    estrelasLinha: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    estrelaBloq: { opacity: 0.3 },
+    rotulo: { fontFamily: fonte.medio, fontSize: 12.5, color: c.txt, marginLeft: 8 },
+    avalCap: { fontFamily: fonte.texto, fontSize: 11.5, color: c.urg, minHeight: 16, marginVertical: 4 },
+    badgesWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
     badge: {
-      paddingHorizontal: 7,
-      paddingVertical: 4,
-      borderRadius: 11,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 13,
       borderWidth: 1,
-      borderColor: c.linha,
-      backgroundColor: c.card,
+      borderColor: 'transparent',
+      backgroundColor: c.bg,
     },
-    badgePos: { backgroundColor: '#d4edda', borderColor: '#5cb85c' },
-    badgeNeg: { backgroundColor: '#fde2e2', borderColor: '#e57373' },
-    badgeTxt: { fontSize: 11, color: c.txt },
-    badgeTxtAtiva: { color: '#1b2a1e' },
-    padrao: { fontSize: 11, color: c.suave, fontStyle: 'italic', marginBottom: 6 },
+    badgeTxt: { fontFamily: fonte.texto, fontSize: 12, color: c.txt },
+    badgeTxtAtiva: { fontFamily: fonte.forte },
+    padrao: { fontFamily: fonte.texto, fontSize: 12, color: c.suave, fontStyle: 'italic', marginBottom: 8 },
     comentario: {
-      borderWidth: 1,
-      borderColor: c.linha,
-      borderRadius: 7,
-      padding: 8,
-      fontSize: 13,
+      borderRadius: 10,
+      padding: 10,
+      fontFamily: fonte.texto,
+      fontSize: 13.5,
       color: c.txt,
       backgroundColor: c.bg,
-      minHeight: 46,
+      minHeight: 48,
       textAlignVertical: 'top',
     },
-    avalAcoes: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 14, marginTop: 8 },
-    cancelar: { color: c.suave, fontSize: 12 },
-    btnSalvar: { backgroundColor: fixas.verde, borderRadius: 6, paddingHorizontal: 14, paddingVertical: 9 },
-    btnSalvarTxt: { color: '#fff', fontWeight: '700', fontSize: 13 },
+    avalAcoes: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 18, marginTop: 10 },
+    cancelar: { fontFamily: fonte.medio, color: c.suave, fontSize: 13 },
+    btnSalvar: { backgroundColor: c.acento, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 9 },
+    btnSalvarOff: { backgroundColor: c.linha },
+    btnSalvarTxt: { fontFamily: fonte.forte, color: c.sobreAcento, fontSize: 13.5 },
   });

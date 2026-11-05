@@ -9,6 +9,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { AspisNavigator } from '../aspis/navigation/AspisNavigator';
 import { KairosScreen } from '../kairos/KairosScreen';
 import { KinesisScreen } from '../kinesis/KinesisScreen';
+import { LOGO_ESCUDO } from '../aspis/theme/logo';
 import { colors, typography } from '../theme';
 
 export type MainTabParamList = {
@@ -32,8 +33,8 @@ function KairosIcon({ size, color }: { size: number; color: string }) {
 }
 
 /**
- * Os quatro espaços do Áskesis: a Comentora (estimula o comportamento), o Aspis
- * (protege a atenção), o Kinesis (tira da cadeira) e o Kairós (as tarefas). Telas que
+ * Os quatro espaços do Áskesis: a Comentora (estimula o comportamento), o Escudo
+ * (o Aspis no código: protege a atenção), o Kinesis (tira da cadeira) e o Kairós (as tarefas). Telas que
  * abrem por cima (chat, configurações, respiração…) continuam na pilha raiz e cobrem
  * a barra; as do Aspis ficam dentro da aba dele.
  */
@@ -78,10 +79,10 @@ export function MainTabs() {
         name="Aspis"
         component={AspisNavigator}
         options={{
-          title: 'Aspis',
+          title: 'Escudo',
           tabBarIcon: ({ size, focused }) => (
             <Image
-              source={require('../../assets/aspis/logo-mark.png')}
+              source={LOGO_ESCUDO}
               style={{ width: size, height: size, borderRadius: size / 2, opacity: focused ? 1 : 0.55 }}
             />
           ),

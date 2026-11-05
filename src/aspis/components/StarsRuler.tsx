@@ -4,7 +4,7 @@ import * as Haptics from 'expo-haptics';
 import Svg, { Circle, G, Line } from 'react-native-svg';
 
 import { ALIGN_MAX, colors, typography } from '../theme';
-import { ESPACIAL } from '../../theme/tema';
+import { ECOLOGICO, ESPACIAL } from '../../theme/tema';
 
 interface Props {
   value: number; // nível de alinhamento mínimo, 0–4 (escala Likert)
@@ -47,7 +47,8 @@ export function StarsRuler({ value, onChange }: Props) {
   };
 
   const ink = colors.text.primary;
-  const sun = ESPACIAL ? '#FAC775' : ink;
+  // O sol: quente no espacial, âmbar no ecológico; no terracota, da mesma tinta dos planetas.
+  const sun = ESPACIAL ? '#FAC775' : ECOLOGICO ? '#C98A2B' : ink;
 
   return (
     <View style={styles.row}>
@@ -76,7 +77,7 @@ export function StarsRuler({ value, onChange }: Props) {
             {/* o eixo: tracejado e apagado fora da conjunção, firme dentro dela */}
             <Line x1={xOf(0)} y1={MID} x2={xOf(current)} y2={MID} stroke={ink} strokeWidth={1} strokeDasharray="2 4" opacity={0.3} />
             <Line x1={xOf(current)} y1={MID} x2={sunX} y2={MID} stroke={ink} strokeWidth={1.4} />
-            {/* o sol: disco com raios curtos, quente no tema espacial */}
+            {/* o sol: disco com raios curtos, colorido nos temas espacial e ecológico */}
             {RAYS.map((a) => (
               <Line
                 key={a}

@@ -1,22 +1,35 @@
 // Configurações › Transcrição no celular: modelo Parakeet (baixar / progresso /
-// apagar) e a transcrição automática que refaz a triagem.
+// apagar), a transcrição automática que refaz a triagem (só os bem ranqueados)
+// e o que chegou do Mac pelo Drive — com o motivo, quando a fila está parada.
 import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import * as db from '../services/db';
+import { desktopStatus } from '../services/desktopTranscripts';
 import { isUnmeteredNetwork } from '../services/media';
 import { AUTO_OPTIONS } from '../services/transcription';
-import { useTranscribeStore } from '../store/useTranscribeStore';
+import { autoQueue, useTranscribeStore } from '../store/useTranscribeStore';
 import { colors, spacing, typography } from '../theme';
 import { Button } from './Button';
 import { Chip } from './Chip';
 
 const MB = 1024 * 1024;
 
+function ago(ms: number): string {
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (min < 60) return `há ${Math.max(1, min)} min`;
+  const h = Math.round(min / 60);
+  if (h < 48) return `há ${h} h`;
+  return `há ${Math.round(h / 24)} dias`;
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 export function TranscriptionSettings() {
   const model = useTranscribeStore((s) => s.model);
   const autoMode = useTranscribeStore((s) => s.autoMode);
   const autoRunning = useTranscribeStore((s) => s.autoRunning);
+  const autoBlocked = useTranscribeStore((s) => s.autoBlocked);
   const version = useTranscribeStore((s) => s.version);
   const jobs = useTranscribeStore((s) => s.jobs);
   const setAuto = useTranscribeStore((s) => s.setAuto);
@@ -27,7 +40,10 @@ export function TranscriptionSettings() {
 
   useEffect(() => init(), [init]); // relê o estado do modelo ao abrir
 
-  const pending = useMemo(() => db.autoTranscribeCandidates(200).length, [version, autoRunning]);
+  const queue = useMemo(() => autoQueue(), [version, autoRunning]);
+  const pending = queue.ready.length;
+  const failure = useMemo(() => db.lastAsrFailure(), [version, autoRunning]);
+  const desk = useMemo(() => desktopStatus(), [version, autoRunning]);
   const totalMb = Math.round((model.total || 670 * MB) / MB);
   const pct = model.total ? Math.round((model.received / model.total) * 100) : 0;
   const current = Object.entries(jobs).find(([, j]) => j.auto);
@@ -81,9 +97,36 @@ export function TranscriptionSettings() {
           ? `Transcrevendo agora: ${currentTitle}. `
           : ''}
         {pending > 0
-          ? `${pending} vídeo${pending === 1 ? '' : 's'} na fila${model.installed ? '' : ' (esperando o modelo)'}.`
-          : 'Nenhum vídeo esperando transcrição.'}
+          ? `${plural(pending, 'vídeo bem ranqueado', 'vídeos bem ranqueados')} na fila${model.installed ? '' : ' (esperando o modelo)'}.`
+          : 'Nenhum vídeo bem ranqueado esperando transcrição.'}
+        {queue.waitingMac.length > 0
+          ? ` ${plural(queue.waitingMac.length, 'espera', 'esperam')} o Mac (o celular assume 3 h depois da triagem).`
+          : ''}
+        {queue.below > 0
+          ? ` ${queue.below} abaixo do seu limiar de estrelas: só pelo botão Transcrever.`
+          : ''}
         {' '}“Só no Wi-Fi” vale para baixar o áudio; a transcrição em si não usa internet.
+      </Text>
+      {autoMode !== 'off' && autoBlocked === 'network' && pending > 0 && !currentTitle && (
+        <Text style={styles.warn}>
+          Parada: sem Wi-Fi para baixar o áudio. Volta sozinha no Wi-Fi — ou escolha “Wi-Fi e dados móveis”.
+        </Text>
+      )}
+      {failure && (
+        <Text style={styles.hint}>
+          Última falha: “{failure.title}” — {failure.error || 'sem detalhe'} ({ago(Date.parse(failure.at))}).
+          {failure.tries < db.ASR_MAX_TRIES ? ' Tenta de novo sozinha mais tarde.' : ' Desistiu dele: só pelo botão.'}
+        </Text>
+      )}
+      <Text style={styles.hint}>
+        {desk.newest > 0
+          ? `Do Mac: ${plural(desk.received, 'transcrição recebida', 'transcrições recebidas')} · a última feita ${ago(desk.newest)}` +
+            (desk.waiting > 0 ? ` · ${desk.waiting} à espera de o vídeo chegar ao feed` : '') +
+            '.'
+          : desk.lastCheck > 0
+            ? `Do Mac: nada ainda (Drive conferido ${ago(desk.lastCheck)}; o Mac grava em Askesis/aspis-transcricoes.json).`
+            : 'Do Mac: conecte a conta Google para receber as transcrições feitas no Mac.'}
+        {desk.error ? ` Erro do Drive: ${desk.error}` : ''}
       </Text>
     </View>
   );

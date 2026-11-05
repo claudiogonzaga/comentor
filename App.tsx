@@ -22,6 +22,7 @@ import { startAutoRefresh } from './src/aspis/services/autoRefresh';
 import { startKairos } from './src/kairos/store';
 import { startKinesis } from './src/kinesis/store';
 import { startConfigSync } from './src/services/configSync';
+import { startStrictAnswers } from './src/services/strictAnswers';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
 import { useAppStore } from './src/store/useAppStore';
 import {
@@ -36,6 +37,10 @@ import { scheduleInspirationNotifications } from './src/services/inspiration';
 import { rearmSpoken } from './src/services/spokenNudges';
 import { captureHealthDaily } from './src/services/health';
 import { colors } from './src/theme';
+import { ECOLOGICO } from './src/theme/tema';
+
+// A barra de status: ícones claros sobre o terracota e o céu; escuros sobre a folha clara.
+const STATUS_BAR = ECOLOGICO ? 'dark' : 'light';
 
 SplashScreenAPI.preventAutoHideAsync().catch(() => {});
 
@@ -108,12 +113,22 @@ export default function App() {
     if (ready) startConfigSync();
   }, [ready]);
 
-  // Tocar na notificação do timer abre a aba do Kinesis.
+  // Hábitos rigorosos: aplica as respostas tocadas na notificação que vibra
+  // (Fiz / Mais tempo / Não vou fazer), inclusive as dadas com o app fechado.
+  useEffect(() => {
+    if (!ready) return;
+    return startStrictAnswers();
+  }, [ready]);
+
+  // Tocar na notificação do timer abre a aba do Kinesis; na de um hábito
+  // rigoroso, a Home, onde o hábito está (abrir não cala a vibração).
   useEffect(() => {
     if (!ready || !navReady) return;
     const open = (url: string | null) => {
       if (url?.startsWith('askesis://kinesis') && navigationRef.current?.isReady?.()) {
         navigationRef.current.navigate('Main', { screen: 'Kinesis' });
+      } else if (url?.startsWith('askesis://comentora') && navigationRef.current?.isReady?.()) {
+        navigationRef.current.navigate('Main', { screen: 'Home' });
       }
     };
     void Linking.getInitialURL().then(open).catch(() => {});
@@ -139,7 +154,7 @@ export default function App() {
       <SafeAreaProvider>
         <View style={{ flex: 1, backgroundColor: colors.bg.primary }}>
           <InAppSplash />
-          <StatusBar style="light" />
+          <StatusBar style={STATUS_BAR} />
         </View>
       </SafeAreaProvider>
     );
@@ -152,7 +167,7 @@ export default function App() {
         <MiniPlayerHost />
         {/* A leitura do X roda de qualquer aba (atualização contínua do Aspis). */}
         <XHarvester />
-        <StatusBar style="light" />
+        <StatusBar style={STATUS_BAR} />
       </View>
     </SafeAreaProvider>
   );

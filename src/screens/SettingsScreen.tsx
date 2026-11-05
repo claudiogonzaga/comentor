@@ -44,6 +44,7 @@ import type { Tone } from '../types';
 const TEMAS: { value: Tema; label: string }[] = [
   { value: 'terracota', label: 'Terracota grego' },
   { value: 'espacial', label: 'Espacial' },
+  { value: 'ecologico', label: 'Ecológico' },
 ];
 
 const TONES: { value: Tone; label: string }[] = [

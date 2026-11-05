@@ -2,7 +2,7 @@
 // do CoMentor). O fundo terracota é aplicado em VaseBackground; aqui ficam os
 // tons fixos. A ação primária (`accent.gold`) é o preto da figura negra; o
 // texto sobre ela (`text.onGold`) é creme.
-import { ESPACIAL } from '../../theme/tema';
+import { ECOLOGICO, ESPACIAL } from '../../theme/tema';
 const TERRACOTA = {
   bg: {
     primary: '#C8703F',
@@ -27,6 +27,33 @@ const TERRACOTA = {
   },
   border: 'rgba(42,26,16,0.28)',
   star: 'rgba(42,26,16,0.50)',
+} as const;
+
+// Ecológico: claro, de folha e musgo. A ação primária é o verde-musgo escuro.
+const ECO = {
+  bg: {
+    primary: '#EEF2E6',
+    gradientEnd: '#DCE6D2',
+    surface: 'rgba(31,51,38,0.06)',
+    surfaceStrong: 'rgba(31,51,38,0.11)',
+    overlay: 'rgba(15,30,20,0.55)',
+  },
+  accent: {
+    gold: '#2F5D3A', // ação primária = verde-musgo
+    goldDim: '#6E8B5E',
+    lavender: '#4F7F8C',
+    success: '#5E8C3A',
+    warning: '#C98A2B',
+    danger: '#B5452F',
+  },
+  text: {
+    primary: '#1F3326',
+    secondary: 'rgba(31,51,38,0.68)',
+    tertiary: 'rgba(31,51,38,0.45)',
+    onGold: '#F1F5EC', // texto claro sobre o botão verde
+  },
+  border: 'rgba(31,51,38,0.22)',
+  star: 'rgba(201,138,43,0.60)',
 } as const;
 
 export const colors = ESPACIAL
@@ -55,7 +82,9 @@ export const colors = ESPACIAL
       border: 'rgba(107,122,168,0.38)',
       star: 'rgba(250,238,218,0.60)',
     } as const)
-  : TERRACOTA;
+  : ECOLOGICO
+    ? ECO
+    : TERRACOTA;
 
 
 // Alinhamento: escala Likert de 5 níveis (0–4), em figura negra (ver StarsRuler).
@@ -66,7 +95,7 @@ export const ALIGN_MID = (ALIGN_LEVELS - 1) / 2; // 2 = 50%
 export const ALIGN_LABELS = ['mínimo', 'baixo', 'médio', 'alto', 'máximo'] as const;
 
 // Cores dos pills de pilar — tons de terra/cerâmica, coerentes com o vaso (no espacial,
-// os tons claros do céu).
+// os tons claros do céu; no ecológico, folha, água, âmbar e casca).
 export const PILLAR_PALETTE = ESPACIAL
   ? ([
       '#B5D4F4', // azul de Netuno
@@ -75,6 +104,15 @@ export const PILLAR_PALETTE = ESPACIAL
       '#F4C0D1', // rosa
       '#CECBF6', // lavanda
       '#FAEEDA', // creme do astro
+    ] as const)
+  : ECOLOGICO
+  ? ([
+      '#5E8C3A', // folha
+      '#4F7F8C', // água
+      '#C98A2B', // âmbar
+      '#B5452F', // fruto
+      '#6B4F36', // casca
+      '#8A7F3B', // musgo seco
     ] as const)
   : ([
       '#7C4A2C', // sépia

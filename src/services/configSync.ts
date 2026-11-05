@@ -10,6 +10,8 @@
 // que foi visto na última passada, sem gancho em cada tela. As regras são as mesmas
 // de sync.py, no projeto do Mac. As chaves de API NÃO passam por aqui. Cada tarefa
 // do Kairós é uma chave; apagada, vira null por 30 dias, para o outro lado apagar.
+// Cada card ocultado no feed do Escudo também é uma chave (aspis.oculto.*), com regras
+// próprias de validade (ocultoSync.ts).
 //
 // Limite conhecido: com o app fechado o JS não roda. Uma tarefa marcada no Mac só
 // cala as cobranças do telefone quando o Áskesis volta a abrir aqui.
@@ -53,6 +55,7 @@ import {
 import { confirmMedication, resetMedicationToday, skipMedicationToday } from './medications';
 import { confirmNudge, resetNudgeToday, skipNudgeToday } from './nudges';
 import { getEffectiveQuietPeriods } from './quietHours';
+import { OCULTO_DROP_MS, OCULTO_KEEP_MS, OCULTO_PREFIX, chavesOcultas, syncOculto } from './ocultoSync';
 import { onLocalChange } from './syncBus';
 
 const FOLDER_NAME = 'Askesis';
@@ -227,8 +230,10 @@ function isAspisDefault(key: string, value: unknown): boolean {
   }
 }
 
-/** O que este telefone tem agora, por chave do arquivo, e se as tarefas puderam ser lidas. */
-async function collect(state: SyncState): Promise<{ local: Record<string, unknown>; kairosOk: boolean }> {
+/** O que este telefone tem agora, por chave do arquivo, e se as tarefas e os ocultos puderam ser lidos. */
+async function collect(
+  state: SyncState,
+): Promise<{ local: Record<string, unknown>; kairosOk: boolean; ocultoOk: boolean }> {
   const local: Record<string, unknown> = {};
 
   const k = useKinesis.getState();
@@ -262,6 +267,18 @@ async function collect(state: SyncState): Promise<{ local: Record<string, unknow
     if (thumbs.length || state.hash['aspis.thumbs'] !== undefined) local['aspis.thumbs'] = thumbs;
   }
 
+  // Os cards ocultados no Escudo: uma chave por card, só os que mudaram nos últimos 60
+  // dias. Sem conseguir ler o banco, a família fica de fora (o vazio aplicaria o de lá
+  // por cima de um "desfazer" daqui).
+  let ocultoOk = true;
+  try {
+    aspisDb.pruneHidden(Date.now() - OCULTO_DROP_MS);
+    Object.assign(local, chavesOcultas(aspisDb.hiddenChanges(Date.now() - OCULTO_KEEP_MS)));
+  } catch (err) {
+    console.warn('[configSync] ocultos', err);
+    ocultoOk = false;
+  }
+
   const config = await getUserConfig();
   // Campo a campo: mudar o tom lá não desfaz uma mudança de horário aqui.
   for (const field of CONFIG_FIELDS) {
@@ -283,6 +300,7 @@ async function collect(state: SyncState): Promise<{ local: Record<string, unknow
     enabled: n.enabled,
     scheduleTime: n.scheduleTime,
     orderIndex: n.orderIndex,
+    strict: n.strict,
     // Hábito já formado sai da lista do dia e não é cobrado.
     ...(hidden.has(n.type) ? { hidden: true } : {}),
   }));
@@ -295,6 +313,7 @@ async function collect(state: SyncState): Promise<{ local: Record<string, unknow
     enabled: m.enabled,
     daysOfWeek: m.daysOfWeek,
     fastingHours: m.fastingHours ?? null,
+    strict: m.strict,
   }));
   // Inclui o sono derivado do horário de dormir. No Mac é só leitura.
   local['comentora.quiet'] = await getEffectiveQuietPeriods().catch(() => []);
@@ -314,12 +333,12 @@ async function collect(state: SyncState): Promise<{ local: Record<string, unknow
   // Sem conseguir ler as tarefas, a família fica de fora: o vazio apagaria tudo.
   await useKairos.getState().load();
   const kairos = useKairos.getState();
-  if (!kairos.loaded) return { local, kairosOk: false };
+  if (!kairos.loaded) return { local, kairosOk: false, ocultoOk };
   for (const t of kairos.tarefas) local[`${KAIROS_PREFIX}${t.id}`] = t;
   for (const key of Object.keys(state.hash)) {
     if (key.startsWith(KAIROS_PREFIX) && !(key in local)) local[key] = null;
   }
-  return { local, kairosOk: true };
+  return { local, kairosOk: true, ocultoOk };
 }
 
 async function applyMeds(remote: (Partial<Medication> & { id?: number | null })[]): Promise<void> {
@@ -335,6 +354,8 @@ async function applyMeds(remote: (Partial<Medication> & { id?: number | null })[
       enabled: r.enabled !== false,
       daysOfWeek: r.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6],
       fastingHours: r.fastingHours ?? null,
+      // Rigoroso: só um booleano muda; ausente (um Mac antigo) mantém o do telefone.
+      ...(typeof r.strict === 'boolean' ? { strict: r.strict } : {}),
     };
     if (typeof r.id === 'number' && byId.has(r.id)) {
       keep.add(r.id);
@@ -375,6 +396,8 @@ async function applyDone(key: string, value: unknown): Promise<void> {
 interface Effects {
   reschedule: boolean;
   refreshConfig: boolean;
+  /** Um card do Escudo foi ocultado ou voltou: o feed relê o banco. */
+  feed?: boolean;
 }
 
 async function applyItem(key: string, value: unknown, fx: Effects): Promise<void> {
@@ -386,20 +409,24 @@ async function applyItem(key: string, value: unknown, fx: Effects): Promise<void
     fx.reschedule = true;
   } else if (key === 'comentora.nudges') {
     const current = await listNudges();
-    for (const r of value as { type: string; enabled: boolean; scheduleTime: string; title: string; body: string }[]) {
+    for (const r of value as { type: string; enabled: boolean; scheduleTime: string; title: string; body: string; strict?: unknown }[]) {
       const n = current.find((x) => x.type === r.type);
       if (!n) continue;
+      // Rigoroso: só um booleano muda; ausente (um Mac antigo) mantém o do telefone.
+      const strict = typeof r.strict === 'boolean' ? r.strict : n.strict;
       if (
         n.enabled !== r.enabled ||
         n.scheduleTime !== r.scheduleTime ||
         n.title !== r.title ||
-        n.body !== r.body
+        n.body !== r.body ||
+        n.strict !== strict
       ) {
         await updateNudge(n.id, {
           enabled: r.enabled,
           scheduleTime: r.scheduleTime,
           title: r.title,
           body: r.body,
+          strict,
         });
         fx.reschedule = true;
       }
@@ -576,7 +603,7 @@ async function runOnce(): Promise<void> {
 
   const items: Record<string, SyncItem> = { ...(doc?.items ?? {}) };
   const first = !state.firstDone;
-  const { local, kairosOk } = await collect(state);
+  const { local, kairosOk, ocultoOk } = await collect(state);
   const fx: Effects = { reschedule: false, refreshConfig: false };
   const applied: string[] = [];
   const oldestDay = recentDays()[DONE_KEEP_DAYS - 1];
@@ -592,6 +619,25 @@ async function runOnce(): Promise<void> {
       delete state.t[key];
       continue;
     }
+    if (key.startsWith(OCULTO_PREFIX)) {
+      // Sem conseguir ler os ocultos daqui, a família fica de fora desta passada.
+      if (!ocultoOk) continue;
+      const passo = syncOculto(
+        key,
+        key in local ? (local[key] as number | null) : undefined,
+        items,
+        state,
+        first,
+        now,
+        DEVICE,
+        hashOf,
+        aspisDb.applyHidden,
+      );
+      if (passo.dirty) dirty = true;
+      if (passo.feed) fx.feed = true;
+      continue;
+    }
+
     const remote = items[key];
 
     if (key.startsWith(KAIROS_PREFIX)) {
@@ -665,6 +711,7 @@ async function runOnce(): Promise<void> {
   }
 
   if (fx.refreshConfig) await useAppStore.getState().refreshConfig();
+  if (fx.feed) useAspisStore.getState().bumpFeed();
   if (fx.reschedule) await rescheduleAllNotifications().catch(() => {});
 
   // O que acabou de ser aplicado é o novo "visto": a forma daqui, já normalizada.

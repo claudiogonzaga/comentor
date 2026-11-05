@@ -211,7 +211,7 @@ export function AiProviderPanel({
           </Pressable>
           <Text style={styles.note}>
             O Claude cuida do TEXTO: chat, cobranças, entrevista e argumentos da Comentora, e a análise de vídeos do
-            Aspis. Ele não gera áudio nem assiste vídeo: a voz neural continua sendo a do Gemini, e um vídeo sem legenda
+            Escudo. Ele não gera áudio nem assiste vídeo: a voz neural continua sendo a do Gemini, e um vídeo sem legenda
             só é assistido com a chave do Gemini. O uso do Claude é cobrado pela Anthropic na sua conta.
           </Text>
         </View>

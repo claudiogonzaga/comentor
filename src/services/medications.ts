@@ -26,6 +26,14 @@ import {
   type SpokenTaskAlarm,
 } from './spokenNudges';
 import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
+import {
+  daysMask,
+  snoozeStrictInsistence,
+  stopStrictInsistence,
+  strictMedKey,
+  syncStrictHabits,
+  type StrictHabitItem,
+} from './strictHabits';
 import { refreshReviewNotification } from './review';
 import { notifyLocalChange } from './syncBus';
 import { persuasiveBody, escalationBody } from './persuasion';
@@ -283,6 +291,8 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
     /* keep default */
   }
   const spokenChain: SpokenTaskAlarm[] = [];
+  // Os RIGOROSOS: no horário, o nativo vibra em pulsos até a resposta.
+  const strict: StrictHabitItem[] = [];
 
   for (const med of meds) {
     if (!med.enabled) continue;
@@ -479,6 +489,26 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
       }
     }
 
+    // RIGOROSO: além da âncora e da corrente, o nativo vibra em pulsos no
+    // horário, nos dias ativos, até a resposta. Respondido hoje: hoje não chama.
+    if (med.strict) {
+      const answeredToday = doneKeys.includes(key) || doneKeys.includes(skipKey(med.id));
+      const snoozeUntil = answeredToday
+        ? 0
+        : Number(await getKV(snoozeUntilKey(med.id)).catch(() => null)) || 0;
+      strict.push({
+        key: strictMedKey(med.id),
+        title,
+        body: baseBody,
+        name: med.name,
+        hour: safeHour,
+        minute: safeMinute,
+        days: daysMask(activeDays),
+        skipDay: answeredToday ? today : '',
+        resumeAt: snoozeUntil > Date.now() ? snoozeUntil : 0,
+      });
+    }
+
     // Corrente de insistências de hoje — só se HOJE for um dia ativo e o
     // lembrete ainda não tiver sido marcado como feito.
     if (activeDays.includes(todayDow) && !doneKeys.includes(key) && !doneKeys.includes(skipKey(med.id))) {
@@ -585,6 +615,8 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
   void syncSpokenMedications(spokenItems).catch(() => {});
   // Com await, para quem espera esta passada cancelar a voz já com tudo armado.
   await syncSpokenTasks('medf', spokenChain).catch(() => {});
+  // Idem para a vibração dos rigorosos (lembrete que saiu da lista para de insistir).
+  await syncStrictHabits('med', strict).catch(() => {});
   notifyLocalChange();
 
   return ids;
@@ -652,6 +684,8 @@ export async function confirmMedication(medId: number, meta: ConfirmMeta = {}): 
   // `meta.day`: dia do lembrete respondido (notificação de ontem respondida
   // depois da meia-noite pertence a ontem).
   const today = logicalDay(meta.day);
+  // Rigoroso vibrando: para já, antes de qualquer espera abaixo.
+  stopStrictInsistence(strictMedKey(medId), today);
   try {
     await markNudgeDone(completionKey(medId), today);
   } catch (err) {
@@ -671,6 +705,7 @@ export async function confirmMedication(medId: number, meta: ConfirmMeta = {}): 
  */
 export async function skipMedicationToday(medId: number, meta: ConfirmMeta = {}): Promise<void> {
   const today = logicalDay(meta.day);
+  stopStrictInsistence(strictMedKey(medId), today);
   try {
     await markNudgeDone(skipKey(medId), today);
   } catch (err) {
@@ -719,8 +754,15 @@ export async function resetMedicationToday(medId: number): Promise<void> {
  * "Lembrar depois": agenda uma única insistência deste medicamento daqui a
  * `minutes` minutos (não marca como tomado). A âncora diária e a corrente
  * normal seguem intactas.
+ *
+ * `opts.until`: prazo exato (epoch ms) em vez de `minutes` a partir de agora — é
+ * o "Mais tempo" tocado na notificação rigorosa, aplicado depois (strictAnswers).
  */
-export async function snoozeMedication(medId: number, minutes = 20): Promise<void> {
+export async function snoozeMedication(
+  medId: number,
+  minutes = 20,
+  opts: { until?: number } = {},
+): Promise<void> {
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
 
@@ -736,7 +778,12 @@ export async function snoozeMedication(medId: number, minutes = 20): Promise<voi
   const med = meds.find((x) => x.id === medId);
   if (!med) return;
 
-  const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
+  const fireAt =
+    opts.until && opts.until > Date.now()
+      ? new Date(opts.until)
+      : new Date(Date.now() + Math.max(1, minutes) * 60_000);
+  // Rigoroso: para de vibrar agora e volta a insistir no fim do prazo.
+  snoozeStrictInsistence(strictMedKey(medId), fireAt.getTime());
   // Guarda o prazo: qualquer reagendamento (abrir o app, salvar algo) cancela
   // todos os lembretes e precisa saber recriar este aviso e respeitar a pausa.
   await setKV(snoozeUntilKey(medId), String(fireAt.getTime())).catch(() => {});

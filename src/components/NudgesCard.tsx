@@ -13,7 +13,8 @@ import { Card } from './Card';
 import { GreekIcon } from './GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
 import { listNudges } from '../services/database';
-import { setNudgeEnabled, setNudgeTime } from '../services/nudges';
+import { setNudgeEnabled, setNudgeStrict, setNudgeTime } from '../services/nudges';
+import { checkStrictPrereqs } from '../services/strictHabits';
 import { iconForEmoji } from '../services/todos';
 import type { Nudge } from '../types';
 
@@ -47,6 +48,19 @@ function NudgeRow({ nudge, onChange }: NudgeRowProps) {
     }
   };
 
+  // Rigoroso: no horário, vibra em pulsos até a resposta.
+  const toggleStrict = async () => {
+    const next = !nudge.strict;
+    if (next && !checkStrictPrereqs()) return;
+    setBusy(true);
+    try {
+      const updated = await setNudgeStrict(nudge.id, next);
+      if (updated) onChange(updated);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleTime = async (_event: unknown, date?: Date) => {
     if (Platform.OS === 'android') setPickerOpen(false);
     if (!date) return;
@@ -70,14 +84,36 @@ function NudgeRow({ nudge, onChange }: NudgeRowProps) {
         <Text style={styles.body} numberOfLines={3}>
           {nudge.body}
         </Text>
-        <Pressable
-          onPress={() => setPickerOpen(true)}
-          style={[styles.timeBtn, !nudge.enabled && { opacity: 0.5 }]}
-          disabled={!nudge.enabled || busy}
-        >
-          <GreekIcon name="clock" size={13} color={colors.accent.gold} />
-          <Text style={styles.timeText}>{nudge.scheduleTime}</Text>
-        </Pressable>
+        <View style={styles.chipsRow}>
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            style={[styles.timeBtn, !nudge.enabled && { opacity: 0.5 }]}
+            disabled={!nudge.enabled || busy}
+          >
+            <GreekIcon name="clock" size={13} color={colors.accent.gold} />
+            <Text style={styles.timeText}>{nudge.scheduleTime}</Text>
+          </Pressable>
+          {/* Rigoroso: vibra até você responder (Fiz / Mais tempo / Não vou fazer). */}
+          <Pressable
+            onPress={toggleStrict}
+            style={[
+              styles.timeBtn,
+              nudge.strict && styles.strictOn,
+              !nudge.enabled && { opacity: 0.5 },
+            ]}
+            disabled={!nudge.enabled || busy}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: nudge.strict }}
+            accessibilityLabel="Rigoroso: vibra até você responder"
+          >
+            <Text style={[styles.strictText, nudge.strict && styles.strictTextOn]}>
+              {nudge.strict ? 'Rigoroso ✓' : 'Rigoroso'}
+            </Text>
+          </Pressable>
+        </View>
+        {nudge.strict && nudge.enabled && (
+          <Text style={styles.strictHint}>Vibra em pulsos até você responder.</Text>
+        )}
       </View>
       <View style={styles.rowRight}>
         {busy ? (
@@ -227,5 +263,26 @@ const styles = StyleSheet.create({
   timeText: {
     ...typography.small,
     color: colors.accent.gold,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  strictOn: {
+    borderColor: colors.accent.gold,
+    backgroundColor: 'rgba(244,197,83,0.15)',
+  },
+  strictText: {
+    ...typography.small,
+    color: colors.text.secondary,
+  },
+  strictTextOn: {
+    color: colors.accent.gold,
+  },
+  strictHint: {
+    ...typography.small,
+    color: colors.text.tertiary,
+    marginTop: 4,
   },
 });

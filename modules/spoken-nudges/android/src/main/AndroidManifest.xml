@@ -8,6 +8,12 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+  <!-- Hábitos rigorosos: vibra em pulsos até a resposta, num serviço em primeiro
+       plano do tipo specialUse (Android 14+ exige o tipo e a permissão dele; não é
+       mídia, nem sincronização, nem dura só 3 min como o shortService). -->
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <!-- Fase 2 (coleta de uso do celular): permissão ESPECIAL, concedida pelo
        usuário em Configurações > Acesso ao uso. Declarar aqui só faz o app
        aparecer naquela lista; nada é lido sem a concessão explícita. -->
@@ -37,5 +43,20 @@
       android:name="expo.modules.spokennudges.SpokenSpeechService"
       android:exported="false"
       android:foregroundServiceType="mediaPlayback" />
+
+    <!-- Hábitos rigorosos: alarmes (horário, fim do "Mais tempo") e os botões da
+         notificação (Fiz / Mais tempo / Não vou fazer). -->
+    <receiver
+      android:name="expo.modules.spokennudges.StrictReceiver"
+      android:exported="false" />
+
+    <service
+      android:name="expo.modules.spokennudges.StrictNudgeService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Lembrete de hábito escolhido pelo usuário que vibra em pulsos até ele responder (fiz / mais tempo / não vou fazer), com teto de 45 minutos." />
+    </service>
   </application>
 </manifest>

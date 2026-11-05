@@ -36,6 +36,7 @@ import { isSleepHabitFormed } from '../services/habitFormation';
 import { ensureChannel, ensurePermissions, scheduleNightReminders } from '../services/notifications';
 import { ensureSleepHabit } from '../services/coach';
 import { scheduleSleepAwarenessNotifications } from '../services/sleepAwareness';
+import { checkStrictPrereqs } from '../services/strictHabits';
 import { useAppStore } from '../store/useAppStore';
 import { iconForEmoji } from '../services/todos';
 import type { Medication } from '../types';
@@ -113,6 +114,8 @@ interface EditorState {
   daysOfWeek: number[];
   /** Jejum intermitente: horas de jejum, ou null = hábito normal. */
   fastingHours: number | null;
+  /** Rigoroso: vibra em pulsos até a resposta. */
+  strict: boolean;
 }
 
 const EMPTY_EDITOR: EditorState = {
@@ -124,6 +127,7 @@ const EMPTY_EDITOR: EditorState = {
   emoji: '💧',
   daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
   fastingHours: null,
+  strict: false,
 };
 
 export function RemindersScreen() {
@@ -230,6 +234,7 @@ export function RemindersScreen() {
       emoji: med.emoji ?? '💧',
       daysOfWeek: med.daysOfWeek?.length ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6],
       fastingHours: med.fastingHours ?? null,
+      strict: !!med.strict,
     });
   };
 
@@ -269,6 +274,7 @@ export function RemindersScreen() {
           enabled: true,
           daysOfWeek: editor.daysOfWeek,
           fastingHours: editor.fastingHours,
+          strict: editor.strict && editor.fastingHours == null,
         });
       } else {
         await updateMedication(editor.id, {
@@ -278,6 +284,7 @@ export function RemindersScreen() {
           emoji: editor.emoji,
           daysOfWeek: editor.daysOfWeek,
           fastingHours: editor.fastingHours,
+          strict: editor.strict && editor.fastingHours == null,
         });
       }
       await scheduleAllMedications();
@@ -384,6 +391,9 @@ export function RemindersScreen() {
             {'\n\n'}
             Vale para os hábitos da Comentora. Os lembretes que você criou (remédios e
             “Meus hábitos”) são cobrados no intervalo fixo, sem dobrar, até você responder.
+            {'\n\n'}
+            Hábito que não pode passar? Ligue “Rigoroso” nele: no horário, o celular vibra
+            em pulsos até você responder.
           </Text>
         </Card>
 
@@ -502,6 +512,7 @@ export function RemindersScreen() {
               {med.daysOfWeek.length < 7 && (
                 <Text style={styles.rowDays}>{formatDays(med.daysOfWeek)}</Text>
               )}
+              {med.strict && <Text style={styles.strictBadge}>Rigoroso · vibra até você responder</Text>}
             </Pressable>
             <View style={styles.rowRight}>
               {busyId === med.id ? (
@@ -546,117 +557,142 @@ export function RemindersScreen() {
         >
           <Pressable style={styles.modalBackdrop} onPress={closeEditor} />
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>
-              {editor.id == null ? 'Novo hábito' : 'Editar hábito'}
-            </Text>
+            {/* Rola quando o editor não cabe na tela (o rigoroso aumentou a folha). */}
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>
+                {editor.id == null ? 'Novo hábito' : 'Editar hábito'}
+              </Text>
 
-            {editor.id == null && (
-              <>
-                <Text style={styles.fieldLabel}>Hábitos prontos</Text>
-                <View style={styles.templateRow}>
-                  {HABIT_TEMPLATES.map((t) => (
+              {editor.id == null && (
+                <>
+                  <Text style={styles.fieldLabel}>Hábitos prontos</Text>
+                  <View style={styles.templateRow}>
+                    {HABIT_TEMPLATES.map((t) => (
+                      <Pressable
+                        key={t.name}
+                        style={styles.templateChip}
+                        onPress={() => applyTemplate(t)}
+                      >
+                        <GreekIcon
+                          name={iconForEmoji(t.emoji, 'nudge')}
+                          size={15}
+                          color={colors.accent.gold}
+                        />
+                        <Text style={styles.templateChipText}>{t.name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              <Text style={styles.fieldLabel}>Ícone</Text>
+              <View style={styles.iconRow}>
+                {ICON_CHOICES.map((c) => {
+                  const on = editor.emoji === c.emoji;
+                  return (
                     <Pressable
-                      key={t.name}
-                      style={styles.templateChip}
-                      onPress={() => applyTemplate(t)}
+                      key={c.emoji}
+                      onPress={() => setEditor((s) => ({ ...s, emoji: c.emoji }))}
+                      style={[styles.iconChip, on && styles.iconChipOn]}
                     >
                       <GreekIcon
-                        name={iconForEmoji(t.emoji, 'nudge')}
-                        size={15}
-                        color={colors.accent.gold}
+                        name={c.icon}
+                        size={24}
+                        color={on ? colors.accent.gold : colors.text.primary}
                       />
-                      <Text style={styles.templateChipText}>{t.name}</Text>
                     </Pressable>
-                  ))}
+                  );
+                })}
+              </View>
+
+              <Text style={styles.fieldLabel}>Nome</Text>
+              <TextInput
+                value={editor.name}
+                onChangeText={(t) => setEditor((s) => ({ ...s, name: t }))}
+                placeholder="Ex.: Beber água, Vitamina D, Jejum…"
+                placeholderTextColor={colors.text.tertiary}
+                style={styles.input}
+                returnKeyType="next"
+              />
+
+              <Text style={styles.fieldLabel}>Detalhe (opcional)</Text>
+              <TextInput
+                value={editor.dosage}
+                onChangeText={(t) => setEditor((s) => ({ ...s, dosage: t }))}
+                placeholder="Ex.: 1 copo, 2 cápsulas…"
+                placeholderTextColor={colors.text.tertiary}
+                style={styles.input}
+              />
+
+              <View style={{ height: spacing.md }} />
+              <TimePickerInput
+                label="Horário"
+                value={editor.time}
+                onChange={(hhmm) => setEditor((s) => ({ ...s, time: hhmm }))}
+              />
+
+              <View style={{ height: spacing.md }} />
+              <View style={styles.daysLabelRow}>
+                <Text style={styles.fieldLabel}>Dias da semana</Text>
+                <Pressable
+                  onPress={() =>
+                    setEditor((s) => ({
+                      ...s,
+                      daysOfWeek:
+                        s.daysOfWeek.length >= 7 ? [] : [0, 1, 2, 3, 4, 5, 6],
+                    }))
+                  }
+                >
+                  <Text style={styles.daysToggleAll}>
+                    {editor.daysOfWeek.length >= 7 ? 'Limpar' : 'Todos os dias'}
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.dayRow}>
+                {DAY_LABELS.map((lbl, idx) => {
+                  const on = editor.daysOfWeek.includes(idx);
+                  return (
+                    <Pressable
+                      key={idx}
+                      onPress={() => toggleDay(idx)}
+                      style={[styles.dayChip, on && styles.dayChipOn]}
+                    >
+                      <Text style={[styles.dayChipText, on && styles.dayChipTextOn]}>
+                        {lbl}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.daysHint}>{formatDays(editor.daysOfWeek)}</Text>
+
+              {/* Rigoroso: no horário, vibra em pulsos até a resposta. */}
+              <View style={styles.strictRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[typography.bodyMedium, { color: colors.text.primary }]}>
+                    Rigoroso: vibra até você responder
+                  </Text>
+                  <Text style={styles.strictHint}>
+                    Vibra e para, vibra e para — até Fiz, Mais tempo ou Não vou fazer. Para
+                    sozinho em 45 min e não vibra na hora de dormir nem no Não Perturbe.
+                  </Text>
                 </View>
-              </>
-            )}
+                <Switch
+                  value={editor.strict}
+                  onValueChange={(next) => {
+                    if (next && !checkStrictPrereqs()) return;
+                    setEditor((s) => ({ ...s, strict: next }));
+                  }}
+                  trackColor={{ false: colors.bg.surfaceStrong, true: colors.accent.gold }}
+                  thumbColor={editor.strict ? colors.text.onGold : colors.text.tertiary}
+                />
+              </View>
 
-            <Text style={styles.fieldLabel}>Ícone</Text>
-            <View style={styles.iconRow}>
-              {ICON_CHOICES.map((c) => {
-                const on = editor.emoji === c.emoji;
-                return (
-                  <Pressable
-                    key={c.emoji}
-                    onPress={() => setEditor((s) => ({ ...s, emoji: c.emoji }))}
-                    style={[styles.iconChip, on && styles.iconChipOn]}
-                  >
-                    <GreekIcon
-                      name={c.icon}
-                      size={24}
-                      color={on ? colors.accent.gold : colors.text.primary}
-                    />
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={styles.fieldLabel}>Nome</Text>
-            <TextInput
-              value={editor.name}
-              onChangeText={(t) => setEditor((s) => ({ ...s, name: t }))}
-              placeholder="Ex.: Beber água, Vitamina D, Jejum…"
-              placeholderTextColor={colors.text.tertiary}
-              style={styles.input}
-              returnKeyType="next"
-            />
-
-            <Text style={styles.fieldLabel}>Detalhe (opcional)</Text>
-            <TextInput
-              value={editor.dosage}
-              onChangeText={(t) => setEditor((s) => ({ ...s, dosage: t }))}
-              placeholder="Ex.: 1 copo, 2 cápsulas…"
-              placeholderTextColor={colors.text.tertiary}
-              style={styles.input}
-            />
-
-            <View style={{ height: spacing.md }} />
-            <TimePickerInput
-              label="Horário"
-              value={editor.time}
-              onChange={(hhmm) => setEditor((s) => ({ ...s, time: hhmm }))}
-            />
-
-            <View style={{ height: spacing.md }} />
-            <View style={styles.daysLabelRow}>
-              <Text style={styles.fieldLabel}>Dias da semana</Text>
-              <Pressable
-                onPress={() =>
-                  setEditor((s) => ({
-                    ...s,
-                    daysOfWeek:
-                      s.daysOfWeek.length >= 7 ? [] : [0, 1, 2, 3, 4, 5, 6],
-                  }))
-                }
-              >
-                <Text style={styles.daysToggleAll}>
-                  {editor.daysOfWeek.length >= 7 ? 'Limpar' : 'Todos os dias'}
-                </Text>
-              </Pressable>
-            </View>
-            <View style={styles.dayRow}>
-              {DAY_LABELS.map((lbl, idx) => {
-                const on = editor.daysOfWeek.includes(idx);
-                return (
-                  <Pressable
-                    key={idx}
-                    onPress={() => toggleDay(idx)}
-                    style={[styles.dayChip, on && styles.dayChipOn]}
-                  >
-                    <Text style={[styles.dayChipText, on && styles.dayChipTextOn]}>
-                      {lbl}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Text style={styles.daysHint}>{formatDays(editor.daysOfWeek)}</Text>
-
-            <View style={{ height: spacing.lg }} />
-            <Button label="Salvar" onPress={handleSave} loading={saving} />
-            <View style={{ height: spacing.sm }} />
-            <Button label="Cancelar" variant="ghost" onPress={closeEditor} />
+              <View style={{ height: spacing.lg }} />
+              <Button label="Salvar" onPress={handleSave} loading={saving} />
+              <View style={{ height: spacing.sm }} />
+              <Button label="Cancelar" variant="ghost" onPress={closeEditor} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -808,6 +844,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
     borderTopWidth: 1,
     borderColor: colors.border,
+    maxHeight: '92%',
   },
   modalTitle: {
     ...typography.subtitle,
@@ -957,5 +994,22 @@ const styles = StyleSheet.create({
   daysHint: {
     ...typography.small,
     color: colors.text.tertiary,
+  },
+  strictRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  strictHint: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  strictBadge: {
+    ...typography.small,
+    color: colors.accent.gold,
+    marginTop: 4,
   },
 });

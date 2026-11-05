@@ -1,7 +1,8 @@
 // Feed de inscrições ranqueado — port da lista do desktop (ui/index.html):
 // chips de pilar, régua de estrelas mínimas, período Dia/Semana/Mês,
 // "Mostrar lidos", expansão inline da síntese e rodapé com os filtrados.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// Deslizar um card para o lado o oculta, com o "Desfazer" por alguns segundos.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -31,9 +32,14 @@ import { useXStore, XLoginRequired } from '../services/x';
 import type { FeedSource } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import type { RootStackParamList } from '../navigation/types';
+import { notifyLocalChange } from '../../services/syncBus';
 import { colors, spacing, typography } from '../theme';
+import { LOGO_ESCUDO } from '../theme/logo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Feed'>;
+
+/** Quanto tempo o aviso "Ocultado · Desfazer" fica na tela. */
+const UNDO_MS = 5000;
 
 export function FeedScreen({ navigation }: Props) {
   const {
@@ -63,6 +69,34 @@ export function FeedScreen({ navigation }: Props) {
   const progress = useRefreshStore((s) => s.progress);
   const refreshing = busy === source;
   const [banner, setBanner] = useState<{ kind: 'info' | 'ok' | 'err'; text: string; toSettings?: boolean } | null>(null);
+
+  // Ocultar ("não quero isso agora"): sai do feed daqui e do Mac, sem 👍/👎 e sem
+  // marcar lido. O aviso guarda o último ocultado para o Desfazer.
+  const [undoId, setUndoId] = useState<string | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+  }, []);
+  const hideCard = useCallback(
+    (id: string) => {
+      db.hideVideo(id);
+      notifyLocalChange();
+      setExpandedId((cur) => (cur === id ? null : cur));
+      bumpFeed();
+      setUndoId(id);
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      undoTimer.current = setTimeout(() => setUndoId(null), UNDO_MS);
+    },
+    [bumpFeed],
+  );
+  const undoHide = useCallback(() => {
+    if (!undoId) return;
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    db.unhideVideo(undoId);
+    notifyLocalChange();
+    bumpFeed();
+    setUndoId(null);
+  }, [undoId, bumpFeed]);
 
   const sinceIso = useMemo(
     () => new Date(Date.now() - PERIODS[period] * 3600 * 1000).toISOString(),
@@ -197,8 +231,8 @@ export function FeedScreen({ navigation }: Props) {
     <View style={styles.header}>
       <View style={styles.topbar}>
         <View style={styles.wordmark}>
-          <Image source={require('../../../assets/aspis/logo-mark.png')} style={styles.logo} />
-          <Text style={styles.appName}>Aspis</Text>
+          <Image source={LOGO_ESCUDO} style={styles.logo} />
+          <Text style={styles.appName}>Escudo</Text>
         </View>
         <View style={styles.headerActions}>
           <Pressable onPress={() => navigation.navigate('Media')} hitSlop={10}>
@@ -292,7 +326,7 @@ export function FeedScreen({ navigation }: Props) {
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>O X, pelo mesmo escudo</Text>
       <Text style={styles.emptyText}>
-        Entre na sua conta do X e o Aspis lê a sua timeline "Seguindo", analisa os posts e ranqueia o
+        Entre na sua conta do X e o Escudo lê a sua timeline "Seguindo", analisa os posts e ranqueia o
         que serve aos seus pilares, como faz com os vídeos. A senha fica na página do X; o app guarda
         só a sessão, neste aparelho.
       </Text>
@@ -315,7 +349,7 @@ export function FeedScreen({ navigation }: Props) {
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>Seu escudo contra o feed</Text>
       <Text style={styles.emptyText}>
-        Conecte a sua conta Google para o Aspis ler as SUAS inscrições, analisar os vídeos novos
+        Conecte a sua conta Google para o Escudo ler as SUAS inscrições, analisar os vídeos novos
         e ranquear o que realmente serve aos seus pilares.
       </Text>
       <Button
@@ -406,6 +440,7 @@ export function FeedScreen({ navigation }: Props) {
               onPress={() =>
                 setExpandedId(expandedId === item.video_id ? null : item.video_id)
               }
+              onHide={(v) => hideCard(v.video_id)}
             >
               <SynthesisView
                 video={item}
@@ -418,6 +453,15 @@ export function FeedScreen({ navigation }: Props) {
         )}
         contentContainerStyle={styles.list}
       />
+      {undoId && (
+        <View style={styles.undo} accessibilityLiveRegion="polite">
+          <Text style={styles.undoText}>Ocultado</Text>
+          <Text style={styles.undoDot}>·</Text>
+          <Pressable onPress={undoHide} hitSlop={12} accessibilityRole="button">
+            <Text style={styles.undoAction}>Desfazer</Text>
+          </Pressable>
+        </View>
+      )}
     </ScreenContainer>
   );
 }
@@ -515,6 +559,23 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
+  // O aviso do ocultar: uma pílula na tinta do tema, com o texto na cor do fundo.
+  undo: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: 999,
+    backgroundColor: colors.text.primary,
+    elevation: 3,
+  },
+  undoText: { ...typography.small, color: colors.bg.primary },
+  undoDot: { ...typography.small, color: colors.bg.primary, opacity: 0.6 },
+  undoAction: { ...typography.small, fontFamily: 'Inter_600SemiBold', color: colors.bg.primary, textDecorationLine: 'underline' },
   footer: {
     ...typography.small,
     color: colors.text.tertiary,

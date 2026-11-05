@@ -904,6 +904,16 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
   if (!medCols.some((c) => c.name === 'fasting_hours')) {
     await database.execAsync(`ALTER TABLE medications ADD COLUMN fasting_hours INTEGER`);
   }
+  // v1.125: hábito RIGOROSO — no horário, o celular vibra em pulsos até a
+  // resposta (Fiz / Mais tempo / Não vou fazer). Vale para os dois tipos de
+  // hábito: os da Comentora (nudges) e os criados pelo usuário (medications).
+  if (!medCols.some((c) => c.name === 'strict_mode')) {
+    await database.execAsync(`ALTER TABLE medications ADD COLUMN strict_mode INTEGER NOT NULL DEFAULT 0`);
+  }
+  const nudgeCols = await database.getAllAsync<{ name: string }>("PRAGMA table_info('nudges')");
+  if (!nudgeCols.some((c) => c.name === 'strict_mode')) {
+    await database.execAsync(`ALTER TABLE nudges ADD COLUMN strict_mode INTEGER NOT NULL DEFAULT 0`);
+  }
 
   await seedDefaultNudges(database);
 
@@ -1562,6 +1572,7 @@ interface NudgeRow {
   enabled: number;
   schedule_time: string;
   order_index: number;
+  strict_mode?: number | null;
 }
 
 const rowToNudge = (r: NudgeRow): Nudge => ({
@@ -1573,6 +1584,7 @@ const rowToNudge = (r: NudgeRow): Nudge => ({
   enabled: r.enabled === 1,
   scheduleTime: r.schedule_time,
   orderIndex: r.order_index,
+  strict: (r.strict_mode ?? 0) === 1,
 });
 
 export async function listNudges(): Promise<Nudge[]> {
@@ -1585,7 +1597,7 @@ export async function listNudges(): Promise<Nudge[]> {
 
 export async function updateNudge(
   id: number,
-  patch: Partial<Pick<Nudge, 'enabled' | 'scheduleTime' | 'title' | 'body'>>,
+  patch: Partial<Pick<Nudge, 'enabled' | 'scheduleTime' | 'title' | 'body' | 'strict'>>,
 ): Promise<Nudge | null> {
   const d = await getDb();
   const fields: string[] = [];
@@ -1593,6 +1605,10 @@ export async function updateNudge(
   if (typeof patch.enabled === 'boolean') {
     fields.push('enabled = ?');
     values.push(patch.enabled ? 1 : 0);
+  }
+  if (typeof patch.strict === 'boolean') {
+    fields.push('strict_mode = ?');
+    values.push(patch.strict ? 1 : 0);
   }
   if (typeof patch.scheduleTime === 'string') {
     fields.push('schedule_time = ?');
@@ -2246,6 +2262,7 @@ interface MedicationRow {
   days_of_week: string | null;
   order_index: number;
   fasting_hours: number | null;
+  strict_mode?: number | null;
 }
 
 const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6];
@@ -2280,6 +2297,7 @@ const rowToMedication = (r: MedicationRow): Medication => ({
   orderIndex: r.order_index,
   daysOfWeek: parseDaysOfWeek(r.days_of_week),
   fastingHours: r.fasting_hours ?? null,
+  strict: (r.strict_mode ?? 0) === 1,
 });
 
 export async function listMedications(): Promise<Medication[]> {
@@ -2307,6 +2325,7 @@ export async function createMedication(input: {
   enabled?: boolean;
   daysOfWeek?: number[];
   fastingHours?: number | null;
+  strict?: boolean;
 }): Promise<Medication> {
   const d = await getDb();
   // Novo lembrete entra no fim da lista.
@@ -2315,8 +2334,8 @@ export async function createMedication(input: {
   );
   const orderIndex = (max?.m ?? -1) + 1;
   const res = await d.runAsync(
-    `INSERT INTO medications (name, dosage, time, emoji, enabled, days_of_week, order_index, fasting_hours)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO medications (name, dosage, time, emoji, enabled, days_of_week, order_index, fasting_hours, strict_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.name.trim(),
       input.dosage?.trim() || null,
@@ -2326,6 +2345,7 @@ export async function createMedication(input: {
       serializeDaysOfWeek(input.daysOfWeek),
       orderIndex,
       input.fastingHours ?? null,
+      input.strict ? 1 : 0,
     ],
   );
   const created = await getMedication(res.lastInsertRowId as number);
@@ -2340,7 +2360,7 @@ export async function updateMedication(
   patch: Partial<
     Pick<
       Medication,
-      'name' | 'dosage' | 'time' | 'emoji' | 'enabled' | 'daysOfWeek' | 'fastingHours'
+      'name' | 'dosage' | 'time' | 'emoji' | 'enabled' | 'daysOfWeek' | 'fastingHours' | 'strict'
     >
   >,
 ): Promise<Medication | null> {
@@ -2374,6 +2394,10 @@ export async function updateMedication(
   if (patch.fastingHours !== undefined) {
     fields.push('fasting_hours = ?');
     values.push(patch.fastingHours ?? null);
+  }
+  if (typeof patch.strict === 'boolean') {
+    fields.push('strict_mode = ?');
+    values.push(patch.strict ? 1 : 0);
   }
   if (fields.length === 0) return getMedication(id);
   fields.push("updated_at = datetime('now')");

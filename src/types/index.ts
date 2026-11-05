@@ -394,6 +394,11 @@ export interface Nudge {
   enabled: boolean;
   scheduleTime: string; // HH:MM
   orderIndex: number;
+  /**
+   * RIGOROSO: no horário, o celular vibra em pulsos (vibra, para, vibra…) até a
+   * pessoa responder — Fiz, Mais tempo ou Não vou fazer. Ver strictHabits.ts.
+   */
+  strict: boolean;
 }
 
 /**
@@ -420,4 +425,6 @@ export interface Medication {
    * avisa 30 min antes do fim e no fim ("pare de comer").
    */
   fastingHours: number | null;
+  /** RIGOROSO: vibra em pulsos até a resposta (como em Nudge.strict). Não vale para jejum. */
+  strict: boolean;
 }

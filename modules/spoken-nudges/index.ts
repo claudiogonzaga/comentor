@@ -35,6 +35,19 @@ export interface SpokenNudgesNativeModule {
   hasUsageAccess(): boolean;
   openUsageAccessSettings(): void;
   openAppDetails(): void;
+  // ---- hábitos rigorosos (vibram em pulsos até a resposta; ver src/services/strictHabits.ts) ----
+  /** Lista dos rigorosos de uma fonte ('nudge' | 'med'), em JSON. */
+  setStrictHabits(source: string, json: string): Promise<void>;
+  /** Janelas de sono (minutos do dia) em que não vibra: [{start, end}]. */
+  setStrictSleepWindows(json: string): void;
+  /** O app marcou o hábito no dia `day`: para de insistir. */
+  stopStrict(key: string, day: string): void;
+  /** "Mais tempo" dado no app: volta a insistir em `untilEpochMs`. */
+  snoozeStrict(key: string, untilEpochMs: number): void;
+  /** Entrega e esvazia a fila de respostas dadas na notificação (JSON). */
+  takeStrictAnswers(): string;
+  /** Evento 'onStrictAnswer': há resposta na fila. */
+  addListener(event: 'onStrictAnswer', listener: () => void): { remove(): void };
 }
 
 // Lança se o módulo nativo não estiver presente (ex.: Expo Go, web). Quem

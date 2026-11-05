@@ -1,6 +1,7 @@
-// A aba Kairós: as tarefas por área da vida. Urgentes numa seção vermelha sempre no
+// A aba Kairós: as tarefas por área da vida. Urgentes numa seção própria sempre no
 // topo; depois o resto, do prazo mais próximo ao sem prazo. São as mesmas tarefas do
-// Áskesis do Mac, onde uma IA também mexe nelas (kairos_mcp.py).
+// Áskesis do Mac, onde uma IA também mexe nelas (kairos_mcp.py). A cara segue o tema
+// da Noosfera (theme.ts): superfície calma, um acento, ícones de traço, sem emoji.
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -21,6 +22,7 @@ import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { syncConfigNow } from '../services/configSync';
 import { TaskCard } from './TaskCard';
 import {
+  IA_COR,
   PRIORIDADES,
   TIPOS_SAUDE,
   areasDe,
@@ -34,9 +36,9 @@ import {
   type Prioridade,
   type Tarefa,
 } from './rules';
+import { Icone } from './icones';
 import { LAPIDE_MS, useKairos, type Campos } from './store';
-import { AREA_ICONE, dark, fixas, light, type Tema } from './theme';
-import { ESPACIAL } from '../theme/tema';
+import { corDaArea, corVisivel, fonte, semEmoji, temaKairos, type Tema } from './theme';
 
 // Onde cada IA abre uma conversa nova já com o pedido. O Gemini não aceita o pedido
 // no endereço: ele vai para a área de transferência. O Claude Code fica no Mac.
@@ -49,8 +51,8 @@ const DESTINOS = [
 
 export function KairosScreen() {
   const scheme = useColorScheme();
-  // No tema espacial da Noosfera, o Kairós fica sempre na variante escura.
-  const c = ESPACIAL || scheme === 'dark' ? dark : light;
+  // Espacial: sempre escuro. Ecológico: sempre claro. Terracota: conforme o sistema.
+  const c = temaKairos(scheme === 'dark');
   const s = useMemo(() => estilos(c), [c]);
   const { tarefas, pulados, lapides } = useKairos();
   const k = useKairos.getState();
@@ -86,6 +88,8 @@ export function KairosScreen() {
   const urgentes = ordenar(base.filter(ehUrgente));
   const resto = ordenar(base.filter((t) => !ehUrgente(t) && (t.status !== 'Feito' || verFeitas)));
   const nUrg = abertas.filter(ehUrgente).length;
+  const nFeitas = tarefas.length - abertas.length;
+  const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
   const excluir = (t: Tarefa) =>
     Alert.alert(
@@ -161,15 +165,18 @@ export function KairosScreen() {
         <View style={{ flex: 1 }}>
           <Text style={s.marca}>kairός</Text>
           <Text style={s.sub}>
-            {abertas.length} aberta(s) · {nUrg} urgente(s) · {tarefas.length - abertas.length} concluída(s)
+            {plural(abertas.length, 'aberta', 'abertas')} · {plural(nUrg, 'urgente', 'urgentes')} ·{' '}
+            {plural(nFeitas, 'concluída', 'concluídas')}
           </Text>
         </View>
         <Pressable
           onPress={() => setDossie(dossieCoaching(tarefas))}
           style={s.btnCab}
+          hitSlop={6}
+          accessibilityRole="button"
           accessibilityLabel="Dossiê de coaching"
         >
-          <Text style={s.btnCabTxt}>📊</Text>
+          <Icone nome="dossie" size={20} cor={c.suave} />
         </Pressable>
       </View>
 
@@ -182,41 +189,64 @@ export function KairosScreen() {
               setSincronizando(true);
               void syncConfigNow().finally(() => setSincronizando(false));
             }}
-            tintColor={fixas.roxo}
-            colors={[fixas.roxo]}
+            tintColor={c.acento}
+            colors={[c.escuro ? c.sobreAcento : c.acento]}
+            progressBackgroundColor={c.escuro ? c.acento : c.card}
           />
         }
       >
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chips}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chips} contentContainerStyle={s.chipsDentro}>
           {['Todas', ...areas].map((a) => {
             const n = a === 'Todas' ? abertas.length : abertas.filter((t) => t.area === a).length;
             if (a !== 'Todas' && n === 0 && filtro !== a) return null;
             const ativo = filtro === a;
             return (
-              <Pressable key={a} onPress={() => setFiltro(a)} style={[s.chip, ativo && s.chipAtivo]}>
-                <Text style={[s.chipTxt, ativo && s.chipTxtAtivo]}>
-                  {AREA_ICONE[a] || ''} {a} {n}
-                </Text>
+              <Pressable
+                key={a}
+                onPress={() => setFiltro(a)}
+                style={[s.chip, ativo && s.chipAtivo]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: ativo }}
+              >
+                {a !== 'Todas' && <View style={[s.chipPonto, { backgroundColor: ativo ? c.sobreAcento : corDaArea(a, c) }]} />}
+                <Text style={[s.chipTxt, ativo && s.chipTxtAtivo]}>{semEmoji(a)}</Text>
+                <Text style={[s.chipN, ativo && s.chipTxtAtivo]}>{n}</Text>
               </Pressable>
             );
           })}
         </ScrollView>
 
-        <Pressable onPress={() => setVerFeitas((v) => !v)} style={s.toggle}>
-          <Text style={s.toggleTxt}>{verFeitas ? '☑' : '☐'} mostrar concluídas anteriores</Text>
+        <Pressable
+          onPress={() => setVerFeitas((v) => !v)}
+          style={s.toggle}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: verFeitas }}
+        >
+          <Caixa marcada={verFeitas} c={c} />
+          <Text style={s.toggleTxt}>Mostrar concluídas anteriores</Text>
         </Pressable>
 
         {urgentes.length > 0 && (
-          <View style={s.secaoUrg}>
-            <Text style={s.secaoUrgTit}>🚨 Urgentes ({urgentes.length})</Text>
+          <View style={s.secao}>
+            <View style={s.secaoCab}>
+              <View style={[s.secaoPonto, { backgroundColor: c.urg }]} />
+              <Text style={[s.secaoTit, { color: c.urg }]}>Urgentes</Text>
+              <Text style={s.secaoN}>{urgentes.length}</Text>
+            </View>
             {urgentes.map(card)}
           </View>
         )}
 
-        <View style={s.lista}>
+        <View style={s.secao}>
+          {urgentes.length > 0 && resto.length > 0 && (
+            <View style={s.secaoCab}>
+              <Text style={s.secaoTit}>Próximas</Text>
+              <Text style={s.secaoN}>{resto.length}</Text>
+            </View>
+          )}
           {resto.length === 0 && urgentes.length === 0 ? (
             <Text style={s.vazio}>
-              Nada por aqui ✨{'\n'}Toque no + para adicionar.{'\n'}No Mac, uma IA também cria e edita tarefas
+              Nada por aqui.{'\n'}Toque no + para adicionar. No Mac, uma IA também cria e edita tarefas
               pela Noosfera.
             </Text>
           ) : (
@@ -225,8 +255,8 @@ export function KairosScreen() {
         </View>
       </ScrollView>
 
-      <Pressable style={s.fab} onPress={() => setForm('nova')} accessibilityLabel="Nova tarefa">
-        <Text style={s.fabTxt}>+</Text>
+      <Pressable style={s.fab} onPress={() => setForm('nova')} accessibilityRole="button" accessibilityLabel="Nova tarefa">
+        <Icone nome="mais" size={26} cor={c.sobreAcento} espessura={2.2} />
       </Pressable>
 
       <Modal visible={form !== null} animationType="slide" onRequestClose={() => setForm(null)}>
@@ -249,23 +279,30 @@ export function KairosScreen() {
       <Modal visible={delegando !== null} transparent animationType="fade" onRequestClose={() => setDelegando(null)}>
         <Pressable style={s.veu} onPress={() => setDelegando(null)}>
           <Pressable style={s.folha} onPress={() => {}}>
-            <Text style={s.formTit}>🤖 Fazer com IA</Text>
+            <View style={s.alca} />
+            <Text style={s.formTit}>Fazer com IA</Text>
             {!!delegando && (
               <Text style={s.ajuda} numberOfLines={2}>
-                "{delegando.titulo}"
+                “{delegando.titulo}”
               </Text>
             )}
             {DESTINOS.map((d) => (
               <Pressable key={d.ia} style={s.opcaoIa} onPress={() => delegando && void delegar(delegando, d)}>
-                <Text style={s.opcaoIaTit}>{d.ia}</Text>
-                <Text style={s.opcaoIaSub}>{d.sub}</Text>
+                <View style={[s.opcaoPonto, { backgroundColor: corVisivel(IA_COR[d.ia], c) }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.opcaoIaTit}>{d.ia}</Text>
+                  <Text style={s.opcaoIaSub}>{d.sub}</Text>
+                </View>
               </Pressable>
             ))}
             <Pressable style={s.opcaoIa} onPress={() => delegando && void colarConversa(delegando)}>
-              <Text style={s.opcaoIaTit}>📋 Ligar a conversa copiada</Text>
-              <Text style={s.opcaoIaSub}>copie o link da conversa e toque aqui</Text>
+              <Icone nome="elo" size={16} cor={c.suave} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.opcaoIaTit}>Ligar a conversa copiada</Text>
+                <Text style={s.opcaoIaSub}>copie o link da conversa e toque aqui</Text>
+              </View>
             </Pressable>
-            <Text style={s.ajuda}>No Mac, o 🤖 abre também uma sessão do Claude Code, que se liga ao card sozinha.</Text>
+            <Text style={s.ajuda}>No Mac, o botão IA abre também uma sessão do Claude Code, que se liga ao card sozinha.</Text>
             <Pressable style={s.cancelarBtn} onPress={() => setDelegando(null)}>
               <Text style={s.cancelarTxt}>Cancelar</Text>
             </Pressable>
@@ -274,8 +311,8 @@ export function KairosScreen() {
       </Modal>
 
       <Modal visible={dossie !== null} animationType="slide" onRequestClose={() => setDossie(null)}>
-        <View style={[s.tela, { padding: 16 }]}>
-          <Text style={s.formTit}>📊 Dossiê para coaching por IA</Text>
+        <View style={[s.tela, { padding: 20 }]}>
+          <Text style={s.formTit}>Dossiê para coaching por IA</Text>
           <Text style={s.ajuda}>
             Copie e cole numa IA (Claude, Gemini…): ele junta estrelas, badges e comentários para ela analisar
             seus padrões e aconselhar. No Mac, a IA também o lê direto pela Noosfera.
@@ -292,7 +329,8 @@ export function KairosScreen() {
               Alert.alert('Copiado', 'O dossiê está na área de transferência.');
             }}
           >
-            <Text style={s.salvarTxt}>📋 Copiar tudo</Text>
+            <Icone nome="copiar" size={17} cor={c.sobreAcento} />
+            <Text style={s.salvarTxt}>Copiar tudo</Text>
           </Pressable>
           <Pressable style={s.cancelarBtn} onPress={() => setDossie(null)}>
             <Text style={s.cancelarTxt}>Fechar</Text>
@@ -365,7 +403,7 @@ function TaskForm({ c, areas, existente, areaInicial, onSalvar, onCancelar }: Fo
   };
 
   return (
-    <ScrollView style={s.tela} contentContainerStyle={{ padding: 16, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+    <ScrollView style={s.tela} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
       <Text style={s.formTit}>{existente ? 'Editar tarefa' : 'Nova tarefa'}</Text>
 
       <Text style={s.rotulo}>Título</Text>
@@ -382,9 +420,8 @@ function TaskForm({ c, areas, existente, areaInicial, onSalvar, onCancelar }: Fo
       <View style={s.opcoes}>
         {areas.map((a) => (
           <Pressable key={a} onPress={() => setArea(a)} style={[s.opcao, area === a && s.opcaoAtiva]}>
-            <Text style={[s.opcaoTxt, area === a && s.opcaoTxtAtiva]}>
-              {AREA_ICONE[a] || ''} {a}
-            </Text>
+            <View style={[s.chipPonto, { backgroundColor: area === a ? c.sobreAcento : corDaArea(a, c) }]} />
+            <Text style={[s.opcaoTxt, area === a && s.opcaoTxtAtiva]}>{semEmoji(a)}</Text>
           </Pressable>
         ))}
       </View>
@@ -401,11 +438,12 @@ function TaskForm({ c, areas, existente, areaInicial, onSalvar, onCancelar }: Fo
       <Text style={s.rotulo}>Prazo</Text>
       <View style={s.linhaData}>
         <Pressable onPress={escolherData} style={[s.input, s.inputData]}>
-          <Text style={{ color: prazo ? c.txt : c.suave }}>{prazo ? fmtData(prazo) : 'sem prazo — toque para escolher'}</Text>
+          <Icone nome="data" size={16} cor={c.suave} />
+          <Text style={[s.inputTxt, !prazo && { color: c.suave }]}>{prazo ? fmtData(prazo) : 'Sem prazo: toque para escolher'}</Text>
         </Pressable>
         {!!prazo && (
           <Pressable onPress={escolherHora} style={[s.input, s.inputHora]}>
-            <Text style={{ color: hora ? c.txt : c.suave }}>{hora || 'hora'}</Text>
+            <Text style={[s.inputTxt, !hora && { color: c.suave }]}>{hora || 'hora'}</Text>
           </Pressable>
         )}
         {!!prazo && (
@@ -417,7 +455,7 @@ function TaskForm({ c, areas, existente, areaInicial, onSalvar, onCancelar }: Fo
             style={s.limpar}
             accessibilityLabel="Tirar o prazo"
           >
-            <Text style={{ color: c.suave }}>✕</Text>
+            <Icone nome="fechar" size={18} cor={c.suave} />
           </Pressable>
         )}
       </View>
@@ -445,8 +483,14 @@ function TaskForm({ c, areas, existente, areaInicial, onSalvar, onCancelar }: Fo
         placeholderTextColor={c.suave}
       />
 
-      <Pressable onPress={() => setUrgente((v) => !v)} style={s.checkLinha}>
-        <Text style={s.checkLinhaTxt}>{urgente ? '☑' : '☐'} 🚨 Marcar como urgente</Text>
+      <Pressable
+        onPress={() => setUrgente((v) => !v)}
+        style={s.checkLinha}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: urgente }}
+      >
+        <Caixa marcada={urgente} c={c} />
+        <Text style={s.checkLinhaTxt}>Marcar como urgente</Text>
       </Pressable>
 
       <Pressable onPress={salvar} style={s.salvar}>
@@ -459,122 +503,137 @@ function TaskForm({ c, areas, existente, areaInicial, onSalvar, onCancelar }: Fo
   );
 }
 
+/** A caixinha de marcar, desenhada (no lugar dos caracteres de caixa). */
+function Caixa({ marcada, c }: { marcada: boolean; c: Tema }) {
+  return (
+    <View
+      style={{
+        width: 18,
+        height: 18,
+        borderRadius: 5,
+        borderWidth: 1.5,
+        borderColor: marcada ? c.acento : c.suave,
+        backgroundColor: marcada ? c.acento : 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {marcada && <Icone nome="check" size={13} cor={c.sobreAcento} espessura={2.6} />}
+    </View>
+  );
+}
+
 const estilos = (c: Tema) =>
   StyleSheet.create({
     tela: { flex: 1, backgroundColor: c.bg },
     cabecalho: {
-      backgroundColor: fixas.roxo,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 6,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
     },
-    marca: { color: '#fff', fontSize: 20, fontWeight: '700' },
-    sub: { color: '#fff', opacity: 0.85, fontSize: 11, marginTop: 2 },
-    btnCab: { backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 8, padding: 8 },
-    btnCabTxt: { fontSize: 16 },
-    chips: { paddingHorizontal: 12, paddingTop: 10, flexGrow: 0 },
+    marca: { fontFamily: fonte.marca, fontSize: 26, lineHeight: 32, color: c.txt },
+    sub: { fontFamily: fonte.texto, fontSize: 12.5, color: c.suave, marginTop: 1 },
+    btnCab: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card },
+    chips: { flexGrow: 0, marginTop: 8 },
+    chipsDentro: { paddingHorizontal: 16, gap: 6 },
     chip: {
-      paddingHorizontal: 13,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
       paddingVertical: 7,
-      borderRadius: 20,
-      marginRight: 8,
-      borderWidth: 1,
-      borderColor: c.linha,
-      backgroundColor: c.card,
+      borderRadius: 16,
     },
-    chipAtivo: { backgroundColor: fixas.roxo, borderColor: fixas.roxo },
-    chipTxt: { fontSize: 13, fontWeight: '600', color: c.txt },
-    chipTxtAtivo: { color: '#fff' },
-    toggle: { paddingHorizontal: 18, paddingVertical: 8 },
-    toggleTxt: { fontSize: 12, color: c.suave },
-    secaoUrg: {
-      marginHorizontal: 12,
-      borderWidth: 1,
-      borderColor: c.urgBd,
-      borderRadius: 10,
-      backgroundColor: c.urgBg,
-      padding: 8,
-      marginBottom: 6,
-    },
-    secaoUrgTit: { color: c.urgTx, fontWeight: '800', fontSize: 13, marginBottom: 4 },
-    lista: { paddingHorizontal: 12 },
-    vazio: { textAlign: 'center', color: c.suave, marginTop: 60, fontSize: 14, lineHeight: 21 },
+    chipAtivo: { backgroundColor: c.acento },
+    chipPonto: { width: 6, height: 6, borderRadius: 3 },
+    chipTxt: { fontFamily: fonte.medio, fontSize: 13, color: c.txt },
+    chipN: { fontFamily: fonte.texto, fontSize: 12, color: c.suave },
+    chipTxtAtivo: { color: c.sobreAcento },
+    toggle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12 },
+    toggleTxt: { fontFamily: fonte.texto, fontSize: 13, color: c.suave },
+    secao: { paddingHorizontal: 14, marginBottom: 8 },
+    secaoCab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, marginTop: 6, marginBottom: 2 },
+    secaoPonto: { width: 6, height: 6, borderRadius: 3 },
+    secaoTit: { fontFamily: fonte.forte, fontSize: 12.5, letterSpacing: 0.4, color: c.suave },
+    secaoN: { fontFamily: fonte.texto, fontSize: 12.5, color: c.suave },
+    vazio: { textAlign: 'center', fontFamily: fonte.texto, color: c.suave, marginTop: 60, fontSize: 14, lineHeight: 21, paddingHorizontal: 24 },
     fab: {
       position: 'absolute',
-      right: 18,
+      right: 20,
       bottom: 24,
-      width: 58,
-      height: 58,
-      borderRadius: 29,
-      backgroundColor: fixas.roxo,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: c.acento,
       alignItems: 'center',
       justifyContent: 'center',
-      elevation: 6,
+      elevation: 3,
     },
-    fabTxt: { color: '#fff', fontSize: 32, lineHeight: 36 },
-    formTit: { fontSize: 18, fontWeight: '700', color: c.txt, marginBottom: 4 },
-    ajuda: { fontSize: 12, color: c.suave, marginVertical: 8, lineHeight: 17 },
-    dossie: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: c.linha,
-      borderRadius: 9,
-      padding: 10,
-      backgroundColor: c.card,
-    },
+    formTit: { fontFamily: fonte.titulo, fontSize: 20, lineHeight: 26, color: c.txt, marginBottom: 4 },
+    ajuda: { fontFamily: fonte.texto, fontSize: 12.5, color: c.suave, marginVertical: 8, lineHeight: 18 },
+    dossie: { flex: 1, borderRadius: 12, padding: 12, backgroundColor: c.card, marginTop: 4 },
     dossieTxt: { fontSize: 11.5, color: c.txt, lineHeight: 16 },
-    rotulo: { fontSize: 12, fontWeight: '600', color: c.suave, marginTop: 14, marginBottom: 5 },
+    rotulo: { fontFamily: fonte.forte, fontSize: 12, color: c.suave, marginTop: 18, marginBottom: 6 },
     input: {
-      borderWidth: 1,
-      borderColor: c.linha,
-      borderRadius: 9,
-      padding: 12,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      fontFamily: fonte.texto,
       fontSize: 15,
       color: c.txt,
       backgroundColor: c.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.linha,
     },
-    inputData: { justifyContent: 'center', flex: 1 },
+    inputTxt: { fontFamily: fonte.texto, fontSize: 15, color: c.txt },
+    inputData: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
     inputHora: { justifyContent: 'center', width: 84, alignItems: 'center' },
     linhaData: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    limpar: { padding: 10 },
-    textarea: { minHeight: 90, textAlignVertical: 'top' },
-    opcoes: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    limpar: { padding: 8 },
+    textarea: { minHeight: 96, textAlignVertical: 'top' },
+    opcoes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     opcao: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
       paddingHorizontal: 12,
       paddingVertical: 8,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: c.linha,
+      borderRadius: 16,
       backgroundColor: c.card,
     },
-    opcaoAtiva: { backgroundColor: fixas.roxo, borderColor: fixas.roxo },
-    opcaoTxt: { fontSize: 13, color: c.txt },
-    opcaoTxtAtiva: { color: '#fff', fontWeight: '700' },
-    checkLinha: { marginTop: 18 },
-    checkLinhaTxt: { fontSize: 15, color: c.txt },
+    opcaoAtiva: { backgroundColor: c.acento },
+    opcaoTxt: { fontFamily: fonte.texto, fontSize: 13, color: c.txt },
+    opcaoTxtAtiva: { fontFamily: fonte.forte, color: c.sobreAcento },
+    checkLinha: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20 },
+    checkLinhaTxt: { fontFamily: fonte.texto, fontSize: 15, color: c.txt },
     salvar: {
-      marginTop: 22,
-      backgroundColor: fixas.roxo,
-      borderRadius: 10,
+      marginTop: 24,
+      backgroundColor: c.acento,
+      borderRadius: 24,
       paddingVertical: 14,
       alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
     },
-    salvarTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+    salvarTxt: { fontFamily: fonte.forte, color: c.sobreAcento, fontSize: 15 },
     cancelarBtn: { paddingVertical: 14, alignItems: 'center' },
     veu: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-    folha: { backgroundColor: c.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
+    folha: { backgroundColor: c.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28 },
+    alca: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.linha, marginBottom: 14 },
     opcaoIa: {
-      borderWidth: 1,
-      borderColor: c.linha,
-      borderRadius: 10,
-      backgroundColor: c.card,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.linha,
     },
-    opcaoIaTit: { fontSize: 15, color: c.txt, fontWeight: '600' },
-    opcaoIaSub: { fontSize: 11.5, color: c.suave, marginTop: 2 },
-    cancelarTxt: { color: c.suave, fontSize: 14 },
+    opcaoPonto: { width: 8, height: 8, borderRadius: 4, marginHorizontal: 4 },
+    opcaoIaTit: { fontFamily: fonte.forte, fontSize: 15, color: c.txt },
+    opcaoIaSub: { fontFamily: fonte.texto, fontSize: 12, color: c.suave, marginTop: 1 },
+    cancelarTxt: { fontFamily: fonte.medio, color: c.suave, fontSize: 14 },
   });

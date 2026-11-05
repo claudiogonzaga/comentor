@@ -14,6 +14,9 @@ class BootReceiver : BroadcastReceiver() {
       "android.intent.action.QUICKBOOT_POWERON" -> {
         Log.d(SpokenScheduler.TAG, "boot/replaced → rearmAll")
         SpokenScheduler.rearmAll(context)
+        // Hábitos rigorosos: re-arma os horários; a insistência que o reinício
+        // interrompeu volta, se ainda estiver dentro do teto de 45 min.
+        StrictScheduler.rearmAll(context, restartSessions = true)
       }
       // Mudou o fuso (viagem) ou o relógio: o epoch guardado de cada diário passou
       // a apontar para outra hora local. rearmAll recalcula pela hora de parede.
@@ -21,6 +24,7 @@ class BootReceiver : BroadcastReceiver() {
       Intent.ACTION_TIME_CHANGED -> {
         Log.d(SpokenScheduler.TAG, "fuso/horário mudou → rearmAll")
         SpokenScheduler.rearmAll(context)
+        StrictScheduler.rearmAll(context, restartSessions = false)
       }
     }
   }

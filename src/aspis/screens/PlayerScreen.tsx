@@ -32,6 +32,7 @@ import {
 import { useMediaStore } from '../store/useMediaStore';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
+import { LOGO_ESCUDO } from '../theme/logo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Player'>;
 
@@ -120,7 +121,7 @@ function AudioPlayerView({
       try {
         player.setActiveForLockScreen(
           true,
-          { title, artist: channel, albumTitle: 'Aspis' },
+          { title, artist: channel, albumTitle: 'Escudo' },
           { showSeekBackward: true, showSeekForward: true },
         );
       } catch {
@@ -184,7 +185,7 @@ function AudioPlayerView({
 
   return (
     <View style={styles.audioWrap}>
-      <Image source={require('../../../assets/aspis/logo-mark.png')} style={styles.art} />
+      <Image source={LOGO_ESCUDO} style={styles.art} />
       <Text style={styles.audioTitle}>{title}</Text>
       {!!channel && <Text style={styles.audioChannel}>{channel}</Text>}
 

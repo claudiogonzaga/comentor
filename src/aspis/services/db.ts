@@ -93,7 +93,35 @@ const MIGRATIONS: { table: string; column: string; ddl: string }[] = [
   { table: 'videos', column: 'asr_status', ddl: 'ALTER TABLE videos ADD COLUMN asr_status TEXT' },
   { table: 'videos', column: 'asr_error', ddl: 'ALTER TABLE videos ADD COLUMN asr_error TEXT' },
   { table: 'videos', column: 'source', ddl: "ALTER TABLE videos ADD COLUMN source TEXT DEFAULT 'youtube'" },
+  // fila de transcrição: quando foi a última tentativa e quantas falharam (nova tentativa mais tarde)
+  { table: 'videos', column: 'asr_at', ddl: 'ALTER TABLE videos ADD COLUMN asr_at TEXT' },
+  { table: 'videos', column: 'asr_tries', ddl: 'ALTER TABLE videos ADD COLUMN asr_tries INTEGER' },
 ];
+
+// Transcrições feitas no Mac (aspis-transcricoes.json no Drive) para vídeos que
+// ainda não chegaram a este banco: aplicadas quando o vídeo chegar.
+const DESKTOP_SCHEMA = `
+CREATE TABLE IF NOT EXISTS desktop_transcripts (
+    video_id TEXT PRIMARY KEY,
+    texto TEXT NOT NULL,
+    fonte TEXT NOT NULL,
+    idioma TEXT,
+    titulo TEXT,
+    em INTEGER NOT NULL
+);
+`;
+
+// Cards ocultados no feed ("não quero isso agora"): por video_id, numa tabela
+// própria — vale também para o vídeo que ainda não chegou a este banco (ocultado
+// no Mac antes de o pipeline daqui o trazer), que já nasce oculto. hidden_at NULL
+// é o "desfeito", guardado para a sincronização levar o null ao Mac.
+const HIDDEN_SCHEMA = `
+CREATE TABLE IF NOT EXISTS hidden (
+    video_id TEXT PRIMARY KEY,
+    hidden_at INTEGER,
+    changed_at INTEGER NOT NULL
+);
+`;
 
 const JSON_FIELDS = ['pontos_chave', 'fatos', 'citacoes', 'evidencias'] as const;
 const FLAGS = ['read', 'saved_drive', 'skipped'] as const;
@@ -118,6 +146,8 @@ function conn(): SQLite.SQLiteDatabase {
   if (!db) {
     db = SQLite.openDatabaseSync('aspis.db');
     db.execSync(SCHEMA);
+    db.execSync(DESKTOP_SCHEMA);
+    db.execSync(HIDDEN_SCHEMA);
     migrate(db);
   }
   return db;
@@ -228,6 +258,9 @@ export interface VideoQuery {
 // definitiva vem quando a transcrição refaz a análise.
 const PROVISIONAL = "content_source = 'metadata'";
 
+// Ocultado no feed (deslizado para o lado): fora da lista e das contagens.
+const NOT_HIDDEN = 'video_id NOT IN (SELECT video_id FROM hidden WHERE hidden_at IS NOT NULL)';
+
 export function isProvisional(v: Pick<VideoRecord, 'content_source'>): boolean {
   return v.content_source === 'metadata';
 }
@@ -235,6 +268,7 @@ export function isProvisional(v: Pick<VideoRecord, 'content_source'>): boolean {
 export function getVideos(q: VideoQuery = {}): VideoRecord[] {
   let sql =
     `SELECT * FROM videos WHERE (score >= ? OR ${PROVISIONAL}) AND COALESCE(skipped, 0) = 0 ` +
+    `AND ${NOT_HIDDEN} ` +
     "AND channel_id NOT IN (SELECT channel_id FROM channel_prefs WHERE state = 'muted')";
   const args: SQLite.SQLiteBindValue[] = [q.minScore ?? 0];
   if (!q.includeRead) sql += ' AND COALESCE(read, 0) = 0';
@@ -263,7 +297,7 @@ export function getVideos(q: VideoQuery = {}): VideoRecord[] {
 export function countBelow(q: VideoQuery = {}): number {
   let sql =
     `SELECT COUNT(*) AS n FROM videos WHERE score < ? AND NOT COALESCE(${PROVISIONAL}, 0) ` +
-    'AND COALESCE(skipped, 0) = 0 ' +
+    `AND COALESCE(skipped, 0) = 0 AND ${NOT_HIDDEN} ` +
     "AND channel_id NOT IN (SELECT channel_id FROM channel_prefs WHERE state = 'muted')";
   const args: SQLite.SQLiteBindValue[] = [q.minScore ?? 0];
   if (!q.includeRead) sql += ' AND COALESCE(read, 0) = 0';
@@ -284,7 +318,7 @@ export function countOutsidePeriod(sinceIso: string, widerIso: string, minScore:
   return (
     conn().getFirstSync<{ n: number }>(
       `SELECT COUNT(*) AS n FROM videos WHERE (score >= ? OR ${PROVISIONAL}) ` +
-        'AND COALESCE(skipped, 0) = 0 ' +
+        `AND COALESCE(skipped, 0) = 0 AND ${NOT_HIDDEN} ` +
         'AND COALESCE(read, 0) = 0 AND published_at < ? AND published_at >= ? ' +
         "AND channel_id NOT IN (SELECT channel_id FROM channel_prefs WHERE state = 'muted')",
       [minScore, sinceIso, widerIso],
@@ -301,6 +335,68 @@ export function deleteVideo(videoId: string): void {
   conn().runSync('DELETE FROM videos WHERE video_id = ?', [videoId]);
   conn().runSync('DELETE FROM qa WHERE video_id = ?', [videoId]);
   conn().runSync('DELETE FROM clips WHERE video_id = ?', [videoId]);
+}
+
+// --- Ocultar ("não quero isso agora") ----------------------------------------
+// Sai do feed sem sinal nenhum para a rede local (não é 👎, não pula, não marca lido).
+
+export interface HiddenChange {
+  video_id: string;
+  /** Epoch ms em que foi ocultado, ou null quando desfeito. */
+  hidden_at: number | null;
+}
+
+export function hideVideo(videoId: string, at = Date.now()): void {
+  conn().runSync(
+    `INSERT INTO hidden (video_id, hidden_at, changed_at) VALUES (?, ?, ?)
+     ON CONFLICT(video_id) DO UPDATE SET hidden_at = excluded.hidden_at, changed_at = excluded.changed_at`,
+    [videoId, at, at],
+  );
+}
+
+/** Desfaz: fica o "desfeito" (null), para o outro aparelho também mostrar de novo. */
+export function unhideVideo(videoId: string, at = Date.now()): void {
+  conn().runSync('UPDATE hidden SET hidden_at = NULL, changed_at = ? WHERE video_id = ?', [at, videoId]);
+}
+
+/**
+ * O que veio do outro aparelho: ocultado no instante `hiddenAt`, ou desfeito (null),
+ * mudado em `changedAt`. Grava mesmo sem o vídeo no banco (ele nasce oculto quando
+ * chegar). Devolve true se o feed daqui muda (o vídeo existe e trocou de estado).
+ */
+export function applyHidden(videoId: string, hiddenAt: number | null, changedAt: number): boolean {
+  const d = conn();
+  const cur = d.getFirstSync<{ hidden_at: number | null }>(
+    'SELECT hidden_at FROM hidden WHERE video_id = ?',
+    [videoId],
+  );
+  if (cur && cur.hidden_at === hiddenAt) return false;
+  d.runSync(
+    `INSERT INTO hidden (video_id, hidden_at, changed_at) VALUES (?, ?, ?)
+     ON CONFLICT(video_id) DO UPDATE SET hidden_at = excluded.hidden_at, changed_at = excluded.changed_at`,
+    [videoId, hiddenAt, changedAt],
+  );
+  const wasHidden = cur?.hidden_at != null;
+  return wasHidden !== (hiddenAt != null) && hasVideo(videoId);
+}
+
+/** Os ocultados desde `sinceMs` (pelo instante em que foram ocultados) e os desfeitos
+ *  desde `sinceMs` (pelo instante em que foram desfeitos). */
+export function hiddenChanges(sinceMs: number): HiddenChange[] {
+  return conn().getAllSync<HiddenChange>(
+    `SELECT video_id, hidden_at FROM hidden
+      WHERE (hidden_at IS NOT NULL AND hidden_at >= ?) OR (hidden_at IS NULL AND changed_at >= ?)`,
+    [sinceMs, sinceMs],
+  );
+}
+
+/** Limpeza: desfeitos antigos e ocultados de vídeos que nunca chegaram. */
+export function pruneHidden(beforeMs: number): void {
+  conn().runSync(
+    `DELETE FROM hidden WHERE changed_at < ?
+       AND (hidden_at IS NULL OR video_id NOT IN (SELECT video_id FROM videos))`,
+    [beforeMs],
+  );
 }
 
 // --- trechos salvos como nota atômica (Destaques) ---------------------------
@@ -507,7 +603,7 @@ export function setAudioFile(videoId: string, filename: string | null): void {
   conn().runSync('UPDATE videos SET audio_file = ? WHERE video_id = ?', [filename, videoId]);
 }
 
-// --- transcrição (legendas do YouTube ou Parakeet no celular) --------------
+// --- transcrição (legendas do YouTube, Parakeet no celular ou o Mac) --------
 export function setTranscript(
   videoId: string,
   transcript: Transcript,
@@ -544,35 +640,137 @@ export function updateAnalysis(videoId: string, a: Analysis, source: ContentSour
   );
 }
 
+export type AsrStatus = 'done' | 'failed' | 'skipped';
+
+// Uma falha da transcrição automática (rede, yt-dlp desatualizado…) não tira o
+// vídeo da fila para sempre: ele volta depois de ASR_RETRY_MS, até ASR_MAX_TRIES.
+export const ASR_MAX_TRIES = 3;
+export const ASR_RETRY_MS = 6 * 3600 * 1000;
+
 export function setAsrStatus(
   videoId: string,
-  status: 'done' | 'failed' | 'skipped' | null,
+  status: AsrStatus | null,
   error: string | null = null,
 ): void {
-  conn().runSync('UPDATE videos SET asr_status = ?, asr_error = ? WHERE video_id = ?', [
-    status, error, videoId,
-  ]);
+  conn().runSync(
+    `UPDATE videos SET asr_status = ?, asr_error = ?, asr_at = ?,
+       asr_tries = CASE WHEN ? = 'failed' THEN COALESCE(asr_tries, 0) + 1 ELSE asr_tries END
+     WHERE video_id = ?`,
+    [status, error, nowIso(), status, videoId],
+  );
 }
 
 // Fila da transcrição automática: vídeos triados só por metadados (sem
 // legenda) nos últimos 14 dias, ainda não lidos/pulados, de canais não
-// silenciados — mais novos primeiro. O próprio banco é a fila (sobrevive a
-// fechar o app).
-export function autoTranscribeCandidates(limit = 50): VideoRecord[] {
+// silenciados — mais novos primeiro (quem ordena pela nota e aplica o limiar
+// é o useTranscribeStore, com a nota ajustada pela rede local, como o feed).
+// O próprio banco é a fila (sobrevive a fechar o app).
+export function autoTranscribeCandidates(limit = 200): VideoRecord[] {
   const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+  const retryBefore = new Date(Date.now() - ASR_RETRY_MS).toISOString();
   return conn()
     .getAllSync<Record<string, unknown>>(
       `SELECT * FROM videos
         WHERE content_source = 'metadata' AND COALESCE(transcript_text, '') = ''
-          AND asr_status IS NULL AND COALESCE(skipped, 0) = 0 AND COALESCE(read, 0) = 0
+          AND (asr_status IS NULL OR (asr_status = 'failed'
+               AND COALESCE(asr_tries, 1) < ? AND COALESCE(asr_at, '') < ?))
+          AND COALESCE(skipped, 0) = 0 AND COALESCE(read, 0) = 0 AND ${NOT_HIDDEN}
           AND COALESCE(source, 'youtube') = 'youtube'
           AND fetched_at >= ?
           AND COALESCE(channel_id, '') NOT IN
               (SELECT channel_id FROM channel_prefs WHERE state = 'muted')
         ORDER BY published_at DESC LIMIT ?`,
+      [ASR_MAX_TRIES, retryBefore, since, limit],
+    )
+    .map(rowToRecord);
+}
+
+/** A falha mais recente da transcrição automática (para os Ajustes mostrarem o motivo). */
+export function lastAsrFailure(): {
+  video_id: string;
+  title: string;
+  error: string;
+  at: string;
+  tries: number;
+} | null {
+  return conn().getFirstSync<{ video_id: string; title: string; error: string; at: string; tries: number }>(
+    `SELECT video_id, COALESCE(NULLIF(neutral_title, ''), original_title, '') AS title,
+            COALESCE(asr_error, '') AS error, COALESCE(asr_at, '') AS at, COALESCE(asr_tries, 1) AS tries
+       FROM videos WHERE asr_status = 'failed' AND asr_at IS NOT NULL
+      ORDER BY asr_at DESC LIMIT 1`,
+  );
+}
+
+// Têm transcrição mas a triagem ainda é a provisória (a nova análise falhou —
+// sem rede, cota da IA — ou não havia chave): refazer quando der.
+export function retriageCandidates(limit = 5): VideoRecord[] {
+  const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+  return conn()
+    .getAllSync<Record<string, unknown>>(
+      `SELECT * FROM videos
+        WHERE content_source = 'metadata' AND COALESCE(transcript_text, '') <> ''
+          AND COALESCE(skipped, 0) = 0 AND ${NOT_HIDDEN} AND COALESCE(source, 'youtube') = 'youtube'
+          AND fetched_at >= ?
+        ORDER BY score DESC, published_at DESC LIMIT ?`,
       [since, limit],
     )
     .map(rowToRecord);
+}
+
+// --- transcrições do Mac à espera do vídeo (desktopTranscripts.ts) -----------
+export interface DesktopTranscriptRow {
+  video_id: string;
+  texto: string;
+  fonte: 'youtube' | 'whisper';
+  idioma: string | null;
+  titulo: string | null;
+  em: number; // epoch ms (quando o Mac transcreveu)
+}
+
+/** O vídeo está no banco? Com transcrição? */
+export function transcriptState(videoId: string): 'missing' | 'empty' | 'has' {
+  const row = conn().getFirstSync<{ t: string | null }>(
+    'SELECT transcript_text AS t FROM videos WHERE video_id = ?',
+    [videoId],
+  );
+  if (!row) return 'missing';
+  return (row.t || '').trim() ? 'has' : 'empty';
+}
+
+export function putDesktopTranscript(r: DesktopTranscriptRow): void {
+  conn().runSync(
+    `INSERT INTO desktop_transcripts (video_id, texto, fonte, idioma, titulo, em) VALUES (?,?,?,?,?,?)
+     ON CONFLICT(video_id) DO UPDATE SET texto = excluded.texto, fonte = excluded.fonte,
+       idioma = excluded.idioma, titulo = excluded.titulo, em = excluded.em
+     WHERE excluded.em >= desktop_transcripts.em`,
+    [r.video_id, r.texto, r.fonte, r.idioma, r.titulo, r.em],
+  );
+}
+
+export function getDesktopTranscript(videoId: string): DesktopTranscriptRow | null {
+  return conn().getFirstSync<DesktopTranscriptRow>(
+    'SELECT * FROM desktop_transcripts WHERE video_id = ?',
+    [videoId],
+  );
+}
+
+/** As que esperavam e cujo vídeo já chegou ao banco. */
+export function desktopTranscriptsArrived(): DesktopTranscriptRow[] {
+  return conn().getAllSync<DesktopTranscriptRow>(
+    `SELECT d.* FROM desktop_transcripts d JOIN videos v ON v.video_id = d.video_id ORDER BY d.em DESC`,
+  );
+}
+
+export function deleteDesktopTranscript(videoId: string): void {
+  conn().runSync('DELETE FROM desktop_transcripts WHERE video_id = ?', [videoId]);
+}
+
+export function pruneDesktopTranscripts(olderThanMs: number): void {
+  conn().runSync('DELETE FROM desktop_transcripts WHERE em < ?', [olderThanMs]);
+}
+
+export function countDesktopTranscriptsWaiting(): number {
+  return conn().getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM desktop_transcripts')?.n ?? 0;
 }
 
 export function setTranscriptText(videoId: string, text: string): void {

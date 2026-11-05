@@ -1,6 +1,7 @@
 // Transcrição do vídeo na síntese:
 // - sem transcrição → botão "📝 Transcrever" (legendas do YouTube → senão
-//   Parakeet no celular), com etapa e progresso;
+//   Parakeet no celular), com etapa e progresso — e, se a fila automática já
+//   tentou, o motivo de não ter dado certo;
 // - com transcrição → seção recolhível com os trechos e o tempo de cada um.
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -87,6 +88,12 @@ function TranscribeButton({ video }: { video: VideoRecord }) {
         </View>
       )}
       {!job && error && model.installed && <Text style={styles.err}>{error}</Text>}
+      {!job && !error && video.asr_status === 'failed' && !!video.asr_error && (
+        <Text style={styles.err}>A transcrição automática falhou: {video.asr_error}</Text>
+      )}
+      {!job && !error && video.asr_status === 'skipped' && !!video.asr_error && (
+        <Text style={styles.sub}>Fora da transcrição automática: {video.asr_error}</Text>
+      )}
     </View>
   );
 }
@@ -94,6 +101,7 @@ function TranscribeButton({ video }: { video: VideoRecord }) {
 const SOURCE_LABEL: Record<string, string> = {
   youtube: 'legenda do YouTube',
   parakeet: 'transcrita no celular',
+  desktop: 'transcrita no Mac',
 };
 
 function TranscriptView({ video }: { video: VideoRecord }) {

@@ -182,7 +182,7 @@ export function SettingsScreen({ navigation }: Props) {
 
         <Section
           title="Inteligência"
-          sub="Gemini ou Claude, para o Aspis e para a Comentora. No Claude, cada tarefa tem o seu modelo e o seu raciocínio."
+          sub="Gemini ou Claude, para o Escudo e para a Comentora. No Claude, cada tarefa tem o seu modelo e o seu raciocínio."
         >
           <AiProviderPanel
             provider={rootConfig?.aiProvider ?? 'gemini'}
@@ -369,7 +369,7 @@ export function SettingsScreen({ navigation }: Props) {
 
         <Section
           title="Hora de dormir"
-          sub="O feed fecha da sua hora de dormir até as 6h, com a opção de abrir mesmo assim. Compartilhar um vídeo para o Aspis continua funcionando."
+          sub="O feed fecha da sua hora de dormir até as 6h, com a opção de abrir mesmo assim. Compartilhar um vídeo para o Escudo continua funcionando."
         >
           <View style={styles.versionRow}>
             <Text style={styles.versionValue}>Fechar o feed à noite</Text>
@@ -386,7 +386,7 @@ export function SettingsScreen({ navigation }: Props) {
         {MEDIA_SUPPORTED && (
           <Section
             title="Áudio e vídeo no celular"
-            sub="“Ouvir áudio” e “Assistir vídeo” baixam o arquivo só para este celular e tocam no Aspis. Apagar sozinho depois de:"
+            sub="“Ouvir áudio” e “Assistir vídeo” baixam o arquivo só para este celular e tocam no Escudo. Apagar sozinho depois de:"
           >
             <RetentionPicker />
             <Text style={[styles.voiceDesc, { marginBottom: spacing.sm }]}>
@@ -402,7 +402,7 @@ export function SettingsScreen({ navigation }: Props) {
         {TRANSCRIPTION_SUPPORTED && (
           <Section
             title="Transcrição no celular"
-            sub="Vídeos sem legenda são transcritos no próprio celular com o modelo NVIDIA Parakeet (ótimo em português, sem internet para transcrever) — e a triagem é refeita com o conteúdo real do vídeo."
+            sub="Os vídeos bem ranqueados chegam transcritos pelo Mac (quando a Noosfera do Mac está aberta). O que o Mac não trouxer é transcrito aqui, com o modelo NVIDIA Parakeet (ótimo em português, sem internet para transcrever) — e a triagem é refeita com o conteúdo real do vídeo."
           >
             <TranscriptionSettings />
           </Section>
@@ -417,7 +417,7 @@ export function SettingsScreen({ navigation }: Props) {
 
         <Section
           title="Algoritmo & feedback"
-          sub="O Aspis aprende com o que você pula (👎) e salva. Quanto mais você usa, melhor o ranqueamento."
+          sub="O Escudo aprende com o que você pula (👎) e salva. Quanto mais você usa, melhor o ranqueamento."
         >
           <NeuralCard feedVersion={feedVersion} />
 
@@ -435,7 +435,7 @@ export function SettingsScreen({ navigation }: Props) {
             </View>
           ) : (
             <Text style={styles.fbHint}>
-              Ainda sem perfil. Pule e salve alguns vídeos, depois toque abaixo para o Aspis
+              Ainda sem perfil. Pule e salve alguns vídeos, depois toque abaixo para o Escudo
               destilar o seu gosto e passar a usá-lo na pontuação.
             </Text>
           )}

@@ -268,3 +268,40 @@ export async function deleteFile(token: string, fileId: string): Promise<void> {
     throw new DriveError(`Google Drive HTTP ${resp.status}`, resp.status);
   }
 }
+
+// --- Leitura barata de arquivos que outro aparelho atualiza (desktopTranscripts.ts) ---
+
+export interface DriveFileInfo {
+  id: string;
+  modifiedTime: string; // RFC 3339
+}
+
+/** Só os metadados (sem baixar o conteúdo); null se o arquivo sumiu ou foi para a lixeira. */
+export async function fileInfo(token: string, id: string): Promise<DriveFileInfo | null> {
+  try {
+    const f = await driveFetch(`${FILES}/${id}?fields=id,modifiedTime,trashed`, token);
+    if (!f?.id || f.trashed) return null;
+    return { id: f.id as string, modifiedTime: (f.modifiedTime as string) ?? '' };
+  } catch (err) {
+    if (err instanceof DriveError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Os arquivos com esse nome na pasta, o modificado por último primeiro. */
+export async function findFilesNewestFirst(
+  token: string,
+  folderId: string,
+  name: string,
+): Promise<DriveFileInfo[]> {
+  const q = `name = '${escapeQuery(name)}' and '${folderId}' in parents and trashed = false`;
+  const found = await driveFetch(
+    `${FILES}?q=${encodeURIComponent(q)}&fields=files(id,modifiedTime)` +
+      `&orderBy=${encodeURIComponent('modifiedTime desc')}&pageSize=10`,
+    token,
+  );
+  return ((found?.files ?? []) as { id: string; modifiedTime?: string }[]).map((f) => ({
+    id: f.id,
+    modifiedTime: f.modifiedTime ?? '',
+  }));
+}

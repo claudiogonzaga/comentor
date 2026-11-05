@@ -1,4 +1,5 @@
-// O tema da Noosfera: terracota grego (o de sempre) ou espacial (o céu do Diángelos).
+// O tema da Noosfera: terracota grego (o de sempre), espacial (o céu do Diángelos) ou
+// ecológico (folha e musgo, claro).
 //
 // As cores são constantes lidas na importação pelos StyleSheet de cada tela, então a
 // escolha é lida aqui, de um arquivo, de forma síncrona, antes de qualquer tela, e
@@ -7,14 +8,18 @@
 import { File, Paths } from 'expo-file-system';
 import * as Updates from 'expo-updates';
 
-export type Tema = 'terracota' | 'espacial';
+export type Tema = 'terracota' | 'espacial' | 'ecologico';
+
+const TEMAS: readonly Tema[] = ['terracota', 'espacial', 'ecologico'];
 
 const arquivo = () => new File(Paths.document, 'tema.txt');
 
 function ler(): Tema {
   try {
     const f = arquivo();
-    return f.exists && f.textSync().trim() === 'espacial' ? 'espacial' : 'terracota';
+    if (!f.exists) return 'terracota';
+    const nome = f.textSync().trim() as Tema;
+    return TEMAS.includes(nome) ? nome : 'terracota';
   } catch {
     return 'terracota';
   }
@@ -23,6 +28,7 @@ function ler(): Tema {
 /** O tema em uso nesta execução do app. */
 export const TEMA: Tema = ler();
 export const ESPACIAL = TEMA === 'espacial';
+export const ECOLOGICO = TEMA === 'ecologico';
 
 /** Grava a escolha e reinicia o app para todas as telas trocarem de cor. */
 export async function trocarTema(tema: Tema): Promise<void> {

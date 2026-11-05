@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, Image, StyleSheet, Text, View } from 'react-native';
 
 import { colors, spacing, typography } from '../theme';
+import { LOGO_ESCUDO } from '../theme/logo';
 
 export type LoadingPhase = 'meta' | 'video' | 'captions' | 'metadata';
 
@@ -36,7 +37,7 @@ export function LoadingAnalysis({ phase, title }: Props) {
   return (
     <View style={styles.root}>
       <Animated.View style={{ transform: [{ scale: pulse }] }}>
-        <Image source={require('../../../assets/aspis/logo-mark.png')} style={styles.shield} />
+        <Image source={LOGO_ESCUDO} style={styles.shield} />
       </Animated.View>
       {title ? (
         <Text style={styles.videoTitle} numberOfLines={2}>

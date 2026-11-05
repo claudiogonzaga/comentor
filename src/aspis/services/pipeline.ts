@@ -10,8 +10,18 @@ import {
   starsToThreshold,
 } from '../constants/defaults';
 import type { Period } from '../types';
-import { analyze, analyzePost, type BrainOptions, GeminiError, NoGeminiKeyError } from './brain';
+import {
+  analyze,
+  analyzePost,
+  analyzeTranscript,
+  type AnalyzeResult,
+  type BrainOptions,
+  GeminiError,
+  NoGeminiKeyError,
+} from './brain';
 import * as db from './db';
+import { consumeDesktopTranscript, pendingDesktopTranscript } from './desktopTranscripts';
+import { contentSourceOf } from './retriage';
 import { harvestTimeline } from './x';
 import {
   getNewVideoIds,
@@ -106,9 +116,18 @@ export async function refreshFeed(
     if (abort) return;
     try {
       const meta = { ...video, channel_thumb: thumbs[video.channel_id] || '' };
+      // O Mac já transcreveu este vídeo (desktopTranscripts.ts): a triagem sai
+      // direto pelo conteúdo real, sem passar pela nota provisória.
+      const desk = pendingDesktopTranscript(video.video_id);
       // mesmo caminho do desktop: transcrição → metadados (sem fileUri no
       // feed — analisar ~25 vídeos "assistindo" cada um seria lento demais)
-      const r = await analyze(meta, brain, false);
+      const r: AnalyzeResult = desk
+        ? {
+            analysis: await analyzeTranscript(meta, desk.transcript, brain),
+            source: contentSourceOf(desk.source),
+            transcript: desk.transcript,
+          }
+        : await analyze(meta, brain, false);
       db.upsertVideo({
         ...meta,
         ...r.analysis,
@@ -117,6 +136,11 @@ export async function refreshFeed(
         content_source: r.source,
         transcript_text: r.transcript?.text ?? null,
       });
+      if (desk) {
+        db.setTranscript(video.video_id, desk.transcript, desk.source);
+        db.setAsrStatus(video.video_id, 'done');
+        consumeDesktopTranscript(video.video_id);
+      }
       processed++;
       if (r.analysis.score >= threshold) above++;
     } catch (e) {

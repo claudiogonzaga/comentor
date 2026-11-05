@@ -48,7 +48,7 @@ import { fetchTranscript } from './captions';
 export class NoGeminiKeyError extends Error {
   constructor() {
     super(
-      'Nenhuma chave de IA configurada. Cole a do Gemini ou a do Claude em Configurações para o Aspis poder analisar vídeos.',
+      'Nenhuma chave de IA configurada. Cole a do Gemini ou a do Claude em Configurações para o Escudo poder analisar vídeos.',
     );
     this.name = 'NoGeminiKeyError';
   }

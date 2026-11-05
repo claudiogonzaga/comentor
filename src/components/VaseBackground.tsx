@@ -3,7 +3,8 @@ import { Dimensions, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { ESPACIAL } from '../theme/tema';
+import { ECOLOGICO, ESPACIAL } from '../theme/tema';
+import { EcoBackground } from './EcoBackground';
 import { SpaceBackground } from './SpaceBackground';
 
 // Fundo de vaso grego: terracota que clareia de dia e escurece à noite,
@@ -161,7 +162,9 @@ function TerracottaBackground({ meander = true }: VaseBackgroundProps) {
   );
 }
 
-/** O fundo da tela: o vaso no tema terracota, o céu no espacial. */
+/** O fundo da tela: o vaso no tema terracota, o céu no espacial, a folha no ecológico. */
 export function VaseBackground(props: VaseBackgroundProps) {
-  return ESPACIAL ? <SpaceBackground /> : <TerracottaBackground {...props} />;
+  if (ESPACIAL) return <SpaceBackground />;
+  if (ECOLOGICO) return <EcoBackground ornament={props.meander !== false} />;
+  return <TerracottaBackground {...props} />;
 }

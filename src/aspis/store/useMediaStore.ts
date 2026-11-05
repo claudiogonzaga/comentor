@@ -53,7 +53,7 @@ interface MediaState {
   refresh: () => void;
   start: (url: string, videoId: string, kind: MediaKind) => Promise<boolean>;
   prefetch: (url: string, videoId: string) => void;
-  ensure: (url: string, videoId: string, kind: MediaKind) => Promise<void>;
+  ensure: (url: string, videoId: string, kind: MediaKind, allowed?: () => boolean) => Promise<void>;
   cancel: (videoId: string, kind: MediaKind) => void;
   remove: (videoId: string, kind?: MediaKind) => void;
   removeAll: () => void;
@@ -69,6 +69,14 @@ let pumping = false;
 // Pré-downloads que falharam nesta sessão: não insiste sozinho (o toque do
 // usuário ainda tenta de novo).
 const failedPrefetch = new Set<string>();
+// Downloads pedidos pela transcrição (ensure): a regra de rede é a da transcrição
+// (o `allowed` de quem pediu), não a do pré-download — antes, com o pré-download
+// "Desligado" ou "Só no Wi-Fi" fora do Wi-Fi, o áudio da transcrição era
+// cancelado logo no primeiro progresso e a transcrição falhava sempre.
+const guards = new Map<string, () => boolean>();
+// Como terminou o último download de cada arquivo que ninguém está vendo
+// (pré-download/transcrição): 'canceled' ou a mensagem do yt-dlp.
+const outcomes = new Map<string, string>();
 
 export const useMediaStore = create<MediaState>((set, get) => {
   const setDownload = (base: string, d: DownloadState | null) => {
@@ -84,8 +92,10 @@ export const useMediaStore = create<MediaState>((set, get) => {
       // Um único set: o botão vê "sem download" e "arquivo pronto" juntos.
       const { [base]: _, ...rest } = get().downloads;
       set({ downloads: rest, version: get().version + 1 });
+      outcomes.delete(base);
       return true;
     } catch (e) {
+      outcomes.set(base, isCanceled(e) ? 'canceled' : e instanceof Error ? e.message : String(e));
       // Se o usuário pediu durante o pré-download, o erro passa a ser dele.
       const wasBackground = get().downloads[base]?.background ?? background;
       if (isCanceled(e)) {
@@ -145,12 +155,14 @@ export const useMediaStore = create<MediaState>((set, get) => {
           const cur = get().downloads[base];
           if (!cur || cur.status !== 'downloading') return;
           // Pré-download "só no Wi-Fi" não continua se o celular caiu para
-          // dados móveis no meio (checa a rede a cada ~5 s).
-          if (cur.background && Date.now() - lastNetCheck > 5000) {
+          // dados móveis no meio (checa a rede a cada ~5 s). O áudio pedido pela
+          // transcrição segue a regra dela (guards), não a do pré-download.
+          const guard = guards.get(base);
+          if ((guard || cur.background) && Date.now() - lastNetCheck > 5000) {
             lastNetCheck = Date.now();
-            if (!canPrefetchNow(get().prefetchMode)) {
+            if (!(guard ? guard() : canPrefetchNow(get().prefetchMode))) {
               const [videoId, kind] = base.split('.') as [string, MediaKind];
-              set({ queue: [] });
+              if (!guard) set({ queue: [] });
               cancelDownload(videoId, kind);
               return;
             }
@@ -172,7 +184,8 @@ export const useMediaStore = create<MediaState>((set, get) => {
       const base = mediaBase(videoId, kind);
       const cur = get().downloads[base];
       if (cur?.status === 'downloading') {
-        // Já está pré-baixando: agora é um pedido do usuário.
+        // Já está pré-baixando: agora é um pedido do usuário (sem regra de rede).
+        guards.delete(base);
         if (cur.background) setDownload(base, { ...cur, background: false });
         return false;
       }
@@ -197,24 +210,41 @@ export const useMediaStore = create<MediaState>((set, get) => {
     },
 
     // Garante o arquivo no celular (para a transcrição): usa o que já existe,
-    // espera um download em andamento ou baixa em segundo plano.
-    ensure: async (url, videoId, kind) => {
+    // espera um download em andamento ou baixa em segundo plano. `allowed` é a
+    // regra de rede de quem pediu (sem ela, baixa em qualquer rede). Lança com o
+    // motivo do yt-dlp, ou com code E_CANCELED se o download foi cancelado.
+    ensure: async (url, videoId, kind, allowed) => {
       if (findMedia(videoId, kind)) return;
       const base = mediaBase(videoId, kind);
-      if (get().downloads[base]?.status === 'downloading') {
-        await new Promise<void>((resolve) => {
-          const unsub = useMediaStore.subscribe((s) => {
-            if (s.downloads[base]?.status !== 'downloading') {
-              unsub();
-              resolve();
-            }
+      const cur = get().downloads[base];
+      // o download que você pediu (Ouvir) não passa a obedecer a regra da fila
+      if (!(cur?.status === 'downloading' && !cur.background)) guards.set(base, allowed ?? (() => true));
+      outcomes.delete(base);
+      try {
+        if (get().downloads[base]?.status === 'downloading') {
+          await new Promise<void>((resolve) => {
+            const unsub = useMediaStore.subscribe((s) => {
+              if (s.downloads[base]?.status !== 'downloading') {
+                unsub();
+                resolve();
+              }
+            });
           });
-        });
-      } else {
-        set({ queue: get().queue.filter((j) => mediaBase(j.videoId, j.kind) !== base) });
-        await run({ url, videoId, kind }, true);
+        } else {
+          set({ queue: get().queue.filter((j) => mediaBase(j.videoId, j.kind) !== base) });
+          await run({ url, videoId, kind }, true);
+        }
+      } finally {
+        guards.delete(base);
       }
-      if (!findMedia(videoId, kind)) throw new Error('Não consegui baixar o áudio do vídeo.');
+      if (findMedia(videoId, kind)) return;
+      const outcome = outcomes.get(base) ?? get().downloads[base]?.error;
+      if (outcome === 'canceled') {
+        throw Object.assign(new Error('Download do áudio cancelado.'), { code: 'E_CANCELED' });
+      }
+      throw new Error(
+        outcome ? `Não consegui baixar o áudio: ${outcome}` : 'Não consegui baixar o áudio do vídeo.',
+      );
     },
 
     cancel: (videoId, kind) => {

@@ -49,11 +49,14 @@ export interface Analysis {
 }
 
 // De onde veio o conteúdo analisado (camadas da Funcionalidade 1).
-// 'transcript' = transcrição feita NO CELULAR (Parakeet) quando não havia legenda.
+// 'transcript' = transcrição do áudio (Parakeet no celular ou Whisper no Mac)
+// quando não havia legenda.
 export type ContentSource = 'video' | 'captions' | 'metadata' | 'transcript' | 'post';
 
-// De onde veio a transcrição salva do vídeo.
-export type TranscriptSource = 'youtube' | 'parakeet';
+// De onde veio a transcrição salva do vídeo. 'desktop' = transcrita no Mac
+// (Whisper) e recebida pelo Drive (aspis-transcricoes.json); a legenda do
+// YouTube trazida pelo Mac conta como 'youtube'.
+export type TranscriptSource = 'youtube' | 'parakeet' | 'desktop';
 
 // Metadados de um vídeo antes da análise (oEmbed e/ou videos.list).
 export interface VideoMeta {
@@ -107,6 +110,9 @@ export interface VideoRecord extends Analysis {
   transcript_segments?: string | null; // JSON [{ts, text}] da transcrição
   transcript_source?: TranscriptSource | null;
   asr_status?: 'done' | 'failed' | 'skipped' | null; // transcrição automática
+  asr_error?: string | null; // motivo da falha / do pulo
+  asr_at?: string | null; // última tentativa (ISO)
+  asr_tries?: number | null; // tentativas que falharam
   source?: FeedSource | null;
 }
 

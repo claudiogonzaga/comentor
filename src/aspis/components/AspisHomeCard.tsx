@@ -46,7 +46,7 @@ export function AspisHomeCard() {
       <Card style={styles.card}>
         <View style={styles.head}>
           <GreekIcon name="sparkle" size={18} color={colors.accent.gold} />
-          <Text style={styles.title}>ASPIS · O MELHOR DE HOJE</Text>
+          <Text style={styles.title}>ESCUDO · O MELHOR DE HOJE</Text>
         </View>
         {top ? (
           <>
@@ -58,7 +58,7 @@ export function AspisHomeCard() {
             </Text>
           </>
         ) : (
-          <Text style={styles.meta}>Nada novo por aqui. Abra a aba Aspis para buscar, ou compartilhe um vídeo do YouTube ›</Text>
+          <Text style={styles.meta}>Nada novo por aqui. Abra a aba Escudo para buscar, ou compartilhe um vídeo do YouTube ›</Text>
         )}
       </Card>
     </Pressable>

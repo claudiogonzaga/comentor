@@ -9,9 +9,9 @@ import { colors, radius, spacing, typography } from '../theme';
 function describe(s: ConfigSyncStatus): string {
   if (s.state === 'ok') {
     const when = new Date(s.last).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    return `Em dia, última passada às ${when}. Hábitos, lembretes, marcas do dia, Aspis e Kinesis vão pelo arquivo askesis-sync.json, na pasta Askesis do seu Google Drive. As chaves de API não passam por lá.`;
+    return `Em dia, última passada às ${when}. Hábitos, lembretes, marcas do dia, Escudo e Kinesis vão pelo arquivo askesis-sync.json, na pasta Askesis do seu Google Drive. As chaves de API não passam por lá.`;
   }
-  if (s.state === 'signed-out') return 'Conecte a conta do Google na aba Aspis: é por ela que as configurações chegam ao Mac.';
+  if (s.state === 'signed-out') return 'Conecte a conta do Google na aba Escudo: é por ela que as configurações chegam ao Mac.';
   if (s.state === 'error') return `Não consegui sincronizar agora: ${s.message}`;
   return 'Ainda não sincronizou.';
 }

@@ -285,7 +285,12 @@ export function SynthesisView({ video: videoProp, context, onChanged, onDiscard,
   if (firstCite?.timestamp) metaBits.push(`trecho em ${firstCite.timestamp}`);
   if (video.content_source === 'metadata')
     metaBits.push('nota provisória — só título e descrição; refeita com a transcrição');
-  if (video.content_source === 'transcript') metaBits.push('análise pela transcrição no celular');
+  if (video.content_source === 'transcript')
+    metaBits.push(
+      video.transcript_source === 'desktop'
+        ? 'análise pela transcrição feita no Mac'
+        : 'análise pela transcrição no celular',
+    );
 
   const narration = analysisNarration(video);
 

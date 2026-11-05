@@ -127,7 +127,7 @@ export function ShareScreen({ route, navigation }: Props) {
   return (
     <ScreenContainer>
       <View style={styles.topbar}>
-        <Text style={styles.wordmark}>Aspis</Text>
+        <Text style={styles.wordmark}>Escudo</Text>
         <Pressable onPress={() => navigation.popToTop()} hitSlop={12}>
           <Text style={styles.close}>×</Text>
         </Pressable>

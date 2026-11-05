@@ -19,6 +19,54 @@ class SpokenNudgesModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SpokenNudges")
 
+    // Hábitos rigorosos: uma resposta tocada na notificação entrou na fila. O JS
+    // então lê a fila (takeStrictAnswers) e marca o hábito.
+    Events("onStrictAnswer")
+
+    OnStartObserving("onStrictAnswer") {
+      // Referência fraca (como o expo-linking): o objeto global não segura o módulo.
+      val weak = java.lang.ref.WeakReference(this@SpokenNudgesModule)
+      StrictEvents.listener = {
+        weak.get()?.sendEvent("onStrictAnswer", mapOf("pending" to true))
+      }
+    }
+
+    OnStopObserving("onStrictAnswer") {
+      StrictEvents.listener = null
+    }
+
+    OnDestroy {
+      StrictEvents.listener = null
+    }
+
+    // ---- hábitos rigorosos (vibram em pulsos até a resposta) ----
+
+    // Lista dos hábitos rigorosos de uma fonte ("nudge" | "med"), em JSON:
+    // [{key, title, body, lines, hour, minute, days, skipDay, resumeAt}].
+    AsyncFunction("setStrictHabits") { source: String, json: String ->
+      StrictScheduler.sync(context, source, json)
+    }
+
+    // Janelas de sono (minutos do dia) em que não vibra: [{start, end}].
+    Function("setStrictSleepWindows") { json: String ->
+      StrictStore.setSleepWindows(context, json)
+    }
+
+    // O app marcou o hábito (feito / não vou fazer) no dia `day`: para de insistir.
+    Function("stopStrict") { key: String, day: String ->
+      StrictScheduler.stopFromApp(context, key, day)
+    }
+
+    // "Me dê mais tempo" dado no app: para agora e volta a insistir em `untilEpochMs`.
+    Function("snoozeStrict") { key: String, untilEpochMs: Double ->
+      StrictScheduler.snoozeFromApp(context, key, untilEpochMs.toLong())
+    }
+
+    // Entrega e esvazia a fila de respostas dadas na notificação (JSON array).
+    Function("takeStrictAnswers") {
+      StrictStore.takeAnswers(context)
+    }
+
     Function("isExactAlarmAllowed") {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager

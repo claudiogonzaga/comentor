@@ -34,6 +34,12 @@ import {
   type SpokenTaskAlarm,
 } from './spokenNudges';
 import { logicalDay, recordHabitEvent, type ConfirmMeta } from './habitEvents';
+import {
+  snoozeStrictInsistence,
+  stopStrictInsistence,
+  syncStrictHabits,
+  type StrictHabitItem,
+} from './strictHabits';
 import { refreshReviewNotification } from './review';
 import {
   evaluateFormation,
@@ -445,6 +451,8 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
   // As versões FALADAS de tudo o que for agendado abaixo: a mesma corrente, para
   // a voz chegar com o celular no bolso e o fone no ouvido.
   const spoken: SpokenTaskAlarm[] = [];
+  // Os hábitos RIGOROSOS: no horário, o nativo vibra em pulsos até a resposta.
+  const strict: StrictHabitItem[] = [];
 
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
@@ -715,6 +723,30 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       console.warn(`failed to schedule nudge anchor ${n.type}:`, err);
     }
 
+    // RIGOROSO: além da âncora e da corrente, o nativo vibra em pulsos no horário
+    // até a resposta. Vale mesmo com a insistência global em 0 — é escolha do
+    // hábito. Respondido hoje (ou dado como perdido): hoje não chama mais.
+    if (isVerify && n.strict) {
+      const answeredToday =
+        doneTypes.includes(n.type) ||
+        doneTypes.includes(`${n.type}:skip`) ||
+        doneTypes.includes(`${n.type}:missed`);
+      const snoozeUntil = answeredToday
+        ? 0
+        : Number(await getKV(snoozeUntilKey(n.type)).catch(() => null)) || 0;
+      strict.push({
+        key: n.type,
+        title,
+        body: anchorBody,
+        name: n.title,
+        hour: safeHour,
+        minute: safeMinute,
+        days: 127,
+        skipDay: answeredToday ? today : '',
+        resumeAt: snoozeUntil > Date.now() ? snoozeUntil : 0,
+      });
+    }
+
     // Corrente de insistências de hoje — só para nudges "verify" ainda não
     // confirmados. As cobranças são GERADAS para esta pessoa (com fallback
     // fixo), os horários têm jitter, e cada uma leva o rótulo da técnica para
@@ -827,6 +859,8 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
   // Arma sem esperar a rede (a voz do Gemini vem depois). Com await, para quem
   // espera esta passada (settleNudgeScheduling) cancelar a voz já com tudo armado.
   await syncSpokenTasks('nudge', spoken).catch(() => {});
+  // Idem para a vibração dos rigorosos (hábito que saiu da lista para de insistir).
+  await syncStrictHabits('nudge', strict).catch(() => {});
   notifyLocalChange();
 
   return ids;
@@ -884,6 +918,8 @@ async function closeNudgeChain(nudgeType: string, day: string, scheduledHHMM: st
  */
 export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
   const today = logicalDay(meta.day);
+  // Rigoroso vibrando: para já, antes de qualquer espera abaixo.
+  stopStrictInsistence(nudgeType, today);
   try {
     await markNudgeDone(nudgeType, today);
   } catch (err) {
@@ -902,6 +938,7 @@ export async function confirmNudge(nudgeType: string, meta: ConfirmMeta = {}): P
  */
 export async function skipNudgeToday(nudgeType: string, meta: ConfirmMeta = {}): Promise<void> {
   const today = logicalDay(meta.day);
+  stopStrictInsistence(nudgeType, today);
   try {
     await markNudgeDone(`${nudgeType}:skip`, today);
   } catch (err) {
@@ -963,8 +1000,15 @@ export async function resetNudgeToday(nudgeType: string): Promise<void> {
  * tocariam antes disso são canceladas — o botão promete sossego, não mais um
  * aviso por cima dos outros — e a notificação visível sai da bandeja. As que
  * vêm depois, e a âncora diária, seguem intactas.
+ *
+ * `opts.until`: prazo exato (epoch ms) em vez de `minutes` a partir de agora — é
+ * o "Mais tempo" tocado na notificação rigorosa, aplicado depois (strictAnswers).
  */
-export async function snoozeNudge(nudgeType: string, minutes = 20): Promise<void> {
+export async function snoozeNudge(
+  nudgeType: string,
+  minutes = 20,
+  opts: { until?: number } = {},
+): Promise<void> {
   const channelId = await ensureChannel();
   await ensureNotificationCategories();
 
@@ -980,7 +1024,12 @@ export async function snoozeNudge(nudgeType: string, minutes = 20): Promise<void
   const n = nudges.find((x) => x.type === nudgeType);
   if (!n) return;
 
-  const fireAt = new Date(Date.now() + Math.max(1, minutes) * 60_000);
+  const fireAt =
+    opts.until && opts.until > Date.now()
+      ? new Date(opts.until)
+      : new Date(Date.now() + Math.max(1, minutes) * 60_000);
+  // Rigoroso: para de vibrar agora e volta a insistir no fim do prazo.
+  snoozeStrictInsistence(nudgeType, fireAt.getTime());
   // Guarda o prazo: qualquer reagendamento (abrir o app, salvar algo) cancela
   // todos os nudges e precisa saber recriar este aviso e pular o que vem antes.
   await setKV(snoozeUntilKey(nudgeType), String(fireAt.getTime())).catch(() => {});
@@ -1024,6 +1073,13 @@ export async function setNudgeEnabled(id: number, enabled: boolean): Promise<Nud
 
 export async function setNudgeTime(id: number, scheduleTime: string): Promise<Nudge | null> {
   const result = await updateNudge(id, { scheduleTime });
+  await scheduleAllNudges();
+  return result;
+}
+
+/** Liga/desliga o modo RIGOROSO (vibra em pulsos até a resposta) de um hábito. */
+export async function setNudgeStrict(id: number, strict: boolean): Promise<Nudge | null> {
+  const result = await updateNudge(id, { strict });
   await scheduleAllNudges();
   return result;
 }

@@ -322,7 +322,7 @@ function buildSystemPromptText(ctx: CoachingContext): string {
   }
   if (ctx.lifeGoals && ctx.lifeGoals.trim().length > 0) {
     extras.push(
-      `\nOBJETIVOS DE VIDA DA PESSOA (os pilares que ela definiu no Aspis — ligue seus argumentos a eles quando couber, sem listá-los):\n${ctx.lifeGoals}`,
+      `\nOBJETIVOS DE VIDA DA PESSOA (os pilares que ela definiu no Escudo — ligue seus argumentos a eles quando couber, sem listá-los):\n${ctx.lifeGoals}`,
     );
   }
   if (ctx.healthContext && ctx.healthContext.trim().length > 0) {
