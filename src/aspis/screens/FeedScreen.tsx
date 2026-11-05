@@ -38,6 +38,14 @@ import { LOGO_ESCUDO } from '../theme/logo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Feed'>;
 
+const DAY_MS = 24 * 3600 * 1000;
+
+/** Compartilhado com a Noosfera nas últimas 24 h: vai para o topo do feed. */
+function sharedRecently(v: { shared_at?: string | null }): number {
+  const t = Date.parse(v.shared_at || '');
+  return Number.isFinite(t) && Date.now() - t < DAY_MS ? 1 : 0;
+}
+
 /** Quanto tempo o aviso "Ocultado · Desfazer" fica na tela. */
 const UNDO_MS = 5000;
 
@@ -116,10 +124,13 @@ export function FeedScreen({ navigation }: Props) {
   const videos = useMemo(
     () =>
       candidates
-        .filter((c) => c.aligned >= threshold || db.isProvisional(c.video))
+        // o que você compartilhou com a Noosfera entra mesmo abaixo do limiar
+        .filter((c) => c.aligned >= threshold || db.isProvisional(c.video) || !!c.video.shared_at)
         .sort(
           (a, b) =>
-            b.aligned - a.aligned || (b.video.published_at > a.video.published_at ? 1 : -1),
+            sharedRecently(b.video) - sharedRecently(a.video) ||
+            b.aligned - a.aligned ||
+            (b.video.published_at > a.video.published_at ? 1 : -1),
         )
         .map((c) => c.video),
     [candidates, threshold],

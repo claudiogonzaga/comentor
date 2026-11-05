@@ -2,7 +2,9 @@
 // YouTube, busca metadados (oEmbed → videos.list se logado), obtém o conteúdo
 // em camadas (Gemini assiste o vídeo → legendas → metadados) e mostra a
 // síntese com as ações. Vídeo já analisado vem direto do cache (SQLite).
-import { useCallback, useEffect, useState } from 'react';
+// Compartilhar é dizer "quero isto": o vídeo entra no feed do Escudo (no topo
+// por um dia, mesmo abaixo do limiar) e ganha 👍 na rede local.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -14,6 +16,7 @@ import { scoreToStars } from '../constants/defaults';
 import { analyze, GeminiError, NoGeminiKeyError } from '../services/brain';
 import { getAccessToken } from '../services/auth';
 import * as db from '../services/db';
+import { learnThumb } from '../services/neural';
 import { fetchOEmbed } from '../services/oembed';
 import { getVideoDetails } from '../services/youtube';
 import { useAppStore } from '../store/useAppStore';
@@ -34,6 +37,19 @@ export function ShareScreen({ route, navigation }: Props) {
   const { sharedText } = route.params;
   const { geminiKey, model, pillars, rules, noteLang, learnedPrefs, user } = useAppStore();
   const [state, setState] = useState<State>({ status: 'loading', phase: 'meta' });
+  // o 👍 foi dado por este compartilhamento (e não já existia)?
+  const autoThumbed = useRef(false);
+
+  /** Compartilhar = quero isto: vai para o feed do Escudo e ganha 👍 na rede local. */
+  const intoShield = useCallback((video: VideoRecord): VideoRecord => {
+    db.markShared(video.video_id);
+    if (db.getThumbValue(video.video_id) !== 1) {
+      learnThumb(video, 1);
+      autoThumbed.current = true;
+    }
+    useAppStore.getState().bumpFeed();
+    return db.getVideo(video.video_id) ?? video;
+  }, []);
 
   const run = useCallback(async () => {
     setState({ status: 'loading', phase: 'meta' });
@@ -52,7 +68,7 @@ export function ShareScreen({ route, navigation }: Props) {
     // cache: já analisado → mostra direto, sem reprocessar
     const cached = db.getVideo(videoId);
     if (cached) {
-      setState({ status: 'done', video: cached });
+      setState({ status: 'done', video: intoShield(cached) });
       return;
     }
 
@@ -103,7 +119,7 @@ export function ShareScreen({ route, navigation }: Props) {
         transcript_text: r.transcript?.text ?? null,
       });
       const saved = db.getVideo(videoId);
-      if (saved) setState({ status: 'done', video: saved });
+      if (saved) setState({ status: 'done', video: intoShield(saved) });
       if (r.source === 'metadata') useTranscribeStore.getState().runAuto();
     } catch (e) {
       const keyError =
@@ -116,11 +132,19 @@ export function ShareScreen({ route, navigation }: Props) {
         canRetry: true,
       });
     }
-  }, [sharedText, geminiKey, model, pillars, rules, noteLang, learnedPrefs, user]);
+  }, [sharedText, geminiKey, model, pillars, rules, noteLang, learnedPrefs, user, intoShield]);
 
   useEffect(() => {
     run();
   }, [run]);
+
+  // Descartar ou pular aqui desfaz o 👍 que o compartilhamento deu.
+  const undoShare = (video: VideoRecord) => {
+    if (autoThumbed.current) learnThumb(video, 0);
+    autoThumbed.current = false;
+    useAppStore.getState().bumpFeed();
+    navigation.popToTop();
+  };
 
   const goSettings = () => navigation.navigate('Settings');
 
@@ -168,6 +192,7 @@ export function ShareScreen({ route, navigation }: Props) {
               {pillars.find((p) => p.id === state.video.pillar)?.mocName || 'nenhum'}
             </Text>
           </View>
+          <Text style={styles.added}>No feed do Escudo, com 👍</Text>
           <Text style={styles.title}>{state.video.neutral_title}</Text>
           <Text style={styles.subline}>
             {state.video.channel}
@@ -178,7 +203,7 @@ export function ShareScreen({ route, navigation }: Props) {
             video={state.video}
             context="share"
             onNeedSettings={goSettings}
-            onDiscard={() => navigation.popToTop()}
+            onDiscard={() => undoShare(state.video)}
           />
         </ScrollView>
       )}
@@ -200,6 +225,7 @@ const styles = StyleSheet.create({
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.sm },
   stars: { fontSize: 16, letterSpacing: 2 },
   scoreText: { ...typography.small, color: colors.text.secondary },
+  added: { ...typography.small, color: colors.accent.success, marginBottom: spacing.xs },
   title: { ...typography.title, color: colors.text.primary },
   subline: { ...typography.small, color: colors.text.secondary, marginTop: 6 },
   errorBox: { flex: 1, justifyContent: 'center', padding: spacing.xxl },

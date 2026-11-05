@@ -113,6 +113,7 @@ export interface VideoRecord extends Analysis {
   asr_error?: string | null; // motivo da falha / do pulo
   asr_at?: string | null; // última tentativa (ISO)
   asr_tries?: number | null; // tentativas que falharam
+  shared_at?: string | null; // compartilhado com a Noosfera (ISO): entra no feed e fica no topo por um dia
   source?: FeedSource | null;
 }
 

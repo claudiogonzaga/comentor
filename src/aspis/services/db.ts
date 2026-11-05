@@ -96,6 +96,8 @@ const MIGRATIONS: { table: string; column: string; ddl: string }[] = [
   // fila de transcrição: quando foi a última tentativa e quantas falharam (nova tentativa mais tarde)
   { table: 'videos', column: 'asr_at', ddl: 'ALTER TABLE videos ADD COLUMN asr_at TEXT' },
   { table: 'videos', column: 'asr_tries', ddl: 'ALTER TABLE videos ADD COLUMN asr_tries INTEGER' },
+  // compartilhado com a Noosfera (menu Compartilhar do YouTube): entra no feed de qualquer jeito
+  { table: 'videos', column: 'shared_at', ddl: 'ALTER TABLE videos ADD COLUMN shared_at TEXT' },
 ];
 
 // Transcrições feitas no Mac (aspis-transcricoes.json no Drive) para vídeos que
@@ -277,8 +279,9 @@ export function getVideos(q: VideoQuery = {}): VideoRecord[] {
     args.push(q.pillar);
   }
   if (q.sinceIso) {
-    sql += ' AND published_at >= ?';
-    args.push(q.sinceIso);
+    // o vídeo compartilhado no período entra, mesmo publicado há tempo
+    sql += " AND (published_at >= ? OR COALESCE(shared_at, '') >= ?)";
+    args.push(q.sinceIso, q.sinceIso);
   }
   if (q.source) {
     sql += " AND COALESCE(source, 'youtube') = ?";
@@ -335,6 +338,22 @@ export function deleteVideo(videoId: string): void {
   conn().runSync('DELETE FROM videos WHERE video_id = ?', [videoId]);
   conn().runSync('DELETE FROM qa WHERE video_id = ?', [videoId]);
   conn().runSync('DELETE FROM clips WHERE video_id = ?', [videoId]);
+}
+
+/**
+ * Compartilhado com a Noosfera: o vídeo vai para o feed do Escudo — volta se estava
+ * oculto, pulado ou lido — e fica no topo por um dia (FeedScreen).
+ */
+export function markShared(videoId: string): void {
+  conn().runSync('UPDATE videos SET shared_at = ?, read = 0, skipped = 0 WHERE video_id = ?', [
+    nowIso(),
+    videoId,
+  ]);
+  const hidden = conn().getFirstSync<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM hidden WHERE video_id = ? AND hidden_at IS NOT NULL',
+    [videoId],
+  );
+  if (hidden?.n) unhideVideo(videoId);
 }
 
 // --- Ocultar ("não quero isso agora") ----------------------------------------
