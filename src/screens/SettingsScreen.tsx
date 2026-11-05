@@ -16,6 +16,7 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { GreekIcon } from '../components/GreekIcon';
 import { colors, radius, spacing, typography } from '../theme';
+import { TEMA, trocarTema, type Tema } from '../theme/tema';
 import { useAppStore } from '../store/useAppStore';
 import { deleteApiKey } from '../services/secureStore';
 import { deleteAllDownloadedModels } from '../services/modelDownload';
@@ -39,6 +40,11 @@ import { scheduleAllMedications } from '../services/medications';
 import { scheduleSedentaryNudges } from '../services/sedentary';
 import { ConfigSyncRow } from '../components/ConfigSyncRow';
 import type { Tone } from '../types';
+
+const TEMAS: { value: Tema; label: string }[] = [
+  { value: 'terracota', label: 'Terracota grego' },
+  { value: 'espacial', label: 'Espacial' },
+];
 
 const TONES: { value: Tone; label: string }[] = [
   { value: 'gentle', label: 'Gentil' },
@@ -268,6 +274,27 @@ export function SettingsScreen() {
         
 
         
+
+        <Card style={styles.card}>
+          <Text style={styles.section}>Aparência</Text>
+          <View style={styles.row}>
+            {TEMAS.map((t) => (
+              <Pressable
+                key={t.value}
+                onPress={() => {
+                  if (t.value === TEMA) return;
+                  Alert.alert(t.label, 'A Noosfera reinicia para trocar as cores de todas as telas.', [
+                    { text: 'Cancelar', style: 'cancel' },
+                    { text: 'Trocar', onPress: () => void trocarTema(t.value).catch((e) => Alert.alert('Não consegui trocar o tema', String(e))) },
+                  ]);
+                }}
+                style={[styles.chip, TEMA === t.value && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, TEMA === t.value && styles.chipTextActive]}>{t.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Card>
 
         <Card style={styles.card}>
           <Text style={styles.section}>Uso do celular</Text>

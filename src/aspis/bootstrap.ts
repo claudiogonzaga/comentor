@@ -17,6 +17,8 @@ import { initNeural } from './services/neural';
 import { deleteAllMedia } from './services/media';
 import { useMediaStore } from './store/useMediaStore';
 import { useTranscribeStore } from './store/useTranscribeStore';
+// Importado aqui para a tarefa em segundo plano existir também com o app fechado.
+import './services/autoRefresh';
 
 const NIGHT_GATE_KEY = 'aspis:nightGate';
 

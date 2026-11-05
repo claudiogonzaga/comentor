@@ -26,6 +26,8 @@ dependencies {
   implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$ytdlVersion"
   // Limpeza periódica dos arquivos vencidos, mesmo com o app fechado.
   implementation "androidx.work:work-runtime-ktx:2.10.1"
+  // FileProvider: compartilhar um arquivo com legenda (shareFile).
+  implementation "androidx.core:core-ktx:1.13.1"
   // Transcrição no celular: sherpa-onnx (onnxruntime) + modelo Parakeet baixado à parte.
   // AAR oficial do GitHub Releases (não há no Maven Central), ligado pelo
   // gradleAarProjects do expo-module.config.json; instale com

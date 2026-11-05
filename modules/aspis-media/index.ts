@@ -27,6 +27,7 @@ interface AspisMediaNative {
   updateEngine(): Promise<{ status: string; version: string | null }>;
   engineVersion(): string | null;
   isUnmeteredNetwork(): boolean;
+  shareFile(uri: string, mime: string, text: string, title: string): void;
 
   // Transcrição no celular (Parakeet via sherpa-onnx)
   modelStatus(): ModelStatus;

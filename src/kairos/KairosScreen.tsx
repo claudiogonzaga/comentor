@@ -36,6 +36,7 @@ import {
 } from './rules';
 import { LAPIDE_MS, useKairos, type Campos } from './store';
 import { AREA_ICONE, dark, fixas, light, type Tema } from './theme';
+import { ESPACIAL } from '../theme/tema';
 
 // Onde cada IA abre uma conversa nova já com o pedido. O Gemini não aceita o pedido
 // no endereço: ele vai para a área de transferência. O Claude Code fica no Mac.
@@ -47,7 +48,9 @@ const DESTINOS = [
 ];
 
 export function KairosScreen() {
-  const c = useColorScheme() === 'dark' ? dark : light;
+  const scheme = useColorScheme();
+  // No tema espacial da Noosfera, o Kairós fica sempre na variante escura.
+  const c = ESPACIAL || scheme === 'dark' ? dark : light;
   const s = useMemo(() => estilos(c), [c]);
   const { tarefas, pulados, lapides } = useKairos();
   const k = useKairos.getState();

@@ -17,6 +17,8 @@ import { useShareIntent } from 'expo-share-intent';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { startAspis } from './src/aspis/bootstrap';
 import { MiniPlayerHost } from './src/aspis/components/MiniPlayer';
+import { XHarvester } from './src/aspis/components/XHarvester';
+import { startAutoRefresh } from './src/aspis/services/autoRefresh';
 import { startKairos } from './src/kairos/store';
 import { startKinesis } from './src/kinesis/store';
 import { startConfigSync } from './src/services/configSync';
@@ -86,8 +88,9 @@ export default function App() {
   }, [ready, fontsLoaded]);
 
   // O Aspis sobe depois da Comentora: uma falha nele não pode impedir os lembretes.
+  // Depois, o feed passa a se atualizar sozinho de hora em hora.
   useEffect(() => {
-    if (ready) void startAspis();
+    if (ready) void startAspis().then(startAutoRefresh);
   }, [ready]);
 
   // O Kinesis também: o timer retoma de onde estava, sem segurar o boot.
@@ -147,6 +150,8 @@ export default function App() {
       <View style={{ flex: 1, backgroundColor: colors.bg.primary }}>
         <RootNavigator navigationRef={navigationRef} onNavReady={() => setNavReady(true)} />
         <MiniPlayerHost />
+        {/* A leitura do X roda de qualquer aba (atualização contínua do Aspis). */}
+        <XHarvester />
         <StatusBar style="light" />
       </View>
     </SafeAreaProvider>

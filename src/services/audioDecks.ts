@@ -31,6 +31,7 @@ import {
   type NewAudioClip,
 } from './database';
 import { parseCsv } from './inspirationLibrary';
+import { assinarTexto, compartilharAudio, nomeAssinado } from './assinatura';
 import { claimPlayback, registerPlayer } from './playerBus';
 import type { AudioClip } from '../types';
 
@@ -909,10 +910,10 @@ export function clipShareText(c: Pick<AudioClip, 'text' | 'title' | 'author' | '
   return `${body}${who ? `\n— ${who}` : ''}${where ? `\n(${where})` : ''}`;
 }
 
-/** Copia o texto do trecho para a área de transferência. */
+/** Copia o texto do trecho para a área de transferência, com a assinatura da Noosfera. */
 export async function copyClipText(c: AudioClip, deckName?: string): Promise<boolean> {
   try {
-    await Clipboard.setStringAsync(clipShareText(c, deckName));
+    await Clipboard.setStringAsync(assinarTexto(clipShareText(c, deckName)));
     notifyShort('Texto copiado');
     return true;
   } catch {
@@ -933,12 +934,12 @@ export async function shareClipAudio(c: AudioClip): Promise<{ ok: boolean; error
     const src = new File(Paths.document, 'audiodecks', String(c.deckId), c.fileName);
     if (!src.exists) return { ok: false, error: 'O arquivo de áudio deste trecho não está no aparelho.' };
     const ext = extOf(c.fileName) || 'mp3';
-    const out = new File(freshShareDir('trecho'), `${String(c.ord + 1).padStart(3, '0')}-${safeName(c.title)}.${ext}`);
+    const out = new File(freshShareDir('trecho'), nomeAssinado(`${String(c.ord + 1).padStart(3, '0')}-${safeName(c.title)}`, ext));
     src.copy(out);
     const mime =
       ext === 'm4a' || ext === 'aac' ? 'audio/mp4' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' || ext === 'opus' ? 'audio/ogg' : ext === 'flac' ? 'audio/flac' : 'audio/mpeg';
     // Não apaga depois: ver freshShareDir (o próximo compartilhamento limpa).
-    await Sharing.shareAsync(out.uri, { mimeType: mime, dialogTitle: 'Compartilhar trecho de áudio' });
+    await compartilharAudio(out.uri, mime, 'Compartilhar trecho de áudio', assinarTexto(clipShareText(c)));
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'erro desconhecido' };

@@ -14,6 +14,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { assinarTexto, compartilharAudio, nomeAssinado } from '../services/assinatura';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Button } from '../components/Button';
 import { AudioScrubber } from '../components/AudioScrubber';
@@ -393,7 +394,8 @@ export function ReadAloudScreen() {
 
   // Exporta/compartilha o áudio gerado. O arquivo é um WAV (o formato que a voz
   // Gemini produz); o share sheet do Android deixa salvar no Drive, mandar por
-  // app, etc. Copia para um nome amigável antes de compartilhar.
+  // app, etc. Copia para um nome amigável, com a marca da Noosfera, e manda a
+  // legenda "Gerado pelo app Noosfera" junto.
   const handleExportAudio = async (item: ReadAloudText) => {
     if (!item.audioUri) return;
     try {
@@ -403,18 +405,20 @@ export function ReadAloudScreen() {
       }
       const safe =
         (item.title || 'leitura').replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 40) || 'leitura';
-      const dest = `${FileSystem.cacheDirectory}${safe}.wav`;
+      const dest = `${FileSystem.cacheDirectory}${nomeAssinado(safe, 'wav')}`;
       try {
         await FileSystem.copyAsync({ from: item.audioUri, to: dest });
       } catch {
         /* se a cópia falhar, compartilha o original mesmo */
       }
       const uri = (await FileSystem.getInfoAsync(dest)).exists ? dest : item.audioUri;
-      await Sharing.shareAsync(uri, {
-        mimeType: 'audio/wav',
-        dialogTitle: 'Exportar áudio',
-        UTI: 'com.microsoft.waveform-audio',
-      });
+      await compartilharAudio(
+        uri,
+        'audio/wav',
+        'Exportar áudio',
+        assinarTexto(item.title || 'Leitura'),
+        'com.microsoft.waveform-audio',
+      );
     } catch (e) {
       Alert.alert('Não consegui exportar', errMsg(e));
     }

@@ -76,7 +76,7 @@ export const HARVEST_JS = `(function(){
   var t=setInterval(function(){
     tries++;
     var path=location.pathname;
-    if(path.indexOf('/i/flow/login')===0||path==='/login'||path==='/i/flow/signup'){post({type:'logged-out'});clearInterval(t);return;}
+    if(/^\\/(i\\/flow\\/(login|signup)|i\\/jf\\/onboarding|login$)/.test(path)||path==='/'){post({type:'logged-out'});clearInterval(t);return;}
     var tabs=document.querySelectorAll('[role="tablist"] [role="tab"]');
     if(tabs.length>=2&&!clicked){clicked=true;tabs[1].click();}
     window.scrollBy(0,1400);

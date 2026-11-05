@@ -1,7 +1,7 @@
 // Feed de inscrições ranqueado — port da lista do desktop (ui/index.html):
 // chips de pilar, régua de estrelas mínimas, período Dia/Semana/Mês,
 // "Mostrar lidos", expansão inline da síntese e rodapé com os filtrados.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -21,18 +21,15 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { StarsRuler } from '../components/StarsRuler';
 import { SynthesisView } from '../components/SynthesisView';
 import { VideoRow } from '../components/VideoRow';
-import { XHarvester } from '../components/XHarvester';
-import { AUTO_REFRESH_AFTER_MS, PERIOD_LABELS, PERIODS, starsToThreshold } from '../constants/defaults';
-import { getAccessToken, NotSignedInError } from '../services/auth';
+import { PERIOD_LABELS, PERIODS, starsToThreshold } from '../constants/defaults';
+import { NotSignedInError } from '../services/auth';
 import { GeminiError, NoGeminiKeyError } from '../services/brain';
-import { claudeForTask } from '../../services/aiTasks';
+import { hasBrain, RefreshBusy, runX, runYouTube, useRefreshStore } from '../services/autoRefresh';
 import * as db from '../services/db';
 import { alignedScore } from '../services/neural';
-import { refreshFeed, refreshX } from '../services/pipeline';
 import { useXStore, XLoginRequired } from '../services/x';
 import type { FeedSource } from '../types';
 import { useAppStore } from '../store/useAppStore';
-import { useTranscribeStore } from '../store/useTranscribeStore';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, spacing, typography } from '../theme';
 
@@ -41,12 +38,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Feed'>;
 export function FeedScreen({ navigation }: Props) {
   const {
     user,
-    geminiKey,
-    model,
     pillars,
-    rules,
-    noteLang,
-    learnedPrefs,
     minStars,
     period,
     showRead,
@@ -66,7 +58,10 @@ export function FeedScreen({ navigation }: Props) {
     useXStore.getState().load();
   }, []);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  // Uma rodada (do botão ou automática) em andamento: a trava é uma só.
+  const busy = useRefreshStore((s) => s.busy);
+  const progress = useRefreshStore((s) => s.progress);
+  const refreshing = busy === source;
   const [banner, setBanner] = useState<{ kind: 'info' | 'ok' | 'err'; text: string; toSettings?: boolean } | null>(null);
 
   const sinceIso = useMemo(
@@ -119,7 +114,7 @@ export function FeedScreen({ navigation }: Props) {
       navigation.navigate('XLogin');
       return;
     }
-    if (!geminiKey && !(await claudeForTask('aspisFeed'))) {
+    if (!(await hasBrain())) {
       setBanner({
         kind: 'err',
         text: 'Cole a sua chave do Gemini ou do Claude em Configurações para analisar os posts.',
@@ -127,36 +122,23 @@ export function FeedScreen({ navigation }: Props) {
       });
       return;
     }
-    setRefreshing(true);
     try {
-      const result = await refreshX(
-        { apiKey: geminiKey, model, pillars, rules, noteLang, learnedPrefs },
-        period,
-        minStars,
-        (p) =>
-          setBanner({
-            kind: 'info',
-            text: p.stage === 'reading' ? 'Lendo a sua timeline do X…' : `Analisando… ${p.done}/${p.total} posts`,
-          }),
-      );
+      const result = await runX(true);
       const bits = [`${result.processed} post(s) analisado(s)`, `${result.above} acima do limiar`];
       if (result.skippedCached) bits.push(`${result.skippedCached} já analisados`);
       if (result.errors) bits.push(`${result.errors} com erro`);
       if (result.capped) bits.push(`${result.capped} ficam para a próxima`);
       setBanner({ kind: 'ok', text: `Pronto · ${bits.join(' · ')}` });
-      bumpFeed();
     } catch (e) {
       const keyError =
         e instanceof NoGeminiKeyError || (e instanceof GeminiError && e.isKeyError);
       setBanner({
-        kind: 'err',
+        kind: e instanceof RefreshBusy ? 'info' : 'err',
         text: e instanceof XLoginRequired ? e.message : e instanceof Error ? e.message : String(e),
         toSettings: keyError,
       });
-    } finally {
-      setRefreshing(false);
     }
-  }, [navigation, geminiKey, model, pillars, rules, noteLang, learnedPrefs, period, minStars, bumpFeed]);
+  }, [navigation]);
 
   const onRefresh = useCallback(async () => {
     if (source === 'x') {
@@ -164,7 +146,7 @@ export function FeedScreen({ navigation }: Props) {
       return;
     }
     setBanner(null);
-    if (!geminiKey && !(await claudeForTask('aspisFeed'))) {
+    if (!(await hasBrain())) {
       setBanner({
         kind: 'err',
         text: 'Cole a sua chave do Gemini ou do Claude em Configurações para analisar vídeos.',
@@ -172,27 +154,12 @@ export function FeedScreen({ navigation }: Props) {
       });
       return;
     }
-    setRefreshing(true);
     try {
-      let u = user;
-      if (!u) u = await googleSignIn();
-      if (!u) {
+      if (!user && !(await googleSignIn())) {
         setBanner({ kind: 'err', text: 'Conecte a sua conta Google para ler as inscrições.' });
         return;
       }
-      const token = await getAccessToken();
-      const result = await refreshFeed(
-        token,
-        { apiKey: geminiKey, model, pillars, rules, noteLang, learnedPrefs },
-        period,
-        minStars,
-        (p) => {
-          if (p.stage === 'subs') setBanner({ kind: 'info', text: 'Lendo as suas inscrições…' });
-          else if (p.stage === 'playlists')
-            setBanner({ kind: 'info', text: `Buscando vídeos novos… ${p.done}/${p.total} canais` });
-          else setBanner({ kind: 'info', text: `Sintetizando… ${p.done}/${p.total} vídeos` });
-        },
-      );
+      const result = await runYouTube(true);
       const bits = [
         `${result.processed} processado(s)`,
         `${result.above} acima do limiar`,
@@ -201,14 +168,11 @@ export function FeedScreen({ navigation }: Props) {
       if (result.errors) bits.push(`${result.errors} com erro`);
       if (result.capped) bits.push(`${result.capped} ficam para a próxima`);
       setBanner({ kind: 'ok', text: `Pronto · ${bits.join(' · ')}` });
-      bumpFeed();
-      // vídeos sem legenda: transcreve no celular e refaz a triagem
-      useTranscribeStore.getState().runAuto();
     } catch (e) {
       const keyError =
         e instanceof NoGeminiKeyError || (e instanceof GeminiError && e.isKeyError);
       setBanner({
-        kind: 'err',
+        kind: e instanceof RefreshBusy ? 'info' : 'err',
         text: e instanceof NotSignedInError
           ? e.message
           : e instanceof Error
@@ -216,29 +180,18 @@ export function FeedScreen({ navigation }: Props) {
             : String(e),
         toSettings: keyError,
       });
-    } finally {
-      setRefreshing(false);
     }
-  }, [source, onRefreshX, user, geminiKey, model, pillars, rules, noteLang, learnedPrefs, period, minStars, googleSignIn, bumpFeed]);
+  }, [source, onRefreshX, user, googleSignIn]);
 
-  // Abrir o app já busca vídeos novos (sem precisar puxar a lista), se a
-  // última busca foi há mais de 2h — só com conta e chave já configuradas,
-  // para não abrir login/erro sozinho.
-  const autoRan = useRef(false);
-  useEffect(() => {
-    if (autoRan.current || !user) return;
-    let alive = true;
-    void (async () => {
-      if (!geminiKey && !(await claudeForTask('aspisFeed'))) return;
-      if (!alive || autoRan.current) return;
-      autoRan.current = true;
-      const last = Date.parse(db.getMeta('last_run') || '');
-      if (!Number.isFinite(last) || Date.now() - last > AUTO_REFRESH_AFTER_MS) onRefresh();
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [user, geminiKey, onRefresh]);
+  // O feed se atualiza sozinho (services/autoRefresh): aqui só se mostra o andamento.
+  const lastRun = db.getMeta(source === 'x' ? 'last_run_x' : 'last_run');
+  const lastRunLabel = useMemo(() => {
+    const t = Date.parse(lastRun || '');
+    if (!Number.isFinite(t)) return null;
+    const d = new Date(t);
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return new Date().toDateString() === d.toDateString() ? `atualizado às ${hm}` : `atualizado em ${d.getDate()}/${d.getMonth() + 1} às ${hm}`;
+  }, [lastRun, feedVersion]);
 
   const header = (
     <View style={styles.header}>
@@ -308,6 +261,13 @@ export function FeedScreen({ navigation }: Props) {
         <StarsRuler value={minStars} onChange={setMinStars} />
       </View>
 
+      {busy === source && progress && !banner ? (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>{progress}</Text>
+        </View>
+      ) : !banner && lastRunLabel ? (
+        <Text style={styles.lastRun}>{lastRunLabel} · de hora em hora, sozinho</Text>
+      ) : null}
       {banner && (
         <Pressable
           onPress={banner.toSettings ? () => navigation.navigate('Settings') : undefined}
@@ -348,7 +308,7 @@ export function FeedScreen({ navigation }: Props) {
       <Text style={styles.emptyText}>
         {refreshing
           ? 'Lendo a sua timeline do X…'
-          : 'Nenhum post analisado no período. Puxe a lista para baixo para ler a timeline.'}
+          : 'Nenhum post analisado no período. Ela se atualiza sozinha de hora em hora; puxe a lista para ler agora.'}
       </Text>
     </View>
   ) : !user ? (
@@ -378,7 +338,7 @@ export function FeedScreen({ navigation }: Props) {
           ? 'Buscando vídeos novos…'
           : filteredOut > 0 || outsidePeriod > 0
             ? 'Nada passou pelos filtros atuais.'
-            : 'Nada por aqui no período. Puxe a lista para baixo para buscar vídeos novos.'}
+            : 'Nada por aqui no período. O feed se atualiza sozinho de hora em hora; puxe a lista para buscar agora.'}
       </Text>
       <View style={styles.emptyActions}>
         {filteredOut > 0 && (
@@ -407,7 +367,6 @@ export function FeedScreen({ navigation }: Props) {
 
   return (
     <ScreenContainer>
-      <XHarvester />
       <FlatList
         data={videos}
         keyExtractor={(v) => v.video_id}
@@ -521,6 +480,7 @@ const styles = StyleSheet.create({
   },
   bannerErr: { backgroundColor: 'rgba(228,120,120,0.10)' },
   bannerText: { ...typography.small, color: colors.text.secondary },
+  lastRun: { ...typography.small, fontSize: 11, color: colors.text.tertiary, marginTop: spacing.xs },
   empty: { paddingVertical: spacing.xxxl, paddingHorizontal: spacing.lg },
   emptyTitle: {
     ...typography.subtitle,

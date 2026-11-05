@@ -16,6 +16,7 @@ import {
   toggleClip,
 } from '../services/audioDecks';
 import * as Clipboard from 'expo-clipboard';
+import { assinarTexto } from '../services/assinatura';
 import { Alert } from 'react-native';
 import type { AudioClip, InspirationCard } from '../types';
 
@@ -237,7 +238,7 @@ export function InspirationHomeCard() {
   const copyText = async () => {
     try {
       await Clipboard.setStringAsync(
-        `${display}${showAuthor ? `\n— ${shown.author}` : ''}`,
+        assinarTexto(`${display}${showAuthor ? `\n— ${shown.author}` : ''}`),
       );
       notifyShort('Texto copiado');
     } catch {

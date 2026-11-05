@@ -1,9 +1,12 @@
 package expo.modules.aspismedia
 
+import android.content.ClipData
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import androidx.core.content.FileProvider
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -179,6 +182,27 @@ class AspisMediaModule : Module() {
     Function("stopKeepAlive") {
       keepAlive = false
       WorkService.stop(context)
+    }
+
+    // Compartilha um arquivo do app com uma legenda (EXTRA_TEXT), que o WhatsApp e o
+    // Telegram mandam junto do áudio. O expo-sharing não leva texto. O arquivo tem de
+    // estar em files/ ou cache/ (os caminhos do provedor do expo-file-system).
+    Function("shareFile") { uri: String, mime: String, text: String, title: String ->
+      val ctx = context
+      val path = Uri.parse(uri).path ?: throw IllegalArgumentException("Arquivo inválido.")
+      val content = FileProvider.getUriForFile(ctx, "${ctx.packageName}.FileSystemFileProvider", File(path))
+      val send = Intent(Intent.ACTION_SEND).apply {
+        type = mime
+        putExtra(Intent.EXTRA_STREAM, content)
+        putExtra(Intent.EXTRA_TEXT, text)
+        putExtra(Intent.EXTRA_SUBJECT, title)
+        clipData = ClipData.newRawUri(title, content)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      val chooser = Intent.createChooser(send, title).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      val activity = appContext.currentActivity
+      if (activity != null) activity.startActivity(chooser)
+      else ctx.startActivity(chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     // Wi-Fi (ou outra rede sem cobrança por dados) — o pré-download só roda
