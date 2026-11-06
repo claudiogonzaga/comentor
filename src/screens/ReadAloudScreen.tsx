@@ -13,6 +13,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { assinarTexto, compartilharAudio, nomeAssinado } from '../services/assinatura';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -22,6 +23,8 @@ import { colors, radius, spacing, typography } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { isGeneratingSame, keepScreenOnFor, useReadAloud } from '../store/useReadAloud';
 import { prepareReadAloudAudio } from '../services/voice';
+import { READ_ALOUD_NATIVE, settleReadAloudJobs } from '../services/geminiTTS';
+import { docxToText, fetchGoogleDocText, googleDocId, isDocx } from '../services/importText';
 import {
   startReadAloudKeepAlive,
   stopReadAloudKeepAlive,
@@ -200,6 +203,15 @@ export function ReadAloudScreen() {
   }, [text]);
 
   const reloadSaved = useCallback(async () => {
+    // Áudios que o serviço nativo terminou com o app fechado: liga cada um ao seu texto.
+    try {
+      await settleReadAloudJobs(async ({ tag, uri, voice }) => {
+        const m = /^text:(\d+)$/.exec(tag);
+        if (m) await updateReadAloudTextAudio(Number(m[1]), uri, voice);
+      });
+    } catch {
+      /* tenta de novo na próxima vez */
+    }
     try {
       setSaved(await listReadAloudTexts());
     } catch {
@@ -279,19 +291,42 @@ export function ReadAloudScreen() {
         multiple: false,
       });
       if (res.canceled || !res.assets?.[0]) return;
-      const content = await FileSystem.readAsStringAsync(res.assets[0].uri, {
+      const asset = res.assets[0];
+      if (isDocx(asset.name, asset.mimeType)) {
+        setText(docxToText(await new File(asset.uri).bytes()));
+        return;
+      }
+      const content = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: FileSystem.EncodingType.UTF8,
       });
       if (looksBinary(content)) {
         Alert.alert(
           'Arquivo não suportado',
-          'Esse arquivo não parece ser texto. Por enquanto, dá pra importar arquivos de texto (.txt). PDF e Word ainda não são suportados.',
+          'Dá pra importar texto (.txt) e Word (.docx). PDF ainda não. Um Google Docs: copie o link do documento, cole aqui e toque em "Trazer o texto do Google Docs".',
         );
         return;
       }
       setText(content);
-    } catch {
-      Alert.alert('Não consegui ler o arquivo', 'Tente um arquivo de texto (.txt).');
+    } catch (e) {
+      Alert.alert(
+        'Não consegui ler o arquivo',
+        `${e instanceof Error ? e.message : String(e)}\n\nUm Google Docs: copie o link do documento, cole aqui e toque em "Trazer o texto do Google Docs".`,
+      );
+    }
+  };
+
+  // Um link do Google Docs colado no campo: troca pelo texto do documento.
+  const docId = googleDocId(text);
+  const [importingDoc, setImportingDoc] = useState(false);
+  const importGoogleDoc = async () => {
+    if (!docId) return;
+    setImportingDoc(true);
+    try {
+      setText(await fetchGoogleDocText(docId));
+    } catch (e) {
+      Alert.alert('Não consegui trazer o documento', e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportingDoc(false);
     }
   };
 
@@ -353,9 +388,12 @@ export function ReadAloudScreen() {
     // Tag ÚNICA por chamada: o expo-keep-awake guarda tags num conjunto sem
     // contagem, então dois "Salvar" sobrepostos (possível ao sair e voltar da
     // tela) com a mesma tag fariam o primeiro a terminar apagar a tela do outro.
+    // Com o serviço nativo (Android), a geração segue com a tela apagada: nada disso.
     const keepTag = `readaloud-save-${++saveSeq}`;
-    keepScreenOnFor(keepTag, true);
-    void startReadAloudKeepAlive();
+    if (!READ_ALOUD_NATIVE) {
+      keepScreenOnFor(keepTag, true);
+      void startReadAloudKeepAlive();
+    }
     const saveSignal = { aborted: false };
     saveSignals.set(saveSignal, saveKey(voice, t));
     notifySaveChange();
@@ -365,6 +403,9 @@ export function ReadAloudScreen() {
         paused,
         signal: saveSignal,
         onProgress: (done, total) => setSaveGen({ done, total }),
+        // se o app fechar no meio, o áudio pronto acha este texto ao voltar
+        tag: `text:${targetId}`,
+        title,
       });
       if (uri) await updateReadAloudTextAudio(targetId, uri, voice);
       await reloadSaved();
@@ -385,8 +426,10 @@ export function ReadAloudScreen() {
     } finally {
       saveSignals.delete(saveSignal);
       notifySaveChange();
-      stopReadAloudKeepAlive();
-      keepScreenOnFor(keepTag, false);
+      if (!READ_ALOUD_NATIVE) {
+        stopReadAloudKeepAlive();
+        keepScreenOnFor(keepTag, false);
+      }
       setSaveGen(null);
       setSavingAudio(false);
     }
@@ -581,9 +624,10 @@ export function ReadAloudScreen() {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
           Cole ou importe um texto — visualização, oração, auto-hipnose — e a
-          Comentora lê em voz alta. Na voz do Gemini, dá pra arrastar a barrinha
-          para voltar/avançar. Enquanto o áudio é preparado, a tela fica acesa —
-          não saia do app até terminar.
+          Comentora lê em voz alta. Também dá pra colar o link de um Google Docs.
+          Na voz do Gemini, dá pra arrastar a barrinha para voltar/avançar. Ao
+          salvar, o áudio é preparado em segundo plano (acompanhe na notificação):
+          pode apagar a tela ou sair do app.
         </Text>
 
         <TextInput
@@ -594,7 +638,7 @@ export function ReadAloudScreen() {
           style={styles.input}
           multiline
           textAlignVertical="top"
-          maxLength={20000}
+          maxLength={100000}
         />
         <View style={styles.metaRow}>
           <Text style={styles.meta}>{text.trim().length} caracteres</Text>
@@ -605,6 +649,16 @@ export function ReadAloudScreen() {
           )}
         </View>
 
+        {docId && (
+          <>
+            <Button
+              label={importingDoc ? 'Trazendo o documento…' : 'Trazer o texto do Google Docs'}
+              onPress={importGoogleDoc}
+              disabled={importingDoc}
+            />
+            <View style={{ height: spacing.sm }} />
+          </>
+        )}
         <Button label="Enviar arquivo" variant="secondary" onPress={handleUpload} />
         <View style={{ height: spacing.sm }} />
         <Button

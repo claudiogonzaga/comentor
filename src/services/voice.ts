@@ -582,6 +582,9 @@ export async function prepareReadAloudAudio(
     onProgress?: (done: number, total: number) => void;
     /** Cancela a geração (nova geração/stop) — evita loops "zumbis". */
     signal?: { aborted: boolean };
+    /** Liga o áudio ao texto salvo mesmo se o app fechar no meio (ex.: "text:12"). */
+    tag?: string;
+    title?: string;
   } = {},
 ): Promise<string | null> {
   const src = opts.paused ? addSentencePauses(text) : text;
@@ -592,6 +595,7 @@ export async function prepareReadAloudAudio(
     opts.geminiVoiceName ?? activeGeminiVoiceName,
     opts.onProgress,
     opts.signal,
+    { tag: opts.tag, title: opts.title },
   );
   return uri;
 }
@@ -743,7 +747,6 @@ async function speakLongTextGemini(
   // do prefetch-de-1-só.
   const LOOKAHEAD = 2;
   const uris: (string | null)[] = new Array(chunks.length).fill(null);
-  const pcms: (Uint8Array | null)[] = new Array(chunks.length).fill(null);
   type GenErr = { index: number; err: unknown };
   let genErr: GenErr | null = null;
   let playIndex = 0;
@@ -758,9 +761,8 @@ async function speakLongTextGemini(
       }
       if (myToken !== speakToken) return;
       try {
-        const { uri, pcm } = await synthesizeChunkGemini(chunks[j], voice);
+        const { uri } = await synthesizeChunkGemini(chunks[j], voice);
         uris[j] = uri;
-        pcms[j] = pcm;
       } catch (err) {
         genErr = { index: j, err };
         return;
@@ -798,9 +800,9 @@ async function speakLongTextGemini(
   }
 
   if (myToken !== speakToken) return;
-  // 3) Tudo tocou → concatena e cacheia o WAV completo (próxima = instantâneo).
+  // 3) Tudo tocou → junta os trechos (em disco) no WAV completo (próxima = instantâneo).
   try {
-    const all = pcms.filter((p): p is Uint8Array => !!p);
+    const all = uris.filter((u): u is string => !!u);
     if (all.length === chunks.length) await saveFullReadAloud(chunks, voice, all);
   } catch {
     /* cache é best-effort */

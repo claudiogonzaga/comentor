@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { prepareReadAloudAudio, speakLongText, stopSpeaking } from '../services/voice';
 import { startReadAloudKeepAlive, stopReadAloudKeepAlive } from '../services/readAloudKeepAlive';
+import { READ_ALOUD_NATIVE } from '../services/geminiTTS';
 import { registerPlayer, claimPlayback } from '../services/playerBus';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
@@ -291,8 +292,11 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
       // Tela acesa enquanto gera (ver screenOnWhileGenerating). O loop
       // silencioso abaixo é antigo e NÃO segura a geração fora do app: ele não
       // cria serviço em primeiro plano nem destrava os timers do JS.
-      screenOnWhileGenerating(true);
-      void startReadAloudKeepAlive();
+      // No Android, o serviço nativo gera com a tela apagada: nada disso.
+      if (!READ_ALOUD_NATIVE) {
+        screenOnWhileGenerating(true);
+        void startReadAloudKeepAlive();
+      }
       try {
         const uri = await prepareReadAloudAudio(t, {
           geminiVoiceName: opts.geminiVoiceName,

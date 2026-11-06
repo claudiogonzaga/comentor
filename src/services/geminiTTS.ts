@@ -11,6 +11,7 @@
 // onde quase nunca há repetição, isso só não atrapalha.
 
 import { File, Paths } from 'expo-file-system';
+import ReadAloudAudio, { type ReadAloudJobStatus } from '../../modules/read-aloud-audio';
 import { getApiKey } from './secureStore';
 import { getSavedAudioUris } from './database';
 
@@ -852,6 +853,8 @@ export async function synthesizeFullSpeechGemini(
   voiceName: string = DEFAULT_GEMINI_VOICE,
   onProgress?: (done: number, total: number) => void,
   signal?: TtsSignal,
+  /** Para o áudio achar o seu texto se o app fechar no meio (ex.: "text:12"). */
+  meta: { tag?: string; title?: string } = {},
 ): Promise<GeminiTTSResult> {
   const clean = chunks.map((c) => c.trim()).filter(Boolean);
   if (clean.length === 0) throw new GeminiTTSError('texto vazio');
@@ -864,6 +867,13 @@ export async function synthesizeFullSpeechGemini(
   const file = new File(Paths.document, `readaloud_${cacheKey}.wav`);
   if (file.exists) {
     return { uri: file.uri, cached: true };
+  }
+
+  // No Android, o serviço nativo gera e monta o áudio: segue com a tela apagada e
+  // não junta ~60 MB de PCM na memória do JavaScript (o que derrubava o app com
+  // textos longos). O caminho abaixo, em JavaScript, fica para quando ele não existe.
+  if (ReadAloudAudio) {
+    return synthesizeFullNative(clean, voiceName, apiKey, file, cacheKey, onProgress, signal, meta);
   }
 
   // O ritmo (RPM) agora é GLOBAL, dentro de fetchPcm (acquireRpmSlot), e vale
@@ -964,6 +974,143 @@ export async function synthesizeFullSpeechGemini(
   return { uri: file.uri, cached: false };
 }
 
+/** No Android, a geração das leituras longas é nativa (segue com a tela apagada). */
+export const READ_ALOUD_NATIVE = !!ReadAloudAudio;
+
+/** Pedidos que um caller está acompanhando agora (a reconciliação não os esquece). */
+const awaitingJobs = new Set<string>();
+
+/** Caminho de arquivo (sem file://), para o módulo nativo. */
+function fsPath(uri: string): string {
+  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+}
+
+/**
+ * O áudio completo pelo serviço nativo (ReadAloudAudio). O pedido tem o id do
+ * próprio áudio: pedir de novo o mesmo texto enquanto ele é gerado só acompanha
+ * o que já está em andamento. O andamento chega por evento e, com o JavaScript
+ * congelado (tela apagada), pela consulta do estado gravado no aparelho.
+ */
+async function synthesizeFullNative(
+  clean: string[],
+  voiceName: string,
+  apiKey: string,
+  file: File,
+  id: string,
+  onProgress?: (done: number, total: number) => void,
+  signal?: TtsSignal,
+  meta: { tag?: string; title?: string } = {},
+): Promise<GeminiTTSResult> {
+  const native = ReadAloudAudio!;
+  const model = effectiveModel();
+  const blockedUntil = dailyBlockUntil.get(model) ?? 0;
+  if (blockedUntil && Date.now() < blockedUntil) {
+    throw new GeminiTTSError('Gemini TTS: cota diária da API esgotada', {
+      httpStatus: 429,
+      quotaExceeded: true,
+      dailyQuota: true,
+    });
+  }
+  throwIfAborted(signal);
+  if (!native.isActive(id)) {
+    await cleanupReadAloudCache();
+    native.startJob({
+      id,
+      chunks: clean,
+      model,
+      legacyModel: LEGACY_TTS_MODEL,
+      voice: voiceName,
+      legacyVoice: GEMINI_VOICES.some((v) => v.name === voiceName) ? voiceName : DEFAULT_GEMINI_VOICE,
+      interactions: usesInteractions(model),
+      apiKey,
+      outPath: fsPath(file.uri),
+      workDir: `${fsPath(Paths.cache.uri).replace(/\/$/, '')}/readaloud`,
+      tag: meta.tag ?? '',
+      title: meta.title ?? '',
+    });
+  }
+  awaitingJobs.add(id);
+  return new Promise<GeminiTTSResult>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      awaitingJobs.delete(id);
+      sub.remove();
+      clearInterval(poll);
+      fn();
+    };
+    const handle = (st: ReadAloudJobStatus | null) => {
+      if (!st || st.id !== id) return;
+      if (st.state === 'queued' || st.state === 'running') {
+        onProgress?.(st.done, st.total);
+      } else if (st.state === 'done' && st.uri) {
+        const uri = st.uri;
+        finish(() => resolve({ uri, cached: false }));
+      } else if (st.state === 'error') {
+        if (st.dailyQuota) dailyBlockUntil.set(model, nextPacificMidnight());
+        const msg = st.error ?? 'falhou';
+        finish(() =>
+          reject(
+            new GeminiTTSError(`Gemini TTS: ${msg}`, {
+              httpStatus: st.dailyQuota ? 429 : undefined,
+              quotaExceeded: !!st.dailyQuota,
+              dailyQuota: !!st.dailyQuota,
+            }),
+          ),
+        );
+      } else if (st.state === 'canceled') {
+        finish(() => reject(new GeminiTTSError('geração cancelada', { aborted: true })));
+      }
+    };
+    const sub = native.addListener('onJob', handle);
+    const poll = setInterval(() => {
+      if (signal?.aborted) {
+        native.cancelJob(id);
+        finish(() => reject(new GeminiTTSError('geração cancelada', { aborted: true })));
+        return;
+      }
+      handle(native.jobStatus(id));
+    }, 1500);
+    handle(native.jobStatus(id));
+  });
+}
+
+/**
+ * Áudios prontos pelo serviço nativo enquanto o app estava fechado ou congelado:
+ * `apply` liga cada um ao que o pediu (a tag) e o pedido é esquecido. Os que
+ * terminaram em erro ou cancelados também são esquecidos.
+ */
+export async function settleReadAloudJobs(
+  apply: (job: { tag: string; uri: string; voice: string }) => Promise<void>,
+): Promise<void> {
+  if (!ReadAloudAudio) return;
+  let jobs: ReadAloudJobStatus[] = [];
+  try {
+    jobs = ReadAloudAudio.jobs();
+  } catch {
+    return;
+  }
+  for (const j of jobs) {
+    if (awaitingJobs.has(j.id)) continue; // quem pediu ainda está esperando
+    if (j.state === 'queued' || j.state === 'running') {
+      // Sobrou de um processo que morreu: sem fila viva, não termina sozinho.
+      if (!ReadAloudAudio.isActive(j.id) && Date.now() - (j.updatedAt ?? 0) > 10 * 60 * 1000) {
+        ReadAloudAudio.forgetJob(j.id);
+      }
+      continue;
+    }
+    if (j.state === 'done' && j.uri && j.tag) {
+      try {
+        if (new File(j.uri).exists) await apply({ tag: j.tag, uri: j.uri, voice: j.voice ?? '' });
+      } catch {
+        continue; // tenta de novo na próxima vez
+      }
+    }
+    ReadAloudAudio.forgetJob(j.id);
+  }
+}
+
 // ---------- Leitura PROGRESSIVA (toca cada trecho assim que fica pronto) ----------
 
 /** Mesmo arquivo/chave do WAV completo usado por synthesizeFullSpeechGemini. */
@@ -990,14 +1137,14 @@ export function getCachedReadAloudUri(
 }
 
 /**
- * Gera UM trecho: devolve o PCM (para concatenar no fim) e o uri de um WAV em
- * cache (para tocar já). Cacheia por trecho em Paths.cache, então re-gerar o
- * mesmo trecho é grátis (útil quando uma leitura é interrompida no meio).
+ * Gera UM trecho e devolve o uri de um WAV em cache (para tocar já). Cacheia por
+ * trecho em Paths.cache, então re-gerar o mesmo trecho é grátis (útil quando uma
+ * leitura é interrompida no meio). A junção final é feita a partir desses arquivos.
  */
 export async function synthesizeChunkGemini(
   text: string,
   voiceName: string = DEFAULT_GEMINI_VOICE,
-): Promise<{ uri: string; pcm: Uint8Array }> {
+): Promise<{ uri: string }> {
   const trimmed = text.trim();
   if (!trimmed) throw new GeminiTTSError('texto vazio');
   const apiKey = await getApiKey();
@@ -1006,46 +1153,47 @@ export async function synthesizeChunkGemini(
   }
   const cacheKey = shortHash(`${activeTtsModel}|${voiceName}:${trimmed}`);
   const file = new File(Paths.cache, `gemini_tts_${cacheKey}.wav`);
-  if (file.exists) {
-    try {
-      const bytes = await file.bytes();
-      // tira o cabeçalho WAV (44 bytes) para recuperar o PCM puro
-      const pcm = bytes.length > 44 ? bytes.slice(44) : new Uint8Array(0);
-      if (pcm.length > 0) return { uri: file.uri, pcm };
-    } catch {
-      /* cache ilegível → regenera abaixo */
-    }
-  }
+  if (file.exists && (file.size ?? 0) > 44) return { uri: file.uri };
   const pcm = normalizePcm(
     await fetchPcm(trimmed, voiceName, apiKey, 0, undefined, timeoutForChunk(trimmed)),
   );
   const wav = pcmToWav(pcm);
   file.create({ overwrite: true });
   file.write(wav);
-  return { uri: file.uri, pcm };
+  return { uri: file.uri };
 }
 
 /**
- * Concatena os PCMs já gerados (na ordem) num único WAV completo e cacheia em
- * disco (Paths.document), para a PRÓXIMA leitura tocar na hora. Devolve o uri.
+ * Junta os WAVs dos trechos (na ordem) num único WAV completo em disco
+ * (Paths.document), para a PRÓXIMA leitura tocar na hora. No Android, a junção é
+ * nativa, de arquivo em arquivo; sem o módulo, em memória. Devolve o uri.
  */
 export async function saveFullReadAloud(
   chunks: string[],
   voiceName: string,
-  pcms: Uint8Array[],
+  chunkUris: string[],
 ): Promise<string> {
+  await cleanupReadAloudCache();
+  const file = fullReadAloudFile(chunks, voiceName);
+  if (ReadAloudAudio) {
+    await ReadAloudAudio.concatWav(chunkUris.map(fsPath), fsPath(file.uri));
+    return file.uri;
+  }
+  const pcms: Uint8Array[] = [];
   let totalLen = 0;
-  for (const p of pcms) totalLen += p.length;
+  for (const uri of chunkUris) {
+    const bytes = await new File(uri).bytes();
+    const pcm = bytes.length > 44 ? bytes.subarray(44) : new Uint8Array(0);
+    pcms.push(pcm);
+    totalLen += pcm.length;
+  }
   const allPcm = new Uint8Array(totalLen);
   let off = 0;
   for (const p of pcms) {
     allPcm.set(p, off);
     off += p.length;
   }
-  const wav = pcmToWav(allPcm);
-  await cleanupReadAloudCache();
-  const file = fullReadAloudFile(chunks, voiceName);
   file.create({ overwrite: true });
-  file.write(wav);
+  file.write(pcmToWav(allPcm));
   return file.uri;
 }

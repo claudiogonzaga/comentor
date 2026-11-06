@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.readaloudaudio'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.readaloudaudio"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // NotificationCompat (progresso da geração na notificação).
+  implementation "androidx.core:core-ktx:1.13.1"
+}
