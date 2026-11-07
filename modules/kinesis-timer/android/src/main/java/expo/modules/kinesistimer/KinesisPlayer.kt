@@ -24,6 +24,14 @@ object KinesisPlayer {
 
   // Nenhum som passa disto; se o player não avisar o fim, o serviço não fica preso.
   private const val MAX_SOUND_MS = 6000L
+  // Os sinos do Zazen soam inteiros: o shijōshō, com a ressonância, dura uns 22 s.
+  private const val MAX_ZAZEN_MS = 30_000L
+
+  // O "fim" de cada som em curso: parar o timer o chama na hora, e não no limite.
+  private val pending = HashMap<MediaPlayer, Runnable>()
+
+  private fun maxMs(sound: String): Long =
+    if (sound.startsWith("zazen")) MAX_ZAZEN_MS else MAX_SOUND_MS
 
   private fun resId(sound: String): Int? = when (sound) {
     "schoolBell" -> R.raw.kin_schoolbell
@@ -40,6 +48,13 @@ object KinesisPlayer {
     "exerciseEnd" -> R.raw.kin_exercise_end
     "finished" -> R.raw.kin_finished
     "beeps" -> R.raw.kin_beeps
+    // Zazen (tradição Sōtō): shijōshō (início, 3 toques), hōzenshō (fim, 1 toque),
+    // kinhin (2 toques), o sino pequeno e as claves de madeira dos avisos.
+    "zazenShijo" -> R.raw.zz_shijo
+    "zazenHozen" -> R.raw.zz_hozen
+    "zazenKinhin" -> R.raw.zz_kinhin
+    "zazenSino" -> R.raw.zz_sino
+    "zazenTaku" -> R.raw.zz_taku
     else -> null
   }
 
@@ -95,19 +110,23 @@ object KinesisPlayer {
         }
       }
       var finished = false
-      val done = Runnable {
-        if (finished) return@Runnable
-        finished = true
-        release(am, mp)
-        onDone()
+      val done = object : Runnable {
+        override fun run() {
+          if (finished) return
+          finished = true
+          handler.removeCallbacks(this)
+          release(am, mp)
+          onDone()
+        }
       }
+      synchronized(this) { pending[mp] = done }
       mp.setOnCompletionListener { handler.post(done) }
       mp.setOnErrorListener { _, what, extra ->
         Log.w(KinesisEngine.TAG, "som $sound falhou ($what/$extra)")
         handler.post(done)
         true
       }
-      handler.postDelayed(done, MAX_SOUND_MS)
+      handler.postDelayed(done, maxMs(sound))
       mp.start()
     } catch (e: Exception) {
       Log.w(KinesisEngine.TAG, "som $sound falhou: ${e.message}")
@@ -119,6 +138,7 @@ object KinesisPlayer {
     try { mp.release() } catch (_: Exception) {}
     synchronized(this) {
       playing.remove(mp)
+      pending.remove(mp)
       if (playing.isEmpty()) {
         focus?.let { am.abandonAudioFocusRequest(it) }
         focus = null
@@ -126,12 +146,17 @@ object KinesisPlayer {
     }
   }
 
-  /** Parar o timer cala o sino em curso. */
+  /**
+   * Parar o timer cala o sino em curso e já dá o som por encerrado: o serviço sai
+   * agora, e não quando venceria o limite (30 s num sino do Zazen).
+   */
   fun stopAll() {
-    synchronized(this) {
+    val ends = synchronized(this) {
       for (mp in playing) {
         try { mp.stop() } catch (_: Exception) {}
       }
+      pending.values.toList()
     }
+    for (end in ends) handler.post(end)
   }
 }

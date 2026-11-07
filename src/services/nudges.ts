@@ -18,12 +18,14 @@ import {
 import {
   NUDGE_CATEGORY,
   NUDGE_CLOSE_CATEGORY,
+  NUDGE_SOFT_CATEGORY,
   SAMPLE_CATEGORY,
   ensureChannel,
   ensureNotificationCategories,
   gatedSchedule,
 } from './notifications';
 import { getDailyInsistenceLines } from './insistenceLines';
+import { nudgePhrase, PRE_REMINDER_MIN } from './nudgePhrases';
 import { notifyLocalChange } from './syncBus';
 import {
   armSpokenTask,
@@ -49,7 +51,7 @@ import {
 } from './habitFormation';
 import { getPastSelfQuotesText } from './morning';
 import { getOwlSpecies } from '../constants/owlSpecies';
-import type { Nudge } from '../types';
+import type { Nudge, Tone } from '../types';
 
 /**
  * TODO item da Home = item que a coruja VERIFICA: ela insiste (re-notifica) a
@@ -71,10 +73,11 @@ const DEFAULT_MAX_INSISTENCES = 5;
 /**
  * Minutos, contados do horário do lembrete, em que cai cada insistência.
  *
- * O ESPAÇAMENTO DOBRA: 10, 20, 40, 80, 160 min — ou seja, as insistências caem
- * aos 10, 30, 70, 150 e 310 minutos. A ideia é cobrar de perto logo depois do
- * horário, quando ainda dá para fazer, e ir afrouxando em vez de martelar no
- * mesmo ritmo o dia inteiro.
+ * A INSISTÊNCIA CRESCE AOS POUCOS: antes do horário, um aviso gentil; no
+ * horário, só o lembrete; a 1ª cobrança — a PERGUNTA, "fez ou precisa de mais
+ * tempo?" — vem só por volta de meia hora depois. Daí o espaçamento dobra: com
+ * a base 10, as cobranças caem aos 30, 70, 150, 310 e 630 minutos (a série
+ * 10, 30, 70… sem o primeiro termo, que perguntava cedo demais).
  *
  * `base` é o intervalo configurado em Lembretes (padrão 10, mínimo 5).
  */
@@ -82,12 +85,68 @@ function insistenceOffsetsMin(base: number, count: number): number[] {
   const out: number[] = [];
   let gap = base;
   let acc = 0;
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i <= count; i++) {
     acc += gap;
-    out.push(acc);
+    if (i > 0) out.push(acc);
     gap *= 2;
   }
   return out;
+}
+
+/**
+ * Um gatilho diário às hh:mm. Respondido ANTES da hora (skipToday), o de hoje
+ * não pode tocar — e um gatilho DIÁRIO não sabe pular um dia: os outros 6 dias
+ * da semana ficam com gatilho SEMANAL (recorrente — não se esgota se o app
+ * passar dias vivo em segundo plano, com o JS congelado e sem reagendar) e só o
+ * dia da semana de HOJE vira DATE nas próximas EARLY_ANSWER_WEEKS semanas. O
+ * primeiro reagendamento a partir de amanhã devolve o DIÁRIO.
+ */
+async function scheduleDailySkippingToday(
+  content: Notifications.NotificationContentInput,
+  hour: number,
+  minute: number,
+  skipToday: boolean,
+  channelId: string,
+): Promise<{ first: string | null; ids: string[] }> {
+  const ids: string[] = [];
+  let first: string | null = null;
+  const keep = (id: string | null) => {
+    if (!id) return;
+    ids.push(id);
+    first = first ?? id;
+  };
+  if (!skipToday) {
+    keep(
+      await gatedSchedule({
+        content,
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute, channelId },
+      }),
+    );
+    return { first, ids };
+  }
+  const todayAt = buildTodayAt(hour, minute);
+  const todayDow = todayAt.getDay();
+  for (let dow = 0; dow < 7; dow++) {
+    if (dow === todayDow) continue;
+    keep(
+      await gatedSchedule({
+        content,
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+          weekday: dow + 1, // expo: 1=domingo … 7=sábado
+          hour,
+          minute,
+          channelId,
+        },
+      }),
+    );
+  }
+  for (let w = 1; w <= EARLY_ANSWER_WEEKS; w++) {
+    const at = new Date(todayAt);
+    at.setDate(at.getDate() + 7 * w);
+    keep(await gatedSchedule({ content, trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId } }));
+  }
+  return { first, ids };
 }
 
 /** FNV-1a: hash simples e determinístico, para o jitter ser estável dentro do dia. */
@@ -461,8 +520,12 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
   let sound: string = 'default';
   let intervalMin = 10;
   let maxInsistences = DEFAULT_MAX_INSISTENCES;
+  let tone: Tone = 'gentle';
+  let userName: string | null = null;
   try {
     const config = await getUserConfig();
+    tone = config.tone ?? 'gentle';
+    userName = config.name ?? null;
     sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
     intervalMin = Math.max(MIN_NUDGE_INTERVAL_MIN, config.reminderIntervalMinutes ?? 10);
     maxInsistences = Math.max(
@@ -506,7 +569,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       !doneTypes.includes(`${n.type}:skip`) &&
       !doneTypes.includes(`${n.type}:missed`),
   );
-  const linesByType = new Map<string, Awaited<ReturnType<typeof getDailyInsistenceLines>>['lines']>();
+  const linesByType = new Map<string, Awaited<ReturnType<typeof getDailyInsistenceLines>>>();
   if (maxInsistences > 0 && pendingVerify.length > 0) {
     const results = await Promise.all(
       pendingVerify.map((n) =>
@@ -518,7 +581,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       ),
     );
     results.forEach((r, i) => {
-      if (r) linesByType.set(pendingVerify[i].type, r.lines);
+      if (r) linesByType.set(pendingVerify[i].type, r);
     });
   }
 
@@ -616,78 +679,69 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       continue;
     }
 
-    // Âncora diária. Se houve REGRESSÃO há poucos dias, a âncora a nomeia:
+    // NO HORÁRIO: só lembra, sem perguntar — uma fala que muda todo dia, mais a
+    // descrição do hábito. Se houve REGRESSÃO há poucos dias, a âncora a nomeia:
     // "você tinha isso na mão por 3 semanas — o que mudou?"
-    let anchorBody = n.body;
+    let anchorBody = `${nudgePhrase('hora', { task: n.title, name: userName, tone, day: today, key: n.type })}${
+      n.body?.trim() ? `\n${n.body.trim()}` : ''
+    }`;
     if (isVerify) {
       const reg = await getRegressionNote(n.type, today, n.title).catch(() => null);
       if (reg) anchorBody = reg;
     }
     // JÁ RESPONDIDO hoje e o horário ainda não chegou (marcou "Já fiz" de manhã
-    // um hábito das 18h): a âncora de HOJE não pode tocar — pediria de novo o
-    // que já foi feito. Como um gatilho DIÁRIO não sabe pular um dia, os outros
-    // 6 dias da semana ficam com gatilho SEMANAL (recorrente — não se esgota se
-    // o app passar dias vivo em segundo plano, com o JS congelado e sem
-    // reagendar) e só o dia da semana de HOJE vira DATE nas próximas
-    // EARLY_ANSWER_WEEKS semanas. O primeiro reagendamento a partir de amanhã
-    // devolve o DIÁRIO; sem ele, perde-se só esse dia da semana, após N semanas.
+    // um hábito das 18h): o aviso de HOJE não pode tocar — nem o gentil de antes.
     const anchorToday = buildTodayAt(safeHour, safeMinute);
-    const answeredEarly =
-      isVerify &&
-      anchorToday.getTime() > Date.now() &&
-      (doneTypes.includes(n.type) || doneTypes.includes(`${n.type}:skip`));
+    const answered =
+      isVerify && (doneTypes.includes(n.type) || doneTypes.includes(`${n.type}:skip`));
+    const answeredEarly = answered && anchorToday.getTime() > Date.now();
+
+    // ANTES DO HORÁRIO: um aviso gentil, sem botão de resposta — "está chegando".
+    const preMins = safeHour * 60 + safeMinute - PRE_REMINDER_MIN;
+    if (preMins >= 0) {
+      const preHour = Math.floor(preMins / 60);
+      const preMinute = preMins % 60;
+      const preToday = buildTodayAt(preHour, preMinute);
+      const preBody = nudgePhrase('antes', {
+        task: n.title,
+        name: userName,
+        tone,
+        day: today,
+        key: n.type,
+        minutes: PRE_REMINDER_MIN,
+      });
+      const skipPre = answered && preToday.getTime() > Date.now();
+      try {
+        const pre = await scheduleDailySkippingToday(
+          { title, body: preBody, data: { ...baseData, verify: false, pre: true }, sound },
+          preHour,
+          preMinute,
+          skipPre,
+          channelId,
+        );
+        ids.push(...pre.ids);
+        if (pre.first) {
+          let at = preToday.getTime();
+          if (at <= Date.now() || skipPre) at += 24 * 60 * 60_000;
+          spoken.push({ id: `${n.type}~pre`, text: spokenTaskText(n.title, preBody), atEpochMs: at, repeatDaily: true });
+        }
+      } catch (err) {
+        console.warn(`failed to schedule nudge pre-reminder ${n.type}:`, err);
+      }
+    }
+
     try {
       const anchorContent = {
         title,
         body: anchorBody,
         data: { ...baseData, verify: isVerify },
         sound,
-        ...(isVerify ? { categoryIdentifier: NUDGE_CATEGORY } : {}),
+        // Um botão só ("Já fiz"): a pergunta vem meia hora depois.
+        ...(isVerify ? { categoryIdentifier: NUDGE_SOFT_CATEGORY } : {}),
       };
-      let id: string | null = null;
-      if (answeredEarly) {
-        const todayDow = anchorToday.getDay();
-        for (let dow = 0; dow < 7; dow++) {
-          if (dow === todayDow) continue;
-          const weekId = await gatedSchedule({
-            content: anchorContent,
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-              weekday: dow + 1, // expo: 1=domingo … 7=sábado
-              hour: safeHour,
-              minute: safeMinute,
-              channelId,
-            },
-          });
-          if (weekId) {
-            ids.push(weekId);
-            id = id ?? weekId;
-          }
-        }
-        for (let w = 1; w <= EARLY_ANSWER_WEEKS; w++) {
-          const at = new Date(anchorToday);
-          at.setDate(at.getDate() + 7 * w);
-          const dateId = await gatedSchedule({
-            content: anchorContent,
-            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId },
-          });
-          if (dateId) {
-            ids.push(dateId);
-            id = id ?? dateId;
-          }
-        }
-      } else {
-        id = await gatedSchedule({
-          content: anchorContent,
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DAILY,
-            hour: safeHour,
-            minute: safeMinute,
-            channelId,
-          },
-        });
-        if (id) ids.push(id);
-      }
+      const anchor = await scheduleDailySkippingToday(anchorContent, safeHour, safeMinute, answeredEarly, channelId);
+      ids.push(...anchor.ids);
+      const id = anchor.first;
       if (id) {
         // Mesma regra da notificação: respondido antes da hora, a de hoje não fala.
         let at = anchorToday.getTime();
@@ -777,15 +831,14 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
       if (offsets.length === 0) continue;
       // A última batida não convence: só pede o registro (Fiz / Não fiz / Por quê).
       const lastK = offsets.reduce((acc, o, i) => (o !== null ? i + 1 : acc), 0);
-      const lines =
+      const gen =
         linesByType.get(n.type) ??
-        (
-          await getDailyInsistenceLines(n, offsets.length, {
-            pastSelfQuotes,
-            deferGeneration: true,
-            onGenerated: rescheduleSoon,
-          })
-        ).lines;
+        (await getDailyInsistenceLines(n, offsets.length, {
+          pastSelfQuotes,
+          deferGeneration: true,
+          onGenerated: rescheduleSoon,
+        }));
+      const lines = gen.lines;
       // Probabilidade de uma batida do meio ser pulada (ver jitteredOffsetsMin):
       // 1/8 por dia, sorteada entre as batidas do meio.
       const pSkip = offsets.length >= 4 ? 1 / 8 / (offsets.length - 2) : 0;
@@ -803,7 +856,16 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
         const line = lines[k - 1] ?? lines[lines.length - 1];
         if (!line) continue;
         const isLast = k === lastK && lastK > 1;
-        const technique = isLast ? 'fechamento' : line.technique;
+        // A 1ª cobrança é a PERGUNTA (fez, mais tempo ou hoje não — e por que a
+        // coruja precisa saber). Das seguintes, as geradas pelo modelo; sem elas,
+        // o banco de falas, que gira todo dia (as fixas viravam ladainha).
+        const isAsk = k === 1;
+        const text = isAsk
+          ? nudgePhrase('pergunta', { task: n.title, name: userName, tone, day: today, key: n.type })
+          : gen.generated
+            ? line.text
+            : nudgePhrase('insiste', { task: n.title, name: userName, tone, day: today, key: n.type, k });
+        const technique = isLast ? 'fechamento' : isAsk ? 'pergunta-pessoal' : line.technique;
         void bumpTechnique(technique, 'shown').catch(() => {});
         try {
           const id = await gatedSchedule({
@@ -811,7 +873,9 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
               title,
               body: isLast
                 ? `Não precisa fazer agora. Só me diz: “${n.title}” — fez ou não fez?`
-                : withActionLine(line.text),
+                : isAsk
+                  ? text
+                  : withActionLine(text),
               // `day`/`at`: a que dia a cobrança pertence e quando toca — para a
               // resposta depois da meia-noite e para o "Me dê mais tempo".
               data: { ...baseData, verify: true, followup: true, technique, k, day: today, at: fireAt.getTime() },
@@ -831,7 +895,7 @@ async function scheduleAllNudgesOnce(): Promise<string[]> {
               // Sem a instrução do botão, que só faz sentido na tela.
               text: isLast
                 ? spokenTaskText('', `Não precisa fazer agora. Só me diz: “${n.title}” — fez ou não fez?`)
-                : spokenTaskText(n.title, line.text),
+                : spokenTaskText(isAsk ? '' : n.title, text),
               atEpochMs: fireAt.getTime(),
               repeatDaily: false,
             });

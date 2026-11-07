@@ -382,15 +382,17 @@ export function RemindersScreen() {
             keyboardType="number-pad"
           />
           <Text style={[typography.small, { color: colors.text.tertiary, marginTop: spacing.xs }]}>
-            O espaço entre as cobranças DOBRA a cada vez: {intervalStr || '10'} min,
-            depois {Number(intervalStr || 10) * 2}, {Number(intervalStr || 10) * 4}, e
-            assim por diante. Cobra de perto logo depois do horário e vai afrouxando.
+            A insistência cresce aos poucos: 10 min antes, um aviso gentil; no horário,
+            só o lembrete; por volta de {Number(intervalStr || 10) * 3} min depois, a
+            pergunta — fez, precisa de mais tempo ou hoje não? Daí o espaço entre as
+            cobranças dobra ({Number(intervalStr || 10) * 4} min,{' '}
+            {Number(intervalStr || 10) * 8}…) e vai afrouxando. As frases mudam todo dia.
             {'\n\n'}
             Esgotadas as cobranças sem você marcar nada, ela desiste e registra o item
             como não feito. 0 desliga a insistência.
             {'\n\n'}
-            Vale para os hábitos da Comentora. Os lembretes que você criou (remédios e
-            “Meus hábitos”) são cobrados no intervalo fixo, sem dobrar, até você responder.
+            Vale para os hábitos da Comentora e para os lembretes que você criou
+            (remédios e “Meus hábitos”).
             {'\n\n'}
             Hábito que não pode passar? Ligue “Rigoroso” nele: no horário, o celular vibra
             em pulsos até você responder.

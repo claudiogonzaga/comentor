@@ -1,5 +1,6 @@
 // Ponte JS do módulo nativo KinesisTimer (Android): executa a linha do tempo do
 // timer de pausas ativas com o app fechado (alarmes exatos, sinos, notificação).
+// O Zazen usa o mesmo motor (uma linha do tempo por vez), com os sons "zazen*".
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 export interface KinesisNotif {
@@ -29,6 +30,8 @@ export interface KinesisEvent {
 export interface KinesisTimeline {
   current: KinesisNotif | null;
   events: KinesisEvent[];
+  /** O que tocar na notificação abre; sem ele, "askesis://kinesis". O Zazen usa "askesis://zazen". */
+  link?: string;
 }
 
 interface KinesisTimerNative {

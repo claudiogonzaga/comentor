@@ -11,6 +11,8 @@ import {
 import {
   MED_CATEGORY,
   MED_DO_CATEGORY,
+  MED_DO_SOFT_CATEGORY,
+  MED_SOFT_CATEGORY,
   ensureChannel,
   ensureNotificationCategories,
   gatedSchedule,
@@ -36,8 +38,8 @@ import {
 } from './strictHabits';
 import { refreshReviewNotification } from './review';
 import { notifyLocalChange } from './syncBus';
-import { persuasiveBody, escalationBody } from './persuasion';
-import type { Medication } from '../types';
+import { nudgePhrase, PRE_REMINDER_MIN } from './nudgePhrases';
+import type { Medication, Tone } from '../types';
 
 /**
  * Distingue lembrete de TOMAR (remédio/suplemento) de FAZER (ver sol, beber
@@ -62,6 +64,8 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
   actionLine: string;
   pendingBody: string;
   category: string;
+  /** Aviso no horário: só o botão "Já tomei"/"Já fiz" (a pergunta vem depois). */
+  softCategory: string;
 } {
   const ingest = isIngest(med);
   const emoji = med.emoji ?? (ingest ? '💊' : '🔔');
@@ -76,6 +80,7 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
       actionLine,
       pendingBody: `${baseBody}\n\nAinda pendente — ${actionLine}`,
       category: MED_CATEGORY,
+      softCategory: MED_SOFT_CATEGORY,
     };
   }
   const baseBody = detail ? `Está na hora: ${detail}.` : `Hora de ${med.name}.`;
@@ -87,24 +92,24 @@ function reminderCopy(med: Pick<Medication, 'emoji' | 'name' | 'dosage'>): {
     actionLine,
     pendingBody: `${baseBody}\n\nAinda pendente — ${actionLine}`,
     category: MED_DO_CATEGORY,
+    softCategory: MED_DO_SOFT_CATEGORY,
   };
 }
 
 /**
- * Mensagem ESCALADA da k-ésima insistência: 1ª cobrança pergunta com o NOME do
- * usuário; 2ª pede uma explicação ("para evitar repetições…"); da 3ª em diante,
- * argumentos persuasivos variados.
+ * A k-ésima cobrança da corrente. A 1ª é a PERGUNTA — tomou/fez, precisa de mais
+ * tempo ou hoje não, e por que a coruja precisa saber; as seguintes vêm do banco
+ * de falas (nudgePhrases), que gira todo dia, mais a instrução do botão.
  */
 function escalatedBody(
-  med: Pick<Medication, 'emoji' | 'name'>,
-  userName: string | null,
+  med: Pick<Medication, 'id' | 'name'>,
+  ctx: { name: string | null; tone: Tone; day: string },
   actionLine: string,
   k: number,
 ): string {
-  const question = isIngest(med) ? `você já tomou ${med.name}?` : `você já fez ${med.name}?`;
-  const scripted = escalationBody({ userName, question, k });
-  if (scripted) return scripted;
-  return persuasiveBody(med.name, actionLine, k);
+  const base = { task: med.name, name: ctx.name, tone: ctx.tone, day: ctx.day, key: `med:${med.id}` };
+  if (k <= 1) return nudgePhrase('pergunta', base);
+  return `${nudgePhrase('insiste', { ...base, k })} ${actionLine}`;
 }
 
 /**
@@ -264,11 +269,13 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
   let sound: string = 'default';
   let intervalMin = 10;
   let userName: string | null = null;
+  let tone: Tone = 'gentle';
   try {
     const config = await getUserConfig();
     sound = getOwlSpecies(config.owlSpecies).soundFile ?? 'default';
     intervalMin = Math.max(MIN_MED_INTERVAL_MIN, config.reminderIntervalMinutes ?? 10);
     userName = config.name;
+    tone = config.tone ?? 'gentle';
   } catch {
     /* keep defaults */
   }
@@ -304,7 +311,7 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
     const safeMinute = Math.min(59, Math.max(0, m));
 
     const key = completionKey(med.id);
-    const { title, baseBody, actionLine, category } = reminderCopy(med);
+    const { title, baseBody, actionLine, category, softCategory } = reminderCopy(med);
 
     // Dias da semana em que o lembrete vale (0=domingo … 6=sábado, igual a
     // Date.getDay()). Os 7 dias = diário; um subconjunto = semanal em dias
@@ -386,16 +393,22 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
       continue; // jejum não usa âncora nem corrente de insistências
     }
 
+    // NO HORÁRIO: só lembra, sem perguntar — uma fala que muda todo dia, mais a
+    // dose. A pergunta (tomou, mais tempo, não vou) vem meia hora depois.
+    const detail = med.dosage?.trim();
+    const horaBody = `${nudgePhrase('hora', { task: med.name, name: userName, tone, day: today, key: `med:${med.id}` })}${
+      detail ? ` (${detail})` : ''
+    }`;
     const anchorContent = {
       title,
-      body: baseBody,
+      body: horaBody,
       data: { type: `med:${med.id}`, medId: med.id },
       sound,
-      categoryIdentifier: category,
+      categoryIdentifier: softCategory,
     };
 
     // JÁ RESPONDIDO hoje e o horário ainda não chegou (marcou "Já tomei" às
-    // 07:40 o remédio das 08:00): a âncora de HOJE não pode tocar — "Hora de
+    // 07:40 o remédio das 08:00): o aviso de HOJE não pode tocar — "Hora de
     // tomar" depois de já tomado é convite a dose dupla. Gatilho DIÁRIO/SEMANAL
     // não sabe pular um dia: os OUTROS dias ativos ficam com gatilho SEMANAL
     // (recorrente — não se esgota se o app passar dias sem reabrir, pois o JS
@@ -404,90 +417,82 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
     // reagendamento a partir de amanhã devolve o DIÁRIO; sem ele, perde-se só
     // esse dia da semana, e só depois de N semanas.
     const todayDow = new Date().getDay();
-    const anchorToday = buildTodayAt(safeHour, safeMinute);
-    const answeredEarly =
-      activeDays.includes(todayDow) &&
-      anchorToday.getTime() > Date.now() &&
-      (doneKeys.includes(key) || doneKeys.includes(skipKey(med.id)));
-
-    // Âncora recorrente. Diário → um gatilho DAILY; semanal → um gatilho
-    // WEEKLY por dia selecionado (no expo, weekday 1=domingo … 7=sábado, então
-    // somamos 1 ao índice 0–6).
-    if (answeredEarly) {
-      for (const dow of activeDays) {
-        if (dow !== todayDow) {
-          try {
-            const id = await gatedSchedule({
-              content: anchorContent,
-              trigger: {
-                type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-                weekday: dow + 1,
-                hour: safeHour,
-                minute: safeMinute,
-                channelId,
-              },
-            });
-            if (id) ids.push(id);
-          } catch (err) {
-            console.warn(
-              `failed to schedule weekly medication anchor ${med.id} (dow ${dow}):`,
-              err,
-            );
-          }
-          continue;
-        }
-        // Dia da semana de hoje: pula hoje, DATE nas próximas semanas.
-        for (let w = 1; w <= EARLY_ANSWER_WEEKS; w++) {
-          const at = new Date(anchorToday);
-          at.setDate(at.getDate() + 7 * w);
-          try {
-            const id = await gatedSchedule({
-              content: anchorContent,
-              trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId },
-            });
-            if (id) ids.push(id);
-          } catch (err) {
-            console.warn(`failed to schedule dated medication anchor ${med.id}:`, err);
-          }
-        }
-      }
-    } else if (isDaily) {
-      try {
-        const id = await gatedSchedule({
-          content: anchorContent,
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DAILY,
-            hour: safeHour,
-            minute: safeMinute,
-            channelId,
-          },
-        });
-        if (id) ids.push(id);
-      } catch (err) {
-        console.warn(`failed to schedule medication anchor ${med.id}:`, err);
-      }
-    } else {
-      for (const dow of activeDays) {
+    const answered = doneKeys.includes(key) || doneKeys.includes(skipKey(med.id));
+    const scheduleRecurring = async (
+      content: Notifications.NotificationContentInput,
+      hour: number,
+      minute: number,
+      skipToday: boolean,
+      label: string,
+    ): Promise<void> => {
+      const at = buildTodayAt(hour, minute);
+      const schedule = async (trigger: Notifications.NotificationTriggerInput) => {
         try {
-          const id = await gatedSchedule({
-            content: anchorContent,
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-              weekday: dow + 1,
-              hour: safeHour,
-              minute: safeMinute,
-              channelId,
-            },
-          });
+          const id = await gatedSchedule({ content, trigger });
           if (id) ids.push(id);
         } catch (err) {
-          console.warn(
-            `failed to schedule weekly medication anchor ${med.id} (dow ${dow}):`,
-            err,
-          );
+          console.warn(`failed to schedule medication ${label} ${med.id}:`, err);
+        }
+      };
+      if (skipToday) {
+        for (const dow of activeDays) {
+          if (dow !== todayDow) {
+            await schedule({ type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday: dow + 1, hour, minute, channelId });
+            continue;
+          }
+          // Dia da semana de hoje: pula hoje, DATE nas próximas semanas.
+          for (let w = 1; w <= EARLY_ANSWER_WEEKS; w++) {
+            const d = new Date(at);
+            d.setDate(d.getDate() + 7 * w);
+            await schedule({ type: Notifications.SchedulableTriggerInputTypes.DATE, date: d, channelId });
+          }
+        }
+      } else if (isDaily) {
+        await schedule({ type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute, channelId });
+      } else {
+        // Semanal: um gatilho WEEKLY por dia selecionado (no expo, weekday 1=domingo … 7=sábado).
+        for (const dow of activeDays) {
+          await schedule({ type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday: dow + 1, hour, minute, channelId });
         }
       }
+    };
+
+    // ANTES DO HORÁRIO: um aviso gentil, sem botão de resposta — "está chegando".
+    const preMins = safeHour * 60 + safeMinute - PRE_REMINDER_MIN;
+    if (preMins >= 0) {
+      const preHour = Math.floor(preMins / 60);
+      const preMinute = preMins % 60;
+      const preAt = buildTodayAt(preHour, preMinute);
+      const preBody = nudgePhrase('antes', {
+        task: med.name,
+        name: userName,
+        tone,
+        day: today,
+        key: `med:${med.id}`,
+        minutes: PRE_REMINDER_MIN,
+      });
+      const skipPre = activeDays.includes(todayDow) && answered && preAt.getTime() > Date.now();
+      await scheduleRecurring(
+        { title, body: preBody, data: { type: `med:${med.id}`, medId: med.id, pre: true }, sound },
+        preHour,
+        preMinute,
+        skipPre,
+        'pre-reminder',
+      );
+      // A voz do aviso gentil de hoje (o reagendamento de amanhã arma o de amanhã).
+      if (activeDays.includes(todayDow) && !skipPre && preAt.getTime() > Date.now()) {
+        spokenChain.push({
+          id: chainAlarmId(String(med.id), 'pre', today, preAt.getTime()),
+          text: spokenTaskText(med.name, preBody),
+          atEpochMs: preAt.getTime(),
+          repeatDaily: false,
+        });
+      }
     }
+
+    const anchorToday = buildTodayAt(safeHour, safeMinute);
+    const answeredEarly = activeDays.includes(todayDow) && anchorToday.getTime() > Date.now() && answered;
+    await scheduleRecurring(anchorContent, safeHour, safeMinute, answeredEarly, 'anchor');
 
     // RIGOROSO: além da âncora e da corrente, o nativo vibra em pulsos no
     // horário, nos dias ativos, até a resposta. Respondido hoje: hoje não chama.
@@ -534,10 +539,12 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
         }
         if (snoozeUntil > anchor) anchor = snoozeUntil;
       }
-      let gap = intervalMin;
-      let elapsed = 0;
+      // A 1ª cobrança (a pergunta) só vem por volta de meia hora depois do
+      // horário — no horário, o aviso só lembrou. Daí o espaço dobra: com a base
+      // 10, as cobranças caem aos 30, 70, 150… minutos.
+      let gap = intervalMin * 2;
+      let elapsed = intervalMin;
       for (let k = 1; k <= maxRepeats; k++) {
-        // O espaço dobra: cobra de perto logo depois do horário e vai afrouxando.
         elapsed += gap;
         gap *= 2;
         const fireAt = new Date(anchor + elapsed * 60_000);
@@ -548,7 +555,7 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
               title,
               // Tom crescente a cada insistência (≥3 vezes).
               // Só a mensagem escalada (sem repetir o "Hora de tomar…").
-              body: escalatedBody(med, userName, actionLine, k),
+              body: escalatedBody(med, { name: userName, tone, day: today }, actionLine, k),
               // `day`: a que dia a cobrança pertence (resposta depois da meia-noite).
               data: { type: `med:${med.id}`, medId: med.id, followup: true, day: today },
               sound,
@@ -564,7 +571,7 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
             ids.push(id);
             spokenChain.push({
               id: chainAlarmId(String(med.id), `f${k}`, today, fireAt.getTime()),
-              text: spokenTaskText(med.name, escalatedBody(med, userName, actionLine, k)),
+              text: spokenTaskText(k === 1 ? '' : med.name, escalatedBody(med, { name: userName, tone, day: today }, actionLine, k)),
               atEpochMs: fireAt.getTime(),
               repeatDaily: false,
             });
@@ -587,9 +594,8 @@ async function scheduleAllMedicationsOnce(): Promise<string[]> {
       const mm = p[1] ?? 0;
       if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
       const dosage = med.dosage?.trim();
-      const text = dosage
-        ? `Hora do seu lembrete: ${med.name}. ${dosage}.`
-        : `Hora do seu lembrete: ${med.name}.`;
+      const fala = nudgePhrase('hora', { task: med.name, name: userName, tone, day: todayISO(), key: `med:${med.id}` });
+      const text = dosage ? `${fala} ${dosage}.` : fala;
       const days =
         med.daysOfWeek && med.daysOfWeek.length > 0 ? med.daysOfWeek : [0, 1, 2, 3, 4, 5, 6];
       const hour = Math.min(23, Math.max(0, hh));

@@ -57,7 +57,10 @@ object KinesisEngine {
   private const val KEY_EVENTS = "events"
   private const val KEY_CURRENT = "current"
   private const val KEY_VOLUME = "volume"
+  private const val KEY_LINK = "link"
   private const val CHANNEL_ID = "kinesis-timer"
+  // Sem "link" na linha do tempo, a notificação abre a aba do Kinesis.
+  private const val DEFAULT_LINK = "askesis://kinesis"
 
   private fun prefs(ctx: Context) =
     ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -68,16 +71,21 @@ object KinesisEngine {
     prefs(ctx).edit().putFloat(KEY_VOLUME, value.coerceIn(0f, 1f)).apply()
   }
 
-  /** Troca a linha do tempo inteira: {current: {...}|null, events: [...]}. */
+  /**
+   * Troca a linha do tempo inteira: {current: {...}|null, events: [...], link?}.
+   * link: o que tocar na notificação abre (o Zazen manda "askesis://zazen").
+   */
   @Synchronized
   fun arm(ctx: Context, json: String) {
     val root = JSONObject(json)
     val events = root.optJSONArray("events") ?: JSONArray()
     val current = root.optJSONObject("current")
-    prefs(ctx).edit()
+    val link = root.optString("link", "").trim()
+    val edit = prefs(ctx).edit()
       .putString(KEY_EVENTS, events.toString())
       .putString(KEY_CURRENT, current?.toString())
-      .apply()
+    if (link.isEmpty()) edit.remove(KEY_LINK) else edit.putString(KEY_LINK, link)
+    edit.apply()
     armNext(ctx)
     if (current != null) postNotification(ctx, parseNotif(current))
     else cancelNotification(ctx)
@@ -86,7 +94,7 @@ object KinesisEngine {
   /** Parar o timer: sem alarme, sem notificação, sem som em curso. */
   @Synchronized
   fun disarm(ctx: Context) {
-    prefs(ctx).edit().remove(KEY_EVENTS).remove(KEY_CURRENT).apply()
+    prefs(ctx).edit().remove(KEY_EVENTS).remove(KEY_CURRENT).remove(KEY_LINK).apply()
     alarmManager(ctx).cancel(pendingIntent(ctx))
     cancelNotification(ctx)
     KinesisPlayer.stopAll()
@@ -145,7 +153,7 @@ object KinesisEngine {
   @Synchronized
   fun finishIfIdle(ctx: Context) {
     if (loadEvents(ctx).isNotEmpty()) return
-    prefs(ctx).edit().remove(KEY_CURRENT).apply()
+    prefs(ctx).edit().remove(KEY_CURRENT).remove(KEY_LINK).apply()
     cancelNotification(ctx)
   }
 
@@ -253,11 +261,12 @@ object KinesisEngine {
     channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
     nm.createNotificationChannel(channel)
 
-    // Tocar na notificação abre direto a aba do Kinesis.
+    // Tocar na notificação abre direto a aba de quem armou: Kinesis ou Zazen.
+    val link = prefs(ctx).getString(KEY_LINK, null) ?: DEFAULT_LINK
     val open = PendingIntent.getActivity(
       ctx,
       0,
-      Intent(Intent.ACTION_VIEW, Uri.parse("askesis://kinesis")).setPackage(ctx.packageName),
+      Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(ctx.packageName),
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val b = Notification.Builder(ctx, CHANNEL_ID)

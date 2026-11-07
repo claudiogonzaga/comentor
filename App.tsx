@@ -21,6 +21,7 @@ import { XHarvester } from './src/aspis/components/XHarvester';
 import { startAutoRefresh } from './src/aspis/services/autoRefresh';
 import { startKairos } from './src/kairos/store';
 import { startKinesis } from './src/kinesis/store';
+import { startZazen } from './src/zazen/store';
 import { startConfigSync } from './src/services/configSync';
 import { startStrictAnswers } from './src/services/strictAnswers';
 import { SplashScreen as InAppSplash } from './src/screens/SplashScreen';
@@ -103,6 +104,11 @@ export default function App() {
     if (ready) void startKinesis();
   }, [ready]);
 
+  // O Zazen: a sessão em andamento retoma (os sinos são do motor do Kinesis).
+  useEffect(() => {
+    if (ready) void startZazen();
+  }, [ready]);
+
   // As tarefas do Kairós, que a sincronização leva e traz do Mac.
   useEffect(() => {
     if (ready) startKairos();
@@ -120,13 +126,16 @@ export default function App() {
     return startStrictAnswers();
   }, [ready]);
 
-  // Tocar na notificação do timer abre a aba do Kinesis; na de um hábito
-  // rigoroso, a Home, onde o hábito está (abrir não cala a vibração).
+  // Tocar na notificação do timer abre a aba do Kinesis (ou a do Zazen, se é ele
+  // que está sentado); na de um hábito rigoroso, a Home, onde o hábito está (abrir
+  // não cala a vibração).
   useEffect(() => {
     if (!ready || !navReady) return;
     const open = (url: string | null) => {
       if (url?.startsWith('askesis://kinesis') && navigationRef.current?.isReady?.()) {
         navigationRef.current.navigate('Main', { screen: 'Kinesis' });
+      } else if (url?.startsWith('askesis://zazen') && navigationRef.current?.isReady?.()) {
+        navigationRef.current.navigate('Main', { screen: 'Zazen' });
       } else if (url?.startsWith('askesis://comentora') && navigationRef.current?.isReady?.()) {
         navigationRef.current.navigate('Main', { screen: 'Home' });
       }

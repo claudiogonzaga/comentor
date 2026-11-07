@@ -98,6 +98,15 @@ export const MED_SKIP_ACTION = 'med-skip';
  */
 export const MED_DO_CATEGORY = 'comentor-med-do-actions';
 
+/**
+ * Aviso NO HORÁRIO (e o gentil, antes): só lembra, não pergunta. Por isso um
+ * botão só — "Já fiz" / "Já tomei" para quem já resolveu. A pergunta (fez, mais
+ * tempo, não fiz) vem meia hora depois, com as categorias completas acima.
+ */
+export const NUDGE_SOFT_CATEGORY = 'comentor-nudge-soft-actions';
+export const MED_SOFT_CATEGORY = 'comentor-med-soft-actions';
+export const MED_DO_SOFT_CATEGORY = 'comentor-med-do-soft-actions';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -198,6 +207,16 @@ export async function ensureNotificationCategories() {
     { identifier: MED_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
     { identifier: MED_SNOOZE_ACTION, buttonTitle: snoozeLabel, options: bg },
     { identifier: MED_SKIP_ACTION, buttonTitle: 'Não vou fazer', options: bg },
+  ]);
+  // No horário: só o botão de quem já resolveu (a pergunta vem depois).
+  await Notifications.setNotificationCategoryAsync(NUDGE_SOFT_CATEGORY, [
+    { identifier: NUDGE_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
+  ]);
+  await Notifications.setNotificationCategoryAsync(MED_SOFT_CATEGORY, [
+    { identifier: MED_DONE_ACTION, buttonTitle: 'Já tomei 💊', options: bg },
+  ]);
+  await Notifications.setNotificationCategoryAsync(MED_DO_SOFT_CATEGORY, [
+    { identifier: MED_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
   ]);
 }
 

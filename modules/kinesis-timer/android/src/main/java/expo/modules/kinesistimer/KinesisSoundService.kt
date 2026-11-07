@@ -95,8 +95,11 @@ class KinesisSoundService : Service() {
     if (active > 0) return
     try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
     wakeLock = null
+    // Fim do treino, ou o timer parado durante o som (o disarm não consegue tirar a
+    // notificação de um serviço em primeiro plano): a notificação sai junto.
+    val gone = finishing || KinesisEngine.currentNotif(this) == null
     try {
-      stopForeground(if (finishing) STOP_FOREGROUND_REMOVE else STOP_FOREGROUND_DETACH)
+      stopForeground(if (gone) STOP_FOREGROUND_REMOVE else STOP_FOREGROUND_DETACH)
     } catch (_: Exception) {}
     stopSelf()
   }
@@ -120,7 +123,7 @@ class KinesisSoundService : Service() {
       val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
       val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kinesis:sino")
       wl.setReferenceCounted(false)
-      wl.acquire(20_000L) // bipes + sino: bem menos que isto
+      wl.acquire(40_000L) // bipes + sino; o shijōshō do Zazen soa uns 22 s
       wakeLock = wl
     } catch (e: Exception) {
       Log.w(KinesisEngine.TAG, "wakelock falhou: ${e.message}")
