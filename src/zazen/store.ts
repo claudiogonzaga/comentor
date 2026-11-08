@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import KinesisTimer from '../../modules/kinesis-timer';
 import { useKinesis } from '../kinesis/store';
 import { getKV, setKV } from '../services/database';
+import { confirmHabitsByAction } from '../services/habitActions';
 import {
   chaveDoDia,
   faseEm,
@@ -112,10 +113,21 @@ interface ZazenStore {
 export const useZazen = create<ZazenStore>((set, get) => {
   /** Fecha a sessão: guarda os minutos sentados (no dia de `quando`) e tira a sessão do disco. */
   const encerrar = (minutos: number, quando: number) => {
+    const s = get().sessao;
     const dias = somarAoDia(get().dias, quando, minutos);
     set({ sessao: null, dias });
     save(KEYS.sessao, null);
     if (minutos > 0) save(KEYS.dias, dias);
+    // Hábito com a ação "Zazen": a sessão que valeu (inteira, ou 80% do previsto e
+    // nunca menos de 5 min) marca o hábito do dia.
+    const previsto = s?.minutos ?? minutos;
+    if (minutos >= Math.max(5, previsto * 0.8)) {
+      void confirmHabitsByAction('zazen', {
+        evidence: `Zazen no app · ${Math.round(minutos)} min`,
+        startedAt: quando - minutos * 60_000,
+        occurredAt: quando,
+      });
+    }
   };
 
   return {

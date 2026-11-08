@@ -13,11 +13,27 @@
 // hábito, tempo): reagendar no mesmo dia não troca o texto.
 //
 // Marcadores: {t} = o nome da tarefa, {n} = o nome da pessoa, {m} = minutos de
-// antecedência. Frase com {n} só entra quando há nome.
+// antecedência, {p}/{P} = a PISTA do hábito ("depois do café"; {P} com inicial
+// maiúscula), {d} = número de dias (marcos). Frase com {n} só entra quando há nome.
+//
+// Tempos do APP DE HÁBITOS (v1.130): 'hora_pista' (o aviso na hora cita a pista —
+// lembrete amarrado ao contexto forma hábito, lembrete solto só garante a
+// repetição), 'volta' (o dia seguinte a uma falta: "nunca duas vezes"), 'parar'
+// (a conferência da noite de um hábito de parar), 'marco', 'graduado' e 'srbai'.
 
 import type { Tone } from '../types';
 
-export type PhraseStage = 'antes' | 'hora' | 'pergunta' | 'insiste';
+export type PhraseStage =
+  | 'antes'
+  | 'hora'
+  | 'pergunta'
+  | 'insiste'
+  | 'hora_pista'
+  | 'volta'
+  | 'parar'
+  | 'marco'
+  | 'graduado'
+  | 'srbai';
 
 const ANTES = [
   'Daqui a {m} minutos: “{t}”. Só avisando, sem pressa.',
@@ -150,11 +166,105 @@ const INSISTE_BRUTAL = [
   '{n}, chega de “daqui a pouco”. “{t}”, agora.',
 ];
 
+const HORA_PISTA = [
+  '{P}: é a deixa para “{t}”.',
+  'O plano é seu: {p}, “{t}”. Chegou a hora.',
+  '{P} — a pista apareceu. Agora, “{t}”.',
+  'Lembra do combinado? {P}, “{t}”.',
+  '{P}, sem pensar muito: “{t}”.',
+  'A deixa de sempre ({p}) pede “{t}”.',
+  '{n}, {p}: é a vez de “{t}”.',
+  '{P}. O resto do dia espera: “{t}” primeiro.',
+  'Pista à vista ({p}): “{t}”.',
+  '{P}: o gatilho tocou. “{t}”, agora.',
+  'É aquele momento: {p}. Então, “{t}”.',
+  'Mesma pista, mesmo gesto: {p}, “{t}”.',
+  '{P} — repetir no mesmo contexto é o que transforma isto em hábito. “{t}”.',
+  'O roteiro: {p}, “{t}”. Cena de agora.',
+  '{n}, a deixa é {p}. Vai de “{t}”.',
+  '{P}: um gesto só, “{t}”.',
+  'Contexto certo, hora certa: {p}, “{t}”.',
+  '{P}? O seu cérebro já está aprendendo o caminho: “{t}”.',
+];
+
+const VOLTA = [
+  'Ontem escapou — normal. Hoje é o dia que conta: “{t}”.',
+  'Uma falta não desfaz nada. Duas seguidas, sim. “{t}” hoje.',
+  '{n}, ontem não deu. Hoje a regra é simples: nunca duas vezes. “{t}”.',
+  'Voltar logo é o que forma hábito. “{t}”, hoje.',
+  'O que importa não é ontem, é a volta. “{t}”.',
+  'Ontem ficou para trás. “{t}” hoje e a linha segue firme.',
+  'Hábito não se mede por um dia, e sim pela volta. “{t}”.',
+  'Nunca falhe duas vezes: “{t}” hoje fecha a lacuna de ontem.',
+  'Recomeço de bolso: “{t}”, hoje mesmo.',
+  '{n}, sem culpa por ontem — só “{t}” hoje.',
+  'Ontem a vida ganhou. Hoje, “{t}” — nem que seja a versão mínima.',
+  'A pesquisa é clara: uma falta não atrapalha; o que conta é voltar. “{t}”.',
+  'Dia de retorno: “{t}”. Pequeno já vale.',
+  'Ontem foi um tropeço, não um caminho. “{t}” hoje.',
+  'Volta curtinha, volta que conta: “{t}”.',
+  '{n}, hoje é o dia mais importante da semana para “{t}”: o da volta.',
+];
+
+const PARAR = [
+  'Como foi hoje com “{t}”? Dia limpo?',
+  '{n}, balanço rápido: hoje sem “{t}”?',
+  'Fechando o dia: “{t}” ficou de fora?',
+  'Um toque: hoje foi dia limpo de “{t}”?',
+  'Pergunta da noite: “{t}” — conseguiu passar sem?',
+  'Hoje você venceu “{t}”? Me conta, sem julgamento.',
+  'Registro do dia: limpo de “{t}”, ou escorregou? As duas respostas ensinam.',
+  '{n}, como a vontade de “{t}” se comportou hoje?',
+  'Mais um dia contra “{t}”. Como terminou?',
+  'Diário de bordo: “{t}” hoje — limpo ou deslize?',
+  'Sem culpa, só o dado: hoje teve “{t}”?',
+  'A coruja quer saber: “{t}” ficou longe hoje?',
+  'Antes de dormir: dia limpo de “{t}”?',
+  'Um deslize é informação, não sentença. Hoje teve “{t}”?',
+];
+
+const MARCO = [
+  '{d} dias de “{t}”. Isso já está mudando o caminho no seu cérebro.',
+  '{n}, {d} dias feitos de “{t}”! Comemora — foi você que construiu.',
+  'Marco: {d} dias de “{t}”. Repetição a repetição, vira você.',
+  '{d} vezes “{t}”. Cada uma deixou a próxima mais leve.',
+  'Olha só: {d} dias de “{t}”. A coruja tirou o chapéu.',
+  '{d} dias de “{t}”. Não foi sorte, foi repetição.',
+  '{d}! “{t}” está criando raiz.',
+  '{n}, {d} dias de “{t}”. Que tal contar para alguém?',
+  'Mais um degrau: {d} dias de “{t}”.',
+  '{d} dias de “{t}”. O que parecia esforço vai virando paisagem.',
+];
+
+const GRADUADO = [
+  '“{t}” ficou automático. Vou parar de lembrar — de vez em quando, pergunto como está.',
+  '{n}, “{t}” já é seu: acontece sem a coruja. A partir de hoje, silêncio.',
+  'Formado: “{t}”. Você não precisa mais de mim para isso.',
+  '“{t}” passou na prova da automaticidade. Graduado! Eu me recolho.',
+  'Missão cumprida com “{t}”: virou hábito. Volto só para conferir.',
+  'A coruja sai de cena: “{t}” agora anda sozinho.',
+];
+
+const SRBAI = [
+  'Como está “{t}”? Quatro perguntas rápidas, 20 segundos.',
+  '{n}, conferência de hábito: “{t}” já sai no automático? Quatro toques.',
+  'Hora de medir “{t}”: quanto ele já acontece sem pensar?',
+  'Checagem rápida de “{t}”: quatro perguntas, e eu ajusto os lembretes.',
+  '“{t}” está ficando automático? Me ajuda a medir — 20 segundos.',
+  'Termômetro do hábito: “{t}”. Quatro perguntas.',
+];
+
 const BANKS: Record<PhraseStage, (tone: Tone) => string[]> = {
   antes: () => ANTES,
   hora: () => HORA,
   pergunta: (tone) => (tone === 'gentle' ? PERGUNTA_GENTIL : [...PERGUNTA_FIRME, ...PERGUNTA_GENTIL.slice(0, 5)]),
   insiste: (tone) => (tone === 'brutal' ? [...INSISTE, ...INSISTE_BRUTAL] : INSISTE),
+  hora_pista: () => HORA_PISTA,
+  volta: () => VOLTA,
+  parar: () => PARAR,
+  marco: () => MARCO,
+  graduado: () => GRADUADO,
+  srbai: () => SRBAI,
 };
 
 /** FNV-1a: hash pequeno e estável. */
@@ -190,6 +300,15 @@ export interface PhraseContext {
   k?: number;
   /** Minutos de antecedência (só para 'antes'). */
   minutes?: number;
+  /** A pista do hábito ("depois do café"). Sem pista, 'hora_pista' vira 'hora'. */
+  cue?: string | null;
+  /** Número de dias (só para 'marco'). */
+  count?: number;
+}
+
+/** Inicial maiúscula (a pista começa a frase). */
+function capitalize(s: string): string {
+  return s ? s.charAt(0).toLocaleUpperCase('pt-BR') + s.slice(1) : s;
 }
 
 /**
@@ -198,6 +317,8 @@ export interface PhraseContext {
  * por batida — duas batidas do mesmo dia nunca repetem a mesma frase.
  */
 export function nudgePhrase(stage: PhraseStage, ctx: PhraseContext): string {
+  const cue = (ctx.cue ?? '').trim().replace(/[.!?…]+$/, '');
+  if (stage === 'hora_pista' && !cue) stage = 'hora';
   const name = ctx.name?.trim() || '';
   const bank = BANKS[stage](ctx.tone ?? 'gentle').filter((p) => name || !p.includes('{n}'));
   const n = bank.length;
@@ -208,7 +329,10 @@ export function nudgePhrase(stage: PhraseStage, ctx: PhraseContext): string {
   return bank[idx]
     .replace(/\{t\}/g, ctx.task.trim())
     .replace(/\{n\}/g, name)
-    .replace(/\{m\}/g, String(ctx.minutes ?? 10));
+    .replace(/\{m\}/g, String(ctx.minutes ?? 10))
+    .replace(/\{P\}/g, capitalize(cue))
+    .replace(/\{p\}/g, cue.charAt(0).toLocaleLowerCase('pt-BR') + cue.slice(1))
+    .replace(/\{d\}/g, String(ctx.count ?? 0));
 }
 
 /** Antecedência do aviso gentil, em minutos. */

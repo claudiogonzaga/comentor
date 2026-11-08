@@ -41,19 +41,32 @@ import { rescheduleAllNotifications } from './coach';
 import {
   createMedication,
   deleteMedication,
-  getAllHabitStates,
   getDoneNudgeTypes,
   getKV,
   getUserConfig,
   listMedications,
-  listNudges,
   setKV,
   updateMedication,
-  updateNudge,
   updateUserConfig,
 } from './database';
 import { confirmMedication, resetMedicationToday, skipMedicationToday } from './medications';
-import { confirmNudge, resetNudgeToday, skipNudgeToday } from './nudges';
+import { confirmNudge, resetNudgeToday, restNudgeToday, skipNudgeToday } from './nudges';
+import {
+  addSlipRow,
+  deleteHabitRow,
+  getHabitRow,
+  getValuesBetween,
+  insertHabitRow,
+  listHabitRows,
+  listSlipRows,
+  listSrbaiRows,
+  setValueRow,
+  updateHabitRow,
+} from './habitDb';
+import { statsFor } from './habitStage';
+import { markHabit, recordSrbai } from './habitos';
+import { logicalDay } from './habitEvents';
+import type { HabitDef } from '../types/habits';
 import { getEffectiveQuietPeriods } from './quietHours';
 import { OCULTO_DROP_MS, OCULTO_KEEP_MS, OCULTO_PREFIX, chavesOcultas, syncOculto } from './ocultoSync';
 import { onLocalChange } from './syncBus';
@@ -66,6 +79,15 @@ const DONE_PREFIX = 'done:';
 const CONFIG_PREFIX = 'comentora.config.';
 const KAIROS_PREFIX = 'kairos.task.';
 const DONE_KEEP_DAYS = 3;
+// App de hábitos (v1.130): a definição de cada hábito (os dois lados editam), as
+// estatísticas (só o celular publica: ele tem o histórico inteiro), a quantidade
+// do dia, as 4 respostas do SRBAI e os deslizes/vontades.
+const HABITO_PREFIX = 'comentora.habito.';
+const HABSTATS_PREFIX = 'comentora.habstats.';
+const QTY_PREFIX = 'qty:';
+const SRBAI_PREFIX = 'srbai:';
+const SLIP_PREFIX = 'slip:';
+const LONG_KEEP_DAYS = 30;
 const TOMBSTONE_KEEP_MS = 30 * 24 * 3600 * 1000;
 const POLL_MS = 60_000;
 const DEBOUNCE_MS = 4000;
@@ -171,21 +193,31 @@ function recentDays(): string[] {
   return out;
 }
 
-/** As marcas de um dia em nudge_completions, no formato do arquivo: tarefa → estado. */
+/**
+ * As marcas de um dia em nudge_completions, no formato do arquivo: tarefa → estado
+ * ('done' | 'min' | 'folga' | 'skip' | 'missed').
+ */
 function marksOf(keys: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
+  const set = new Set(keys);
+  const bases = new Set<string>();
   for (const raw of keys) {
-    if (raw.endsWith(':missed')) {
-      const base = raw.slice(0, -':missed'.length);
-      if (!out[base]) out[base] = 'missed';
-    } else if (raw.endsWith(':skip')) {
-      const base = raw.slice(0, -':skip'.length);
-      if (out[base] !== 'done') out[base] = 'skip';
-    } else {
-      out[raw] = 'done';
-    }
+    const m = /^(.*):(missed|skip|min|folga)$/.exec(raw);
+    bases.add(m ? m[1] : raw);
+  }
+  const out: Record<string, string> = {};
+  for (const base of bases) {
+    if (set.has(base)) out[base] = set.has(`${base}:min`) ? 'min' : 'done';
+    else if (set.has(`${base}:folga`)) out[base] = 'folga';
+    else if (set.has(`${base}:skip`)) out[base] = 'skip';
+    else if (set.has(`${base}:missed`)) out[base] = 'missed';
   }
   return out;
+}
+
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return dayKeyOf(d);
 }
 
 /** Valor ainda de fábrica não vale como escolha: não pode passar por cima do que o Mac tem. */
@@ -286,24 +318,62 @@ async function collect(
     if (value !== undefined) local[`${CONFIG_PREFIX}${field}`] = value;
   }
 
-  const hidden = new Set(
-    (await getAllHabitStates().catch(() => []))
-      .filter((s) => s.state !== 'forming')
-      .map((s) => s.nudgeType),
-  );
-  local['comentora.nudges'] = (await listNudges()).map((n) => ({
-    id: n.id,
-    type: n.type,
-    title: n.title,
-    body: n.body,
-    emoji: n.emoji,
-    enabled: n.enabled,
-    scheduleTime: n.scheduleTime,
-    orderIndex: n.orderIndex,
-    strict: n.strict,
-    // Hábito já formado sai da lista do dia e não é cobrado.
-    ...(hidden.has(n.type) ? { hidden: true } : {}),
-  }));
+  // Os HÁBITOS: uma chave por hábito (a que sumiu daqui vira null), e as
+  // estatísticas que o Mac só mostra. Sem conseguir ler, a família fica de fora.
+  try {
+    const habits = await listHabitRows(true);
+    for (const h of habits) {
+      const { id: _id, ...def } = h;
+      local[`${HABITO_PREFIX}${h.type}`] = def;
+      try {
+        const st = await statsFor(h);
+        local[`${HABSTATS_PREFIX}${h.type}`] = {
+          strength: Math.round(st.strength * 1000) / 1000,
+          stage: st.stage,
+          formed: st.formed,
+          last30: [st.last30.done, st.last30.total],
+          streak: st.streak,
+          best: st.best,
+          total: st.total,
+          heat: st.heat,
+          srbai: st.srbai,
+          srbaiDue: st.srbaiDue,
+          weekDone: st.weekDone,
+          cleanDays: st.cleanDays,
+        };
+      } catch (err) {
+        console.warn('[configSync] habstats', h.type, err);
+      }
+    }
+    for (const key of Object.keys(state.hash)) {
+      if ((key.startsWith(HABITO_PREFIX) || key.startsWith(HABSTATS_PREFIX)) && !(key in local)) local[key] = null;
+    }
+    // Quantidades dos últimos dias; a que foi apagada vira null.
+    for (const v of await getValuesBetween(daysAgo(DONE_KEEP_DAYS - 1), daysAgo(0))) {
+      local[`${QTY_PREFIX}${v.date}:${v.key}`] = v.value;
+    }
+    for (const key of Object.keys(state.hash)) {
+      if (key.startsWith(QTY_PREFIX) && !(key in local)) local[key] = null;
+    }
+    // SRBAI (só as respostas completas, de 4 itens) e deslizes dos últimos 30 dias.
+    for (const e of await listSrbaiRows(null, daysAgo(LONG_KEEP_DAYS - 1))) {
+      if (e.items.length === 4) local[`${SRBAI_PREFIX}${e.key}:${e.date}`] = e.items;
+    }
+    for (const sl of await listSlipRows(null, `${daysAgo(LONG_KEEP_DAYS - 1)}T00:00:00`)) {
+      const ms = Date.parse(sl.at);
+      if (Number.isFinite(ms)) {
+        local[`${SLIP_PREFIX}${sl.key}:${ms}`] = {
+          place: sl.place,
+          emotion: sl.emotion,
+          trigger: sl.trigger,
+          note: sl.note,
+          resisted: sl.resisted,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[configSync] hábitos', err);
+  }
   local['comentora.meds'] = (await listMedications()).map((m) => ({
     id: m.id,
     name: m.name,
@@ -384,13 +454,81 @@ async function applyDone(key: string, value: unknown): Promise<void> {
     if (value === 'done') await confirmMedication(id, meta);
     else if (value === 'skip') await skipMedicationToday(id, meta);
     else if (value === null && day === today) await resetMedicationToday(id);
-  } else if (value === 'done') {
+    return;
+  }
+  // Dia mais antigo que ontem (correção feita no Mac): grava direto no dia certo.
+  if (logicalDay(day) !== day) {
+    if (!(await getHabitRow(task))) return;
+    if (value === 'done' || value === 'min') await markHabit(task, value === 'min' ? 'minimo' : 'feito', { day, via: 'mac' });
+    else if (value === 'folga') await markHabit(task, 'folga', { day, via: 'mac' });
+    else if (value === 'skip') await markHabit(task, 'nao', { day, via: 'mac' });
+    return;
+  }
+  if (value === 'done') {
     await confirmNudge(task, meta);
+  } else if (value === 'min') {
+    await confirmNudge(task, meta, { minimum: true });
+  } else if (value === 'folga') {
+    await restNudgeToday(task, meta);
   } else if (value === 'skip') {
     await skipNudgeToday(task, meta);
   } else if (value === null && day === today) {
     await resetNudgeToday(task);
   }
+}
+
+/** Campos de um hábito vindos do Mac (só os conhecidos, com o tipo certo). */
+function habitFields(v: Record<string, unknown>): Partial<HabitDef> {
+  const out: Partial<HabitDef> = {};
+  const str = (k: keyof HabitDef) => {
+    if (typeof v[k] === 'string') (out as Record<string, unknown>)[k] = v[k];
+  };
+  const strOrNull = (k: keyof HabitDef) => {
+    if (typeof v[k] === 'string' || v[k] === null) (out as Record<string, unknown>)[k] = v[k];
+  };
+  const bool = (k: keyof HabitDef) => {
+    if (typeof v[k] === 'boolean') (out as Record<string, unknown>)[k] = v[k];
+  };
+  const num = (k: keyof HabitDef) => {
+    if (typeof v[k] === 'number' || v[k] === null) (out as Record<string, unknown>)[k] = v[k];
+  };
+  str('title');
+  str('body');
+  strOrNull('emoji');
+  bool('enabled');
+  str('scheduleTime');
+  num('orderIndex');
+  bool('strict');
+  str('kind');
+  strOrNull('cue');
+  strOrNull('place');
+  strOrNull('minimum');
+  strOrNull('planB');
+  strOrNull('why');
+  str('measure');
+  num('target');
+  strOrNull('unit');
+  str('freq');
+  if (Array.isArray(v.daysOfWeek)) out.daysOfWeek = (v.daysOfWeek as unknown[]).filter((x): x is number => typeof x === 'number');
+  num('perWeek');
+  str('reminders');
+  strOrNull('action');
+  strOrNull('pausedUntil');
+  if (Array.isArray(v.pauses)) out.pauses = v.pauses as [string, string][];
+  bool('archived');
+  str('createdDay');
+  return out;
+}
+
+async function applyHabitDef(type: string, value: unknown): Promise<void> {
+  const existing = await getHabitRow(type);
+  if (value === null || typeof value !== 'object') {
+    if (existing) await deleteHabitRow(type);
+    return;
+  }
+  const fields = habitFields(value as Record<string, unknown>);
+  if (existing) await updateHabitRow(type, fields);
+  else if (fields.title) await insertHabitRow(type, { ...fields, title: fields.title });
 }
 
 interface Effects {
@@ -407,29 +545,38 @@ async function applyItem(key: string, value: unknown, fx: Effects): Promise<void
     await updateUserConfig({ [key.slice(CONFIG_PREFIX.length)]: value } as Partial<UserConfig>);
     fx.refreshConfig = true;
     fx.reschedule = true;
-  } else if (key === 'comentora.nudges') {
-    const current = await listNudges();
-    for (const r of value as { type: string; enabled: boolean; scheduleTime: string; title: string; body: string; strict?: unknown }[]) {
-      const n = current.find((x) => x.type === r.type);
-      if (!n) continue;
-      // Rigoroso: só um booleano muda; ausente (um Mac antigo) mantém o do telefone.
-      const strict = typeof r.strict === 'boolean' ? r.strict : n.strict;
-      if (
-        n.enabled !== r.enabled ||
-        n.scheduleTime !== r.scheduleTime ||
-        n.title !== r.title ||
-        n.body !== r.body ||
-        n.strict !== strict
-      ) {
-        await updateNudge(n.id, {
-          enabled: r.enabled,
-          scheduleTime: r.scheduleTime,
-          title: r.title,
-          body: r.body,
-          strict,
-        });
-        fx.reschedule = true;
-      }
+  } else if (key.startsWith(HABITO_PREFIX)) {
+    await applyHabitDef(key.slice(HABITO_PREFIX.length), value);
+    fx.reschedule = true;
+  } else if (key.startsWith(HABSTATS_PREFIX)) {
+    // Só o celular publica as estatísticas (ele tem o histórico inteiro).
+  } else if (key.startsWith(QTY_PREFIX)) {
+    const rest = key.slice(QTY_PREFIX.length);
+    const day = rest.slice(0, 10);
+    const type = rest.slice(11);
+    if (await getHabitRow(type)) await setValueRow(type, day, typeof value === 'number' ? value : null);
+  } else if (key.startsWith(SRBAI_PREFIX)) {
+    const rest = key.slice(SRBAI_PREFIX.length);
+    const cut = rest.lastIndexOf(':');
+    const items = Array.isArray(value) ? (value as unknown[]).filter((x): x is number => typeof x === 'number') : [];
+    if (cut > 0 && items.length === 4) {
+      await recordSrbai(rest.slice(0, cut), items as [number, number, number, number], rest.slice(cut + 1));
+    }
+  } else if (key.startsWith(SLIP_PREFIX)) {
+    const rest = key.slice(SLIP_PREFIX.length);
+    const cut = rest.lastIndexOf(':');
+    const ms = Number(rest.slice(cut + 1));
+    const v = (value ?? {}) as { place?: string | null; emotion?: string | null; trigger?: string | null; note?: string | null; resisted?: boolean };
+    if (cut > 0 && Number.isFinite(ms) && value) {
+      await addSlipRow({
+        key: rest.slice(0, cut),
+        at: new Date(ms).toISOString(),
+        place: v.place ?? null,
+        emotion: v.emotion ?? null,
+        trigger: v.trigger ?? null,
+        note: v.note ?? null,
+        resisted: !!v.resisted,
+      });
     }
   } else if (key === 'comentora.meds') {
     await applyMeds(value as Medication[]);
@@ -609,7 +756,33 @@ async function runOnce(): Promise<void> {
   const oldestDay = recentDays()[DONE_KEEP_DAYS - 1];
   let dirty = !doc;
 
+  const oldestLong = daysAgo(LONG_KEEP_DAYS - 1);
+  const oldestLongMs = Date.parse(`${oldestLong}T00:00:00`);
   for (const key of Array.from(new Set([...Object.keys(local), ...Object.keys(items)])).sort()) {
+    // A lista antiga de hábitos (até a v1.129): agora é uma chave por hábito.
+    // Aplicá-la de novo traria valores velhos por cima — sai do arquivo.
+    if (key === 'comentora.nudges') {
+      if (items[key]) {
+        delete items[key];
+        dirty = true;
+      }
+      delete state.hash[key];
+      delete state.t[key];
+      continue;
+    }
+    const expired =
+      (key.startsWith(QTY_PREFIX) && key.slice(QTY_PREFIX.length, QTY_PREFIX.length + 10) < oldestDay) ||
+      (key.startsWith(SRBAI_PREFIX) && key.slice(key.lastIndexOf(':') + 1) < oldestLong) ||
+      (key.startsWith(SLIP_PREFIX) && Number(key.slice(key.lastIndexOf(':') + 1)) < oldestLongMs);
+    if (expired) {
+      if (items[key]) {
+        delete items[key];
+        dirty = true;
+      }
+      delete state.hash[key];
+      delete state.t[key];
+      continue;
+    }
     if (key.startsWith(DONE_PREFIX) && key.slice(DONE_PREFIX.length, DONE_PREFIX.length + 10) < oldestDay) {
       if (items[key]) {
         delete items[key];

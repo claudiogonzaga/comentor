@@ -202,16 +202,34 @@ export function SettingsScreen() {
           </Card>
         </Pressable>
 
+        {/* Hábitos e lembretes viraram coisas diferentes (v1.130): o hábito se
+            forma e a coruja vai soltando; o lembrete lembra sempre. */}
+        <Pressable onPress={() => navigation.navigate('Habits')}>
+          <Card style={styles.linkCard}>
+            <View style={styles.linkIcon}>
+              <GreekIcon name="leaf" size={24} color={colors.accent.gold} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkTitle}>Hábitos</Text>
+              <Text style={styles.linkSub}>
+                Os que você está formando (ou largando): força, calendário, pausa e
+                revisão da semana. A coruja lembra menos conforme eles pegam.
+              </Text>
+            </View>
+            <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />
+          </Card>
+        </Pressable>
+
         <Pressable onPress={() => navigation.navigate('Reminders')}>
           <Card style={styles.linkCard}>
             <View style={styles.linkIcon}>
               <GreekIcon name="bell" size={24} color={colors.accent.gold} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.linkTitle}>Hábitos saudáveis</Text>
+              <Text style={styles.linkTitle}>Lembretes</Text>
               <Text style={styles.linkSub}>
-                Sol, luz azul, respiração, cardio, remédios, água, jejum… + nudge
-                de trabalho sentado. A coruja insiste até você marcar que fez.
+                Remédios, suplementos, jejum e avisos, mais o sono, a insistência e o
+                nudge de trabalho sentado. A coruja insiste até você marcar.
               </Text>
             </View>
             <GreekIcon name="chevronRight" size={20} color={colors.text.tertiary} />

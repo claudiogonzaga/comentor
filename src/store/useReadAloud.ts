@@ -5,6 +5,7 @@ import { startReadAloudKeepAlive, stopReadAloudKeepAlive } from '../services/rea
 import { READ_ALOUD_NATIVE } from '../services/geminiTTS';
 import { registerPlayer, claimPlayback } from '../services/playerBus';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { confirmHabitsByAction } from '../services/habitActions';
 
 export type ReadAloudStatus = 'idle' | 'generating' | 'playing' | 'paused';
 
@@ -221,6 +222,8 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
           duration: dur,
           finishedTick: s.finishedTick + 1,
         }));
+        // Ouviu até o fim: o hábito com a ação "Leia para mim" se marca sozinho.
+        void confirmHabitsByAction('leia', { evidence: 'Leia para mim · ouvido até o fim' });
         return;
       }
       set({ currentTime: cur, duration: dur, status: st?.playing ? 'playing' : 'paused' });
@@ -365,7 +368,10 @@ export const useReadAloud = create<ReadAloudState>((set, get) => {
         rate: opts.rate,
         paused: opts.paused,
         onDone: () => {
-          if (mine === token) set((s) => ({ status: 'idle', finishedTick: s.finishedTick + 1 }));
+          if (mine === token) {
+            set((s) => ({ status: 'idle', finishedTick: s.finishedTick + 1 }));
+            void confirmHabitsByAction('leia', { evidence: 'Leia para mim · ouvido até o fim' });
+          }
         },
         onError: () => {
           if (mine === token) set({ status: 'idle', error: 'não consegui ler o texto.' });

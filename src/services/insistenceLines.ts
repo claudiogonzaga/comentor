@@ -170,6 +170,13 @@ async function buildUserPrompt(nudge: Nudge, count: number, ctx: LineContext): P
   ]);
   const lines: string[] = [];
   lines.push(`Hábito: "${nudge.title}"${nudge.body ? ` — ${nudge.body}` : ''}.`);
+  // App de hábitos (v1.130): o plano da pessoa. Cobrança que cita a PISTA e
+  // oferece a VERSÃO MÍNIMA funciona melhor que a cobrança solta.
+  const plan = nudge as Nudge & { cue?: string | null; minimum?: string | null; why?: string | null; planB?: string | null };
+  if (plan.cue) lines.push(`Pista (quando a pessoa planejou fazer): "${plan.cue}".`);
+  if (plan.minimum) lines.push(`Versão mínima aceita nos dias ruins: "${plan.minimum}".`);
+  if (plan.planB) lines.push(`Plano B da pessoa: "${plan.planB}".`);
+  if (plan.why) lines.push(`Por que isso importa para ela: "${plan.why}".`);
   lines.push(`Nome da pessoa: ${config.name?.trim() || 'amigo(a)'}.`);
   lines.push(`Fez ${doneDays} dos últimos 14 dias. Ontem: ${doneYesterday ? 'fez' : 'NÃO fez'}.`);
   lines.push(`Tom configurado: ${config.tone}.`);

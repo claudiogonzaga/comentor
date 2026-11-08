@@ -17,6 +17,7 @@ import { analyze, GeminiError, NoGeminiKeyError } from '../services/brain';
 import { getAccessToken } from '../services/auth';
 import * as db from '../services/db';
 import { learnThumb } from '../services/neural';
+import { compartilharComIA } from '../services/filaIA';
 import { fetchOEmbed } from '../services/oembed';
 import { getVideoDetails } from '../services/youtube';
 import { useAppStore } from '../store/useAppStore';
@@ -39,6 +40,8 @@ export function ShareScreen({ route, navigation }: Props) {
   const [state, setState] = useState<State>({ status: 'loading', phase: 'meta' });
   // o 👍 foi dado por este compartilhamento (e não já existia)?
   const autoThumbed = useRef(false);
+  // o link já foi para a fila da IA do Mac (não repete no "tentar de novo")
+  const enviadoIA = useRef<string | null>(null);
 
   /** Compartilhar = quero isto: vai para o feed do Escudo e ganha 👍 na rede local. */
   const intoShield = useCallback((video: VideoRecord): VideoRecord => {
@@ -63,6 +66,13 @@ export function ShareScreen({ route, navigation }: Props) {
         canRetry: false,
       });
       return;
+    }
+
+    // A IA do Mac também escreve o card deste vídeo, na próxima execução agendada
+    // (06h, 13h ou 21h) — mesmo que a análise daqui falhe (filaIA.ts).
+    if (enviadoIA.current !== videoId) {
+      enviadoIA.current = videoId;
+      compartilharComIA({ id: videoId, source: 'youtube', url: watchUrl(videoId) });
     }
 
     // cache: já analisado → mostra direto, sem reprocessar

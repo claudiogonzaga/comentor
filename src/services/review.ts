@@ -25,6 +25,8 @@ import {
   setKV,
 } from './database';
 import { ensureChannel } from './notifications';
+import { listHabitRows } from './habitDb';
+import { isScheduledDay } from './habitStrength';
 
 export const REVIEW_TYPE = 'review';
 
@@ -42,22 +44,9 @@ export interface AutomaticityQuestion {
 
 /** O hábito a perguntar hoje (o de avaliação mais antiga), ou null. */
 export async function getAutomaticityQuestion(): Promise<AutomaticityQuestion | null> {
-  try {
-    const today = isoOf(new Date());
-    if ((await getKV('automaticity_asked')) === today) return null; // já perguntou hoje
-    const last = await getLastAutomaticityDates();
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - AUTOMATICITY_EVERY_DAYS);
-    const cutoffISO = isoOf(cutoff);
-    const candidates = (await listNudges())
-      .filter((n) => n.enabled)
-      .filter((n) => !last[n.type] || last[n.type] <= cutoffISO)
-      .sort((a, b) => (last[a.type] ?? '').localeCompare(last[b.type] ?? ''));
-    const n = candidates[0];
-    return n ? { key: n.type, title: n.title } : null;
-  } catch {
-    return null;
-  }
+  // v1.130: a pergunta única de uma vez por semana deu lugar às 4 perguntas do
+  // SRBAI por hábito, a cada 14 dias (habitos.getDueSrbai / recordSrbai).
+  return null;
 }
 
 /** Grava a resposta (1–7) ou o "agora não" (score null): não pergunta de novo hoje. */
@@ -84,9 +73,13 @@ function isoOf(d: Date): string {
   return format(d, 'yyyy-MM-dd');
 }
 
-/** Chaves esperadas no dia: nudges habilitados (não formados) + remédios do dia da semana. */
+/**
+ * Chaves esperadas no dia: hábitos do dia (ligados, não pausados, não formados,
+ * cota da semana em aberto) + remédios do dia da semana.
+ */
 async function expectedKeysFor(date: Date): Promise<{ key: string; item: PendingItem }[]> {
   const out: { key: string; item: PendingItem }[] = [];
+  const day = isoOf(date);
   let formed = new Set<string>();
   try {
     formed = new Set((await getAllHabitStates()).filter((s) => s.state !== 'forming').map((s) => s.nudgeType));
@@ -94,15 +87,19 @@ async function expectedKeysFor(date: Date): Promise<{ key: string; item: Pending
     /* sem estados */
   }
   try {
-    for (const n of await listNudges()) {
+    for (const n of await listHabitRows()) {
       if (!n.enabled || formed.has(n.type)) continue;
+      if (n.pausedUntil && n.pausedUntil >= day) continue;
+      if (!isScheduledDay(n, day)) continue;
+      // X vezes por semana: o dia sem registro não é pendência — só o registro do que fez.
+      if (n.freq === 'semana') continue;
       out.push({
         key: n.type,
         item: { key: n.type, kind: 'nudge', nudgeType: n.type, title: n.title, time: n.scheduleTime },
       });
     }
   } catch {
-    /* nudges opcionais */
+    /* hábitos opcionais */
   }
   try {
     const dow = date.getDay();
@@ -121,7 +118,7 @@ async function expectedKeysFor(date: Date): Promise<{ key: string; item: Pending
 
 /** Um item está RESPONDIDO se tem "feito" ou "não fiz" (:skip). :missed é sem resposta. */
 function answered(done: Set<string>, key: string): boolean {
-  return done.has(key) || done.has(`${key}:skip`);
+  return done.has(key) || done.has(`${key}:skip`) || done.has(`${key}:folga`);
 }
 
 /** Itens de hoje ainda sem resposta (feito ou não fiz). Inclui os já dados como :missed. */

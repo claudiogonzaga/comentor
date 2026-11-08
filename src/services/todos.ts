@@ -1,10 +1,11 @@
 import {
   getDoneNudgeTypes,
   listMedications,
-  listNudges,
   getAllHabitStates,
   getSensorEvidenceForDate,
 } from './database';
+import { listHabitRows } from './habitDb';
+import { isScheduledDay } from './habitStrength';
 import { confirmNudge, unconfirmNudge } from './nudges';
 import { confirmMedication, unconfirmMedication } from './medications';
 import type { GreekIconName } from '../components/GreekIcon';
@@ -151,10 +152,13 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
   }
 
   try {
-    const nudges = await listNudges();
+    const nudges = await listHabitRows();
     for (const n of nudges) {
       if (!n.enabled) continue;
       if (formedTypes.has(n.type)) continue;
+      // Pausado ou fora dos dias do hábito: não é tarefa de hoje.
+      if (n.pausedUntil && n.pausedUntil >= today) continue;
+      if (!isScheduledDay(n, today)) continue;
       items.push({
         key: n.type,
         kind: 'nudge',
@@ -164,8 +168,11 @@ export async function getTodayTodos(): Promise<TodoItem[]> {
         time: n.scheduleTime,
         icon: iconForEmoji(n.emoji, 'nudge'),
         done:
-          done.has(n.type) || done.has(`${n.type}:skip`) || done.has(`${n.type}:missed`),
-        skipped: done.has(`${n.type}:skip`) && !done.has(n.type),
+          done.has(n.type) ||
+          done.has(`${n.type}:skip`) ||
+          done.has(`${n.type}:folga`) ||
+          done.has(`${n.type}:missed`),
+        skipped: (done.has(`${n.type}:skip`) || done.has(`${n.type}:folga`)) && !done.has(n.type),
         missed:
           done.has(`${n.type}:missed`) &&
           !done.has(n.type) &&

@@ -44,6 +44,7 @@ import { pickFallback } from './fallbackMessages';
 import { recordCompletion } from './streaks';
 import { getIntensityForMinutesLate, INTENSITY_LEVELS } from '../constants/intensityLevels';
 import { DEFAULT_SYSTEM_PROMPT, fillTemplate } from '../constants/promptTemplate';
+import { migrateHabitsV1 } from './habitMigration';
 import type {
   ChatMessage,
   DailyLog,
@@ -819,6 +820,8 @@ export async function rearmSleepReminders(): Promise<void> {
  * waiting for the next Settings save.
  */
 export async function rescheduleAllNotifications(): Promise<void> {
+  // v1.130: "Meus hábitos" se divide em hábitos e lembretes (uma vez só).
+  await migrateHabitsV1();
   if (!(await ensurePermissions())) return;
   const config = await getUserConfig();
   await ensureNotificationCategories();

@@ -1853,7 +1853,7 @@ export async function setHabitState(s: HabitState): Promise<void> {
 // --------- Coletora de sinais (v1.103): eventos, saúde diária, experimentos ---------
 
 /** 'undone' = a pessoa DESFEZ uma marcação (ex.: confirmação automática errada). */
-export type HabitEventStatus = 'done' | 'not_done' | 'no_answer' | 'undone';
+export type HabitEventStatus = 'done' | 'not_done' | 'no_answer' | 'undone' | 'rest';
 
 export interface HabitEvent {
   id: number;
@@ -3183,6 +3183,9 @@ export async function resetAllUserData(): Promise<void> {
      VALUES (1, '23:00', 10, 12, 'firm', 'gemini-3.1-flash-lite', 0, 0, ?, 1, 0, 'remote', 0, 0)`,
     [DEFAULT_SYSTEM_PROMPT],
   );
+  // App de hábitos (v1.130): quantidades e deslizes. As tabelas só existem depois
+  // da primeira leitura de hábitos — numa instalação que nunca chegou lá, ignora.
+  await d.execAsync('DELETE FROM habit_values; DELETE FROM habit_slips;').catch(() => {});
   // Os lembretes diários voltam aos padrões de instalação (os títulos, textos e
   // horários personalizados saíram junto com a tabela).
   await seedDefaultNudges(d);

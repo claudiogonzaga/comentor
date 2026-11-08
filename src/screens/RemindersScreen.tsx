@@ -17,7 +17,6 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { GreekIcon, type GreekIconName } from '../components/GreekIcon';
-import { NudgesCard } from '../components/NudgesCard';
 import { SedentaryCard } from '../components/SedentaryCard';
 import { FastingCard } from '../components/FastingCard';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -42,11 +41,12 @@ import { iconForEmoji } from '../services/todos';
 import type { Medication } from '../types';
 
 /**
- * #7 — Tela única "Lembretes e hábitos": junta os nudges diários da
- * Comentora (respiração, pôr do sol…) com os lembretes personalizados do
- * usuário — que agora cobrem qualquer hábito saudável: remédios, suplementos,
- * beber água, comer algo, jejum, café, etc. No horário, a coruja insiste até
- * a pessoa marcar como feito.
+ * LEMBRETES (v1.130): remédios, suplementos, jejum e avisos avulsos — o que só
+ * precisa ser LEMBRADO, sempre, e não se forma. Os hábitos (que se formam e a
+ * coruja vai soltando) saíram daqui para telas próprias (Seus hábitos); por isso
+ * o antigo cartão dos nudges da Comentora não mora mais nesta tela. Aqui ficam
+ * também o sono, a insistência, o fechamento do dia e o "mais tempo", que valem
+ * para os dois. No horário, a coruja insiste até a pessoa marcar.
  *
  * O ícone é escolhido num seletor de ícones gregos (preto/terracota). Cada
  * ícone guarda um emoji representativo, usado apenas no texto da notificação
@@ -308,8 +308,8 @@ export function RemindersScreen() {
 
   const handleDelete = (med: Medication) => {
     Alert.alert(
-      'Excluir hábito',
-      `Remover "${med.name}"? Você não receberá mais esse hábito.`,
+      'Excluir lembrete',
+      `Remover "${med.name}"? Você não receberá mais esse lembrete.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -336,11 +336,25 @@ export function RemindersScreen() {
         <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.back}>‹ Voltar</Text>
         </Pressable>
-        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Hábitos saudáveis</Text>
+        <Text style={[typography.subtitle, { color: colors.text.primary }]}>Lembretes</Text>
         <View style={{ width: 60 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Os hábitos têm telas próprias agora; daqui, um atalho para lá. */}
+        <Pressable
+          onPress={() => navigation.navigate('Habits')}
+          style={styles.habitsLink}
+          accessibilityRole="button"
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.habitsLinkTitle}>Seus hábitos →</Text>
+            <Text style={styles.habitsLinkSub}>
+              Ler, caminhar, meditar, parar de… — os que se formam e a coruja vai soltando.
+            </Text>
+          </View>
+        </Pressable>
+
         {/* Sono — horário de dormir + insistência (veio de Configurações). */}
         <Card style={{ marginBottom: spacing.lg }}>
           <Text style={styles.sectionTitle}>Sono</Text>
@@ -473,14 +487,11 @@ export function RemindersScreen() {
         {/* Jejum intermitente — hábito pré-definido configurável, abaixo do Sono. */}
         <FastingCard />
 
-        {/* Nudges diários da Comentora (respiração, pôr do sol…). */}
-        <NudgesCard />
-
-        <Text style={styles.sectionTitle}>Meus hábitos</Text>
+        <Text style={styles.sectionTitle}>Meus lembretes</Text>
         <Text style={styles.intro}>
-          Crie hábitos saudáveis: sol matutino, luz azul, respiração, cardio,
-          remédios, água, comida, jejum… No horário, a coruja insiste (e canta)
-          até você marcar que fez. Use os hábitos prontos ou crie os seus.
+          Remédios, suplementos, água, jejum, avisos… No horário, a coruja insiste
+          (e canta) até você marcar. Lembretes não se formam: lembram sempre. Para
+          criar um hábito, use “Seus hábitos”.
         </Text>
 
         {meds === null && (
@@ -493,7 +504,7 @@ export function RemindersScreen() {
           <Card style={styles.emptyCard}>
             <GreekIcon name="leaf" size={40} color={colors.text.tertiary} />
             <Text style={styles.emptyText}>
-              Nenhum hábito ainda. Toque em “Adicionar hábito” para criar o
+              Nenhum lembrete ainda. Toque em “Adicionar lembrete” para criar o
               primeiro.
             </Text>
           </Card>
@@ -540,7 +551,7 @@ export function RemindersScreen() {
         ))}
 
         <View style={styles.addWrap}>
-          <Button label="Adicionar hábito +" onPress={openNew} />
+          <Button label="Adicionar lembrete +" onPress={openNew} />
         </View>
 
         <View style={{ height: spacing.lg }} />
@@ -562,12 +573,12 @@ export function RemindersScreen() {
             {/* Rola quando o editor não cabe na tela (o rigoroso aumentou a folha). */}
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={styles.modalTitle}>
-                {editor.id == null ? 'Novo hábito' : 'Editar hábito'}
+                {editor.id == null ? 'Novo lembrete' : 'Editar lembrete'}
               </Text>
 
               {editor.id == null && (
                 <>
-                  <Text style={styles.fieldLabel}>Hábitos prontos</Text>
+                  <Text style={styles.fieldLabel}>Prontos</Text>
                   <View style={styles.templateRow}>
                     {HABIT_TEMPLATES.map((t) => (
                       <Pressable
@@ -703,6 +714,19 @@ export function RemindersScreen() {
 }
 
 const styles = StyleSheet.create({
+  habitsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.lg,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.accent.gold,
+  },
+  habitsLinkTitle: { ...typography.bodyMedium, color: colors.accent.gold },
+  habitsLinkSub: { ...typography.small, color: colors.text.secondary, marginTop: 2 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',

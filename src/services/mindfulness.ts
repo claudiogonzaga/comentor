@@ -8,7 +8,8 @@
 
 import { Platform, ToastAndroid } from 'react-native';
 import { format } from 'date-fns';
-import { addMindfulSession, getDoneNudgeTypes, listNudges } from './database';
+import { addMindfulSession, getDoneNudgeTypes } from './database';
+import { listHabitRows } from './habitDb';
 import { confirmNudge } from './nudges';
 import { logicalDay } from './habitEvents';
 
@@ -19,8 +20,12 @@ const KIND_LABEL: Record<MindfulKind, string> = {
   nidra: 'Ioga Nidra',
 };
 
-/** Hábito que esta prática cumpre: o nudge 'breathing' ou um título que fale dela. */
-function matches(kind: MindfulKind, n: { type: string; title: string }): boolean {
+/**
+ * Hábito que esta prática cumpre: o que tem a AÇÃO correspondente (v1.130), o
+ * nudge 'breathing', ou um título que fale dela.
+ */
+function matches(kind: MindfulKind, n: { type: string; title: string; action?: string | null }): boolean {
+  if (n.action) return n.action === (kind === 'breathing' ? 'respiracao' : 'ioga');
   const title = n.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   if (kind === 'breathing') return n.type === 'breathing' || /respira/.test(title);
   return /nidra|medita/.test(title);
@@ -83,8 +88,9 @@ export async function recordMindfulSession(opts: {
     const done = new Set(await getDoneNudgeTypes(day));
     const evidence = `${KIND_LABEL[opts.kind]} no app · ${fmtMin(minutes)}${opts.completed ? ' (completa)' : ''}`;
     const confirmed: string[] = [];
-    for (const n of await listNudges()) {
+    for (const n of await listHabitRows()) {
       if (!n.enabled || done.has(n.type) || !matches(opts.kind, n)) continue;
+      if (n.pausedUntil && n.pausedUntil >= day) continue;
       await confirmNudge(n.type, {
         via: 'sensor',
         evidence,

@@ -22,6 +22,12 @@ import { InspirationLibraryScreen } from '../screens/InspirationLibraryScreen';
 import { AudioDecksScreen } from '../screens/AudioDecksScreen';
 import { MainTabs, type MainTabParamList } from './MainTabs';
 import { YogaNidraScreen } from '../screens/YogaNidraScreen';
+import { HabitsScreen } from '../screens/HabitsScreen';
+import { HabitEditScreen } from '../screens/HabitEditScreen';
+import { HabitDetailScreen } from '../screens/HabitDetailScreen';
+import { WeeklyReviewScreen } from '../screens/WeeklyReviewScreen';
+import { UrgeSurfScreen } from '../screens/UrgeSurfScreen';
+import type { HabitInput } from '../types/habits';
 import type { IntensityLevel, LocalModelId } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import {
@@ -29,6 +35,8 @@ import {
   SNOOZE_ACTION,
   SLEEP_WHY_ACTION,
   NUDGE_DONE_ACTION,
+  PARAR_CLEAN_ACTION,
+  PARAR_SLIP_ACTION,
   NUDGE_SNOOZE_ACTION,
   NUDGE_NOT_DONE_ACTION,
   NUDGE_WHY_ACTION,
@@ -44,6 +52,7 @@ import {
 import { confirmNudge, skipNudgeToday, snoozeNudge } from '../services/nudges';
 import { handleMorningResponse, MORNING_TYPE } from '../services/morning';
 import { REVIEW_TYPE } from '../services/review';
+import { markSlipFromNotification } from '../services/habitos';
 import { rateAudioClip, rateInspirationCard } from '../services/inspiration';
 import { ReviewScreen } from '../screens/ReviewScreen';
 import { recordSampleAnswer, todayISO as formationToday } from '../services/habitFormation';
@@ -84,6 +93,13 @@ export type RootStackParamList = {
   InspirationLibrary: undefined;
   AudioDecks: undefined;
   YogaNidra: undefined;
+  // Hábitos (v1.130): a lista, criar/editar, o detalhe, a revisão da semana e
+  // o "surfar a vontade" dos hábitos de parar.
+  Habits: undefined;
+  HabitEdit: { type?: string; template?: string; prefill?: Partial<HabitInput> } | undefined;
+  HabitDetail: { type: string };
+  WeeklyReview: { weekStart?: string } | undefined;
+  UrgeSurf: { type: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -243,6 +259,36 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           return;
         }
         const meta = { via: 'notification' as const, k: data.k, technique: data.technique, day: reminderDay };
+        const extra = data as { weeklyReview?: boolean; srbai?: boolean; graduated?: boolean };
+        // App de hábitos (v1.130): a revisão de domingo, as 4 perguntas de um
+        // hábito formado e o anúncio da graduação abrem a tela certa.
+        if (action === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+          if (extra.weeklyReview) {
+            nav.navigate('WeeklyReview', {});
+            return;
+          }
+          if ((extra.srbai || extra.graduated) && data.nudgeType) {
+            nav.navigate('HabitDetail', { type: data.nudgeType });
+            return;
+          }
+        }
+        // Hábito de PARAR, na conferência da noite: "Dia limpo" / "Escorreguei".
+        if (action === PARAR_CLEAN_ACTION && data.nudgeType) {
+          try {
+            await confirmNudge(data.nudgeType, meta);
+          } catch {
+            /* best-effort */
+          }
+          return;
+        }
+        if (action === PARAR_SLIP_ACTION && data.nudgeType) {
+          try {
+            await markSlipFromNotification(data.nudgeType, meta);
+          } catch {
+            /* best-effort */
+          }
+          return;
+        }
         if (action === NUDGE_DONE_ACTION && data.nudgeType) {
           // A técnica que precedeu o "Já fiz" pontua: é assim que a coruja
           // aprende o que convence ESTA pessoa.
@@ -569,6 +615,23 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           component={YogaNidraScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen name="Habits" component={HabitsScreen} options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen
+          name="HabitEdit"
+          component={HabitEditScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="HabitDetail"
+          component={HabitDetailScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="WeeklyReview"
+          component={WeeklyReviewScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen name="UrgeSurf" component={UrgeSurfScreen} options={{ animation: 'fade' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -33,19 +33,12 @@ import { VerticalVolume } from '../components/VerticalVolume';
 import { SequenceCard } from '../components/SequenceCard';
 import { InspirationHomeCard } from '../components/InspirationHomeCard';
 import { AspisHomeCard } from '../aspis/components/AspisHomeCard';
-import { getTodayTodos, type TodoItem } from '../services/todos';
+import { HabitsTodaySection } from '../components/HabitsTodaySection';
+import { useSnackbar } from '../components/Snackbar';
 import { checkExerciseEvidence } from '../services/exerciseDetection';
-import {
-  confirmMedication,
-  skipMedicationToday,
-  snoozeMedication,
-  resetMedicationToday,
-} from '../services/medications';
-import { confirmNudge, skipNudgeToday, snoozeNudge, resetNudgeToday } from '../services/nudges';
 import type { OwlMood } from '../types';
 import { cancelSleepEscalationReminders } from '../services/notifications';
 import { checkForUpdate, type UpdateInfo } from '../services/updateChecker';
-import { getAutomaticityQuestion, getCompleteDaysStreak } from '../services/review';
 
 interface Dashboard {
   config: { bedtime: string; name: string | null };
@@ -65,22 +58,6 @@ function formatCountdown(mins: number): { value: string; unit: string } {
 }
 
 /** Remove emojis coloridos do texto da notificação para manter a estética. */
-function hhmmToMin(t: string): number | null {
-  const [h, m] = t.split(':').map((x) => parseInt(x, 10));
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
-}
-
-/** "em 2h10" / "em 25 min" até o horário HH:MM de hoje. */
-function formatUntil(t: string): string {
-  const target = hhmmToMin(t);
-  if (target === null) return '';
-  const now = new Date();
-  const d = Math.max(0, target - (now.getHours() * 60 + now.getMinutes()));
-  const h = Math.floor(d / 60);
-  const m = d % 60;
-  return h > 0 ? `EM ${h}H${String(m).padStart(2, '0')}` : `EM ${m} MIN`;
-}
-
 function stripEmoji(s: string): string {
   return s
     .replace(
@@ -198,13 +175,14 @@ export function HomeScreen() {
   }, [headphonesOnly, setConfig, showFoneHint]);
 
   const [data, setData] = useState<Dashboard | null>(null);
-  const [todos, setTodos] = useState<TodoItem[]>([]);
   const [marking, setMarking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  // Completude da coleta: dias seguidos em que todo item teve resposta.
-  const [completeStreak, setCompleteStreak] = useState(0);
-  // Pergunta semanal de automaticidade pendente (aparece à noite, leva ao Fechar o dia).
-  const [hasAutoQ, setHasAutoQ] = useState(false);
+  // A seção de hábitos relê junto com a Home (foco e a cada 30 s).
+  const [habitsKey, setHabitsKey] = useState(0);
+  // Dia perfeito (todos os hábitos em formação feitos): a coruja comemora.
+  const [perfectDay, setPerfectDay] = useState(false);
+  // O aviso curto do pé da tela ("Feito: … · Desfazer").
+  const snackbar = useSnackbar();
 
   useEffect(() => {
     // Throttled background check (only fires if 6h+ since last check).
@@ -221,18 +199,10 @@ export function HomeScreen() {
       todayLog: d.todayLog ? { completed: d.todayLog.completed } : null,
       sleepHabit: d.sleepHabit ? { id: d.sleepHabit.id } : null,
     });
-    getCompleteDaysStreak().then(setCompleteStreak).catch(() => {});
-    getAutomaticityQuestion()
-      .then((q) => setHasAutoQ(!!q))
-      .catch(() => {});
     // Treino gravado no relógio confirma o hábito de exercício (no máx. uma
-    // leitura a cada 10 min; a lista abaixo já sai atualizada).
+    // leitura a cada 10 min); a seção de hábitos relê depois, já atualizada.
     await checkExerciseEvidence().catch(() => []);
-    try {
-      setTodos(await getTodayTodos());
-    } catch {
-      /* todos optional */
-    }
+    setHabitsKey((k) => k + 1);
   }, []);
 
   useFocusEffect(
@@ -263,34 +233,9 @@ export function HomeScreen() {
     }
   };
 
-  // Painel de lembretes: as três respostas do coach por item pendente.
-  const handleTodoAction = async (
-    item: TodoItem,
-    action: 'done' | 'skip' | 'snooze' | 'undo',
-  ) => {
-    try {
-      if (item.kind === 'med' && item.medId != null) {
-        if (action === 'done') await confirmMedication(item.medId, { via: 'home' });
-        else if (action === 'skip') await skipMedicationToday(item.medId, { via: 'home' });
-        else if (action === 'undo') await resetMedicationToday(item.medId);
-        else await snoozeMedication(item.medId, storeConfig?.snoozeMinutes ?? 20);
-      } else if (item.kind === 'nudge' && item.nudgeType) {
-        if (action === 'done') await confirmNudge(item.nudgeType, { via: 'home' });
-        else if (action === 'skip') await skipNudgeToday(item.nudgeType, { via: 'home' });
-        else if (action === 'undo') await resetNudgeToday(item.nudgeType);
-        else await snoozeNudge(item.nudgeType, storeConfig?.snoozeMinutes ?? 20);
-      }
-    } catch {
-      /* best-effort */
-    }
-    try {
-      setTodos(await getTodayTodos());
-    } catch {
-      /* mantém estado */
-    }
-  };
-
-  const mood = moodForState(data);
+  // A coruja: dormindo depois de "Vou dormir agora"; comemorando no dia
+  // perfeito; senão, o humor da hora de dormir.
+  const mood: OwlMood = data?.todayLog?.completed ? 'sleeping' : perfectDay ? 'celebrating' : moodForState(data);
   const countdown = data?.minutesToBedtime !== null && data?.minutesToBedtime !== undefined
     ? formatCountdown(data.minutesToBedtime)
     : null;
@@ -301,15 +246,6 @@ export function HomeScreen() {
     if (h < 18) return 'Boa tarde';
     return 'Boa noite';
   })();
-
-  // Da lista do dia (só o que é para FAZER): o último que já passou do horário
-  // sem resposta e o próximo que ainda vai tocar.
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const pending = todos.filter((t) => !t.done && hhmmToMin(t.time) !== null);
-  const lastPending =
-    pending.filter((t) => hhmmToMin(t.time)! <= nowMin).sort((a, b) => hhmmToMin(b.time)! - hhmmToMin(a.time)!)[0] ?? null;
-  const nextPending =
-    pending.filter((t) => hhmmToMin(t.time)! > nowMin).sort((a, b) => hhmmToMin(a.time)! - hhmmToMin(b.time)!)[0] ?? null;
 
   return (
     <ScreenContainer edges={['bottom']}>
@@ -387,59 +323,11 @@ export function HomeScreen() {
           <Owl mood={mood} size={180} />
         </View>
 
-        {/* LEMBRETES são coisas para FAZER. Dois cards, tirados da lista do dia:
-            o último que já passou do horário e segue sem resposta, e o próximo.
-            Os dois deixam marcar aqui mesmo. (Inspiração tem o card dela, abaixo.) */}
-        {lastPending && (
-          <Card style={styles.notifCard}>
-            <View style={styles.notifHeader}>
-              <GreekIcon name="bell" size={18} color={colors.accent.gold} />
-              <Text style={styles.notifLabel}>
-                ÚLTIMO LEMBRETE · {lastPending.time} · SEM RESPOSTA
-              </Text>
-            </View>
-            <Text style={styles.notifTitle}>{lastPending.title}</Text>
-            {lastPending.subtitle ? <Text style={styles.notifBody}>{lastPending.subtitle}</Text> : null}
-            <View style={styles.remActions}>
-              <Pressable
-                accessibilityRole="button"
-                style={[styles.remBtn, styles.remBtnPrimary]}
-                onPress={() => void handleTodoAction(lastPending, 'done')}
-              >
-                <Text style={styles.remBtnPrimaryText}>Já fiz ✅</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                style={styles.remBtn}
-                onPress={() => void handleTodoAction(lastPending, 'skip')}
-              >
-                <Text style={styles.remBtnText}>Não hoje</Text>
-              </Pressable>
-            </View>
-          </Card>
-        )}
-
-        {nextPending && (
-          <Card style={styles.notifCard}>
-            <View style={styles.notifHeader}>
-              <GreekIcon name="bell" size={18} color={colors.accent.gold} />
-              <Text style={styles.notifLabel}>
-                PRÓXIMO LEMBRETE · {nextPending.time} · {formatUntil(nextPending.time)}
-              </Text>
-            </View>
-            <Text style={styles.notifTitle}>{nextPending.title}</Text>
-            {nextPending.subtitle ? <Text style={styles.notifBody}>{nextPending.subtitle}</Text> : null}
-            <View style={styles.remActions}>
-              <Pressable
-                accessibilityRole="button"
-                style={styles.remBtn}
-                onPress={() => void handleTodoAction(nextPending, 'done')}
-              >
-                <Text style={styles.remBtnText}>Já fiz ✅</Text>
-              </Pressable>
-            </View>
-          </Card>
-        )}
+        {/* HÁBITOS (v1.130): o que é para hoje, logo abaixo da coruja. Substitui o
+            antigo cartão "Hábitos saudáveis e lembretes" e os dois cartões de
+            último/próximo lembrete — a seção já traz os hábitos do dia e, separados,
+            os lembretes (remédios, suplementos, jejum). O resto da Home segue abaixo. */}
+        <HabitsTodaySection refreshKey={habitsKey} snack={snackbar.show} onPerfectDay={setPerfectDay} />
 
         {data?.todayLog?.completed ? (
           <Card style={styles.bigCard}>
@@ -484,119 +372,6 @@ export function HomeScreen() {
 
         {/* O Aspis (o escudo): só o melhor de hoje; o resto mora na seção dele. */}
         <AspisHomeCard />
-
-        {/* Painel de LEMBRETES: cada pendência traz as 3 respostas do coach. */}
-        <Card style={styles.todoCard}>
-          <Pressable
-            style={styles.todoHeader}
-            onPress={() => navigation.navigate('Reminders')}
-          >
-            <View style={styles.todoHeaderLeft}>
-              <GreekIcon name="bell" size={18} color={colors.accent.gold} />
-              <Text style={styles.todoTitle} numberOfLines={1}>
-                HÁBITOS SAUDÁVEIS E LEMBRETES
-              </Text>
-            </View>
-            <GreekIcon name="chevronRight" size={18} color={colors.text.tertiary} />
-          </Pressable>
-          {/* Fechar o dia: aparece à noite enquanto houver item sem resposta. */}
-          {/* "Não feito" automático (missed) também é SEM RESPOSTA: a coruja desistiu,
-              a pessoa não respondeu — e a tela de revisão conta esses itens. */}
-          {todos.some((t) => !t.done || t.missed) && new Date().getHours() >= 18 && (
-            <Pressable style={styles.closeDayBtn} onPress={() => navigation.navigate('Review')}>
-              <Text style={styles.closeDayText}>
-                Fechar o dia · {todos.filter((t) => !t.done || t.missed).length} sem resposta
-              </Text>
-            </Pressable>
-          )}
-          {hasAutoQ && !todos.some((t) => !t.done || t.missed) && new Date().getHours() >= 18 && (
-            <Pressable style={styles.closeDayBtn} onPress={() => navigation.navigate('Review')}>
-              <Text style={styles.closeDayText}>Pergunta da semana · 1 toque</Text>
-            </Pressable>
-          )}
-          {completeStreak > 0 && (
-            <Text style={styles.streakLine}>
-              Registro completo: {completeStreak} dia{completeStreak > 1 ? 's' : ''} seguido
-              {completeStreak > 1 ? 's' : ''}
-            </Text>
-          )}
-          {todos.length === 0 && (
-            <Text style={styles.todoEmpty}>
-              Nenhum lembrete para hoje. Toque para adicionar.
-            </Text>
-          )}
-          {todos.map((item) => (
-            <View key={item.key} style={styles.todoItem}>
-              <View style={styles.todoRow}>
-                <View style={styles.todoIcon}>
-                  <GreekIcon
-                    name={item.icon}
-                    size={20}
-                    color={item.done ? colors.text.tertiary : colors.text.primary}
-                  />
-                </View>
-                <View style={styles.todoTextWrap}>
-                  <Text
-                    style={[styles.todoItemTitle, item.done && styles.todoDoneText]}
-                    numberOfLines={1}
-                  >
-                    {item.title}
-                  </Text>
-                  <Text style={styles.todoItemMeta} numberOfLines={1}>
-                    {item.time}
-                    {item.subtitle ? ` · ${item.subtitle}` : ''}
-                  </Text>
-                </View>
-                {item.done && (
-                  <Pressable onPress={() => handleTodoAction(item, 'undo')} hitSlop={8}>
-                    <Text
-                      style={[
-                        styles.todoStatus,
-                        (item.skipped || item.missed) && styles.todoStatusSkip,
-                      ]}
-                    >
-                      {item.missed
-                        ? 'Não feito'
-                        : item.skipped
-                          ? 'Não hoje'
-                          : item.evidence
-                            ? /no app/.test(item.evidence)
-                              ? '✓ App'
-                              : '✓ Relógio'
-                            : '✓ Feito'}{' '}
-                      ✕
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-              {!item.done && (
-                <View style={styles.todoActions}>
-                  <Pressable
-                    style={[styles.actBtn, styles.actDone]}
-                    onPress={() => handleTodoAction(item, 'done')}
-                    hitSlop={4}
-                  >
-                    <Text style={styles.actDoneText} numberOfLines={1}>Já fiz</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.actBtn}
-                    onPress={() => handleTodoAction(item, 'snooze')}
-                    hitSlop={4}
-                  >
-                    <Text style={styles.actText} numberOfLines={1}>Mais tempo</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.actBtn}
-                    onPress={() => handleTodoAction(item, 'skip')}
-                    hitSlop={4}
-                  >
-                    <Text style={styles.actText} numberOfLines={1}>Não hoje</Text>
-                  </Pressable>
-                </View>
-              )}
-            </View>
-          ))}
-        </Card>
 
         <HealthCard />
 
@@ -648,6 +423,8 @@ export function HomeScreen() {
           </Text>
         </Pressable>
       </ScrollView>
+      {/* "Feito: … · Desfazer" — fica no pé da tela, por cima do que rola. */}
+      {snackbar.node}
     </ScreenContainer>
   );
 }
@@ -700,41 +477,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  remActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  remBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.accent.gold,
-  },
-  remBtnPrimary: { backgroundColor: colors.accent.gold },
-  remBtnText: { ...typography.bodyMedium, color: colors.accent.gold },
-  remBtnPrimaryText: { ...typography.bodyMedium, color: colors.text.onGold },
-  notifCard: {
-    marginBottom: spacing.lg,
-  },
-  notifHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  notifLabel: {
-    ...typography.label,
-    color: colors.accent.gold,
-    textTransform: 'uppercase',
-    marginLeft: spacing.xs,
-  },
-  notifTitle: {
-    ...typography.bodyMedium,
-    color: colors.text.primary,
-    marginBottom: 2,
-  },
-  notifBody: {
-    ...typography.body,
-    color: colors.text.secondary,
-    lineHeight: 22,
-  },
   bigCard: {
     marginBottom: spacing.lg,
     paddingVertical: spacing.xl,
@@ -743,96 +485,6 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     marginTop: spacing.sm,
-  },
-  todoCard: {
-    marginBottom: spacing.lg,
-  },
-  todoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-  },
-  todoHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  todoEmpty: {
-    ...typography.small,
-    color: colors.text.secondary,
-    paddingBottom: spacing.sm,
-  },
-  todoTitle: {
-    ...typography.label,
-    color: colors.accent.gold,
-    textTransform: 'uppercase',
-    marginLeft: spacing.xs,
-    flexShrink: 1,
-  },
-  todoItem: {
-    paddingVertical: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  todoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  todoStatus: {
-    ...typography.small,
-    color: colors.accent.gold,
-    marginLeft: spacing.sm,
-  },
-  todoStatusSkip: { color: colors.text.tertiary },
-  closeDayBtn: {
-    backgroundColor: colors.accent.gold,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm,
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  closeDayText: { ...typography.bodyMedium, color: colors.text.onGold },
-  streakLine: { ...typography.small, color: colors.text.secondary, marginBottom: spacing.sm },
-  todoActions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    paddingBottom: spacing.sm,
-    paddingLeft: 36,
-  },
-  actBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  actText: { ...typography.small, color: colors.text.secondary },
-  actDone: { borderColor: colors.accent.gold, backgroundColor: 'rgba(244,197,83,0.15)' },
-  actDoneText: { ...typography.small, color: colors.accent.gold },
-  todoIcon: {
-    width: 28,
-    alignItems: 'center',
-    marginRight: spacing.sm,
-  },
-  todoTextWrap: {
-    flex: 1,
-  },
-  todoItemTitle: {
-    ...typography.bodyMedium,
-    color: colors.text.primary,
-  },
-  todoDoneText: {
-    color: colors.text.tertiary,
-    textDecorationLine: 'line-through',
-  },
-  todoItemMeta: {
-    ...typography.small,
-    color: colors.text.tertiary,
-    marginTop: 1,
   },
   checkbox: {
     width: 24,

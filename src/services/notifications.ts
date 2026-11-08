@@ -107,6 +107,15 @@ export const NUDGE_SOFT_CATEGORY = 'comentor-nudge-soft-actions';
 export const MED_SOFT_CATEGORY = 'comentor-med-soft-actions';
 export const MED_DO_SOFT_CATEGORY = 'comentor-med-do-soft-actions';
 
+/**
+ * Hábito de PARAR (v1.130): a conferência da noite — "como foi hoje com X?".
+ * "Dia limpo ✅" registra o dia como vencido; "Escorreguei" registra o deslize
+ * (o contexto — onde, como estava — a Home pede depois, sem pressa).
+ */
+export const PARAR_CATEGORY = 'comentor-parar-actions';
+export const PARAR_CLEAN_ACTION = 'parar-clean';
+export const PARAR_SLIP_ACTION = 'parar-slip';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -217,6 +226,10 @@ export async function ensureNotificationCategories() {
   ]);
   await Notifications.setNotificationCategoryAsync(MED_DO_SOFT_CATEGORY, [
     { identifier: MED_DONE_ACTION, buttonTitle: 'Já fiz ✅', options: bg },
+  ]);
+  await Notifications.setNotificationCategoryAsync(PARAR_CATEGORY, [
+    { identifier: PARAR_CLEAN_ACTION, buttonTitle: 'Dia limpo ✅', options: bg },
+    { identifier: PARAR_SLIP_ACTION, buttonTitle: 'Escorreguei', options: bg },
   ]);
 }
 
