@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
-import { Image, useWindowDimensions } from 'react-native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useEffect, useMemo } from 'react';
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
 
@@ -12,6 +13,7 @@ import { KinesisScreen } from '../kinesis/KinesisScreen';
 import { SengaiIcon } from '../zazen/arte';
 import { ZazenScreen } from '../zazen/ZazenScreen';
 import { LOGO_ESCUDO } from '../aspis/theme/logo';
+import { naoLidos, useAvisos } from '../avisos/store';
 import { colors, typography } from '../theme';
 
 export type MainTabParamList = {
@@ -35,6 +37,69 @@ function KairosIcon({ size, color }: { size: number; color: string }) {
   );
 }
 
+/** O sino da caixa de avisos (a IA pessoal e ele), o mesmo do Mac. */
+function SinoIcon({ size, color }: { size: number; color: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <Path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </Svg>
+  );
+}
+
+/** Largura do sino, à direita das abas. */
+const SINO = 38;
+
+function Sino({ topo }: { topo: number }) {
+  const navigation = useNavigation();
+  const n = useAvisos((s) => naoLidos(s.avisos));
+  const load = useAvisos((s) => s.load);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <Pressable
+      onPress={() => navigation.navigate('Avisos' as never)}
+      style={[sinoStyles.botao, { paddingTop: topo }]}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={n ? `Avisos da sua IA: ${n} não lido${n > 1 ? 's' : ''}` : 'Avisos da sua IA'}
+    >
+      <View>
+        <SinoIcon size={22} color={n ? colors.accent.gold : colors.text.tertiary} />
+        {n > 0 && (
+          <View style={sinoStyles.badge}>
+            <Text style={sinoStyles.badgeTxt}>{n > 99 ? '99+' : n}</Text>
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+const sinoStyles = StyleSheet.create({
+  barra: {
+    flexDirection: 'row',
+    backgroundColor: colors.bg.primary,
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+  },
+  botao: { width: SINO, alignItems: 'center', justifyContent: 'center' },
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: colors.accent.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeTxt: { ...typography.small, fontSize: 10, lineHeight: 13, fontFamily: 'Inter_600SemiBold', color: colors.text.onGold },
+});
+
 // ---- cinco abas numa barra só ----
 //
 // Com um quinto da tela para cada (uns 93 pontos no Motorola), "Comentora" ao lado
@@ -50,6 +115,8 @@ const ROTULOS: Record<keyof MainTabParamList, string> = {
   Zazen: 'Zazen',
 };
 const FONTE_ROTULO = 12;
+/** Com o sino à direita, se o 12 não couber ao lado do ícone, tenta o 11 antes de descer o rótulo. */
+const FONTE_ROTULO_MIN = 11;
 /** O ícone redondo da barra tem 25 pontos; a caixa padrão (31) tem 3 de folga de cada lado. */
 const CAIXA_ICONE = 25;
 /** O ○△□ é mais largo que alto (41×24). */
@@ -58,8 +125,8 @@ const CAIXA_SENGAI = Math.ceil((ALTURA_SENGAI * 41) / 24);
 /** Padding do item (5 de cada lado) + o espaço entre o ícone e o rótulo. */
 const FOLGA_ABA = 5 * 2 + 4;
 /** Largura estimada do rótulo: a Inter tem ~0,58 em por letra nestas palavras; 0,6 com margem. */
-function larguraRotulo(texto: string, escalaFonte: number): number {
-  return texto.length * FONTE_ROTULO * 0.6 * escalaFonte;
+function larguraRotulo(texto: string, escalaFonte: number, fonte = FONTE_ROTULO): number {
+  return texto.length * fonte * 0.6 * escalaFonte;
 }
 
 /**
@@ -77,23 +144,45 @@ export function MainTabs() {
   const { width, fontScale } = useWindowDimensions();
   const barra = useMemo(() => {
     const nomes = Object.keys(ROTULOS) as (keyof MainTabParamList)[];
-    const precisa = {} as Record<keyof MainTabParamList, number>;
-    for (const nome of nomes) {
-      const icone = nome === 'Zazen' ? CAIXA_SENGAI : CAIXA_ICONE;
-      precisa[nome] = icone + FOLGA_ABA + larguraRotulo(ROTULOS[nome], fontScale || 1);
+    const cabe = width - insets.left - insets.right - SINO;
+    const medir = (fonte: number) => {
+      const precisa = {} as Record<keyof MainTabParamList, number>;
+      for (const nome of nomes) {
+        const icone = nome === 'Zazen' ? CAIXA_SENGAI : CAIXA_ICONE;
+        precisa[nome] = icone + FOLGA_ABA + larguraRotulo(ROTULOS[nome], fontScale || 1, fonte);
+      }
+      return { precisa, total: nomes.reduce((soma, nome) => soma + precisa[nome], 0) };
+    };
+    let fonte = FONTE_ROTULO;
+    let m = medir(fonte);
+    if (m.total > cabe) {
+      const menor = medir(FONTE_ROTULO_MIN);
+      if (menor.total <= cabe) {
+        fonte = FONTE_ROTULO_MIN;
+        m = menor;
+      }
     }
-    const total = nomes.reduce((soma, nome) => soma + precisa[nome], 0);
-    const lado = total <= width - insets.left - insets.right;
-    const media = total / nomes.length;
+    const lado = m.total <= cabe;
+    const media = m.total / nomes.length;
     return {
       lado,
-      item: (nome: keyof MainTabParamList) => ({ flex: lado ? precisa[nome] / media : 1 }),
+      fonte,
+      item: (nome: keyof MainTabParamList) => ({ flex: lado ? m.precisa[nome] / media : 1 }),
     };
   }, [width, fontScale, insets.left, insets.right]);
 
   return (
     <Tab.Navigator
       backBehavior="firstRoute"
+      // A barra das abas e, à direita, o sino da caixa de avisos (abre por cima de tudo).
+      tabBar={(props) => (
+        <View style={sinoStyles.barra}>
+          <View style={{ flex: 1 }}>
+            <BottomTabBar {...props} />
+          </View>
+          <Sino topo={insets.top} />
+        </View>
+      )}
       screenLayout={({ children }) => (
         <SafeAreaInsetsContext.Provider value={sceneInsets}>{children}</SafeAreaInsetsContext.Provider>
       )}
@@ -107,13 +196,13 @@ export function MainTabs() {
         // Os 12 pontos que a barra deixa depois do texto cortavam o "Comentora"
         // (marginEnd: 0); com cinco abas, também a fonte e a folga do ícone (acima).
         tabBarLabelStyle: barra.lado
-          ? { ...typography.small, fontSize: FONTE_ROTULO, marginStart: 4, marginEnd: 0 }
+          ? { ...typography.small, fontSize: barra.fonte, marginStart: 4, marginEnd: 0 }
           : { ...typography.small, fontSize: 11, lineHeight: 14, marginStart: 0, marginEnd: 0 },
         tabBarIconStyle: barra.lado ? { width: CAIXA_ICONE } : undefined,
         tabBarStyle: {
           backgroundColor: colors.bg.primary,
-          borderBottomColor: colors.border,
-          borderBottomWidth: 1,
+          // A borda de baixo é da barra inteira (abas + sino), logo acima.
+          borderBottomWidth: 0,
           // Rótulo embaixo: a altura padrão (49) não comporta ícone + texto.
           ...(barra.lado ? null : { height: 56 + insets.top }),
         },

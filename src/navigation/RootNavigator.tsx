@@ -26,6 +26,7 @@ import { HabitsScreen } from '../screens/HabitsScreen';
 import { HabitEditScreen } from '../screens/HabitEditScreen';
 import { HabitDetailScreen } from '../screens/HabitDetailScreen';
 import { WeeklyReviewScreen } from '../screens/WeeklyReviewScreen';
+import { AvisosScreen } from '../avisos/AvisosScreen';
 import { UrgeSurfScreen } from '../screens/UrgeSurfScreen';
 import type { HabitInput } from '../types/habits';
 import type { IntensityLevel, LocalModelId } from '../types';
@@ -100,6 +101,8 @@ export type RootStackParamList = {
   HabitDetail: { type: string };
   WeeklyReview: { weekStart?: string } | undefined;
   UrgeSurf: { type: string };
+  // A caixa de avisos (v1.131): a caixa postal entre ele e a IA pessoal (o sino da barra).
+  Avisos: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -632,6 +635,7 @@ export function RootNavigator({ navigationRef, onNavReady }: { navigationRef: an
           options={{ animation: 'slide_from_bottom' }}
         />
         <Stack.Screen name="UrgeSurf" component={UrgeSurfScreen} options={{ animation: 'fade' }} />
+        <Stack.Screen name="Avisos" component={AvisosScreen} options={{ animation: 'slide_from_right' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

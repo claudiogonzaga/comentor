@@ -31,6 +31,7 @@ import * as aspisDb from '../aspis/services/db';
 import { thumbsChanged } from '../aspis/services/neural';
 import { useAppStore as useAspisStore } from '../aspis/store/useAppStore';
 import type { ThumbRecord } from '../aspis/types';
+import { AVISO_KEEP_MS, useAvisos, type Aviso } from '../avisos/store';
 import { mergeTarefa, type Tarefa } from '../kairos/rules';
 import { useKairos } from '../kairos/store';
 import { DEFAULT_CONFIG } from '../kinesis/timer';
@@ -78,6 +79,9 @@ const DEVICE = 'phone';
 const DONE_PREFIX = 'done:';
 const CONFIG_PREFIX = 'comentora.config.';
 const KAIROS_PREFIX = 'kairos.task.';
+// A caixa de avisos (v1.131): um aviso da IA ou recado dele por chave; ganha a
+// mudança mais recente. Apagado vira null por 30 dias; com mais de 60, sai sem lápide.
+const AVISO_PREFIX = 'aviso.';
 const DONE_KEEP_DAYS = 3;
 // App de hábitos (v1.130): a definição de cada hábito (os dois lados editam), as
 // estatísticas (só o celular publica: ele tem o histórico inteiro), a quantidade
@@ -265,7 +269,7 @@ function isAspisDefault(key: string, value: unknown): boolean {
 /** O que este telefone tem agora, por chave do arquivo, e se as tarefas e os ocultos puderam ser lidos. */
 async function collect(
   state: SyncState,
-): Promise<{ local: Record<string, unknown>; kairosOk: boolean; ocultoOk: boolean }> {
+): Promise<{ local: Record<string, unknown>; kairosOk: boolean; ocultoOk: boolean; avisosOk: boolean }> {
   const local: Record<string, unknown> = {};
 
   const k = useKinesis.getState();
@@ -399,16 +403,27 @@ async function collect(
     if (key.startsWith(DONE_PREFIX) && !(key in local)) local[key] = null;
   }
 
+  // Um aviso por chave; o apagado vira null. Sem ler os avisos, a família fica de fora.
+  await useAvisos.getState().load();
+  const caixa = useAvisos.getState();
+  const avisosOk = caixa.loaded;
+  if (avisosOk) {
+    for (const a of caixa.avisos) local[`${AVISO_PREFIX}${a.id}`] = a;
+    for (const key of Object.keys(state.hash)) {
+      if (key.startsWith(AVISO_PREFIX) && !(key in local)) local[key] = null;
+    }
+  }
+
   // Uma chave por tarefa. A que sumiu daqui vira null, para sumir no Mac também.
   // Sem conseguir ler as tarefas, a família fica de fora: o vazio apagaria tudo.
   await useKairos.getState().load();
   const kairos = useKairos.getState();
-  if (!kairos.loaded) return { local, kairosOk: false, ocultoOk };
+  if (!kairos.loaded) return { local, kairosOk: false, ocultoOk, avisosOk };
   for (const t of kairos.tarefas) local[`${KAIROS_PREFIX}${t.id}`] = t;
   for (const key of Object.keys(state.hash)) {
     if (key.startsWith(KAIROS_PREFIX) && !(key in local)) local[key] = null;
   }
-  return { local, kairosOk: true, ocultoOk };
+  return { local, kairosOk: true, ocultoOk, avisosOk };
 }
 
 async function applyMeds(remote: (Partial<Medication> & { id?: number | null })[]): Promise<void> {
@@ -583,6 +598,8 @@ async function applyItem(key: string, value: unknown, fx: Effects): Promise<void
     fx.reschedule = true;
   } else if (key.startsWith(KAIROS_PREFIX)) {
     useKairos.getState().applySynced(key.slice(KAIROS_PREFIX.length), (value ?? null) as Tarefa | null);
+  } else if (key.startsWith(AVISO_PREFIX)) {
+    useAvisos.getState().applySynced(key.slice(AVISO_PREFIX.length), (value ?? null) as Aviso | null);
   } else if (key.startsWith('kinesis.')) {
     useKinesis.getState().applySynced(key, value);
   } else if (key === 'aspis.pillars') {
@@ -750,7 +767,7 @@ async function runOnce(): Promise<void> {
 
   const items: Record<string, SyncItem> = { ...(doc?.items ?? {}) };
   const first = !state.firstDone;
-  const { local, kairosOk, ocultoOk } = await collect(state);
+  const { local, kairosOk, ocultoOk, avisosOk } = await collect(state);
   const fx: Effects = { reschedule: false, refreshConfig: false };
   const applied: string[] = [];
   const oldestDay = recentDays()[DONE_KEEP_DAYS - 1];
@@ -812,6 +829,30 @@ async function runOnce(): Promise<void> {
     }
 
     const remote = items[key];
+
+    if (key.startsWith(AVISO_PREFIX)) {
+      if (!avisosOk) continue;
+      let ref = remote ? remote.v : undefined;
+      if (ref === null || ref === undefined) ref = local[key];
+      const rt = remote?.t ?? 0;
+      const criado = ref && typeof ref === 'object' ? Number((ref as Aviso).criado) || 0 : 0;
+      const velho =
+        (ref && typeof ref === 'object' && criado < now - AVISO_KEEP_MS) ||
+        ((ref === null || ref === undefined) && !!remote && now - rt > TOMBSTONE_KEEP_MS) ||
+        ((ref === null || ref === undefined) && !remote);
+      if (velho) {
+        // Passou da idade (ou é lápide vencida): sai do arquivo e daqui, sem lápide.
+        if (remote) {
+          delete items[key];
+          dirty = true;
+        }
+        delete state.hash[key];
+        delete state.t[key];
+        if (local[key]) useAvisos.getState().esquecer(key.slice(AVISO_PREFIX.length));
+        continue;
+      }
+      // Daqui em diante, a regra geral: ganha a mudança mais recente.
+    }
 
     if (key.startsWith(KAIROS_PREFIX)) {
       // Sem conseguir ler as tarefas daqui, a família fica de fora desta passada.
@@ -990,6 +1031,9 @@ export function startConfigSync(): void {
   });
   useKairos.subscribe((now, before) => {
     if (now.loaded !== before.loaded || now.tarefas !== before.tarefas) soon();
+  });
+  useAvisos.subscribe((now, before) => {
+    if (now.loaded !== before.loaded || now.avisos !== before.avisos) soon();
   });
   useAspisStore.subscribe((now, before) => {
     if (
